@@ -663,7 +663,7 @@ class PhysicalPipeline:
         On a name collision, the left (self) field keeps its name and the right (other)
         field is suffixed with "_right" (repeatedly, if needed). This mirrors Palimpzest's
         own join semantics (see union_schemas(join=True) and DataRecord.from_join_parents),
-        so downstream operators can reference right-side columns as e.g. "prod_id_right".
+        so downstream operators can reference right-side columns as e.g. "idx_right".
 
         Self-join: `pipeline.sem_join(pipeline, ...)` is supported. The upstream is executed
         ONCE and joined with its own output (see _execute_core), so it is not recomputed and
@@ -756,7 +756,7 @@ class PhysicalPipeline:
 
         Schema merging mirrors sem_join: on a name collision the left field keeps its name
         and the right field is suffixed with "_right", so downstream operators reference
-        right-side columns as e.g. "prod_id_right".
+        right-side columns as e.g. "idx_right".
 
         Self-join (`pipeline.join(pipeline, ...)`) is supported: the upstream is executed
         ONCE and joined with its own output (not recomputed) — a common-subexpression

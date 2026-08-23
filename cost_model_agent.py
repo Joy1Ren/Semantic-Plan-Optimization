@@ -814,8 +814,6 @@ explore_sample("Reviews.csv", n=3)
 class ExploreImagesTool(Tool):
     name = "explore_images"
     MAX_IMAGES = 5
-    # Fallback extensions tried after the configured one (covers datasets that mix formats).
-    _IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp")
 
     # Rendered per-instance in __init__ so the prompt names this dataset's actual id column/folder.
     _DOC_TEMPLATE = """\
@@ -836,17 +834,14 @@ explore_images(ids)
         data_dir: str,
         pending_images: list,
         *,
-        id_col: str = "prod_id",
         subdir: str = "images",
-        ext: str = ".jpg",
     ) -> None:
         import pathlib
         self._images_dir = pathlib.Path(data_dir) / subdir
-        self._id_col = id_col
-        # Configured extension first, then the common fallbacks (deduped, order-preserving).
-        self._exts = tuple(dict.fromkeys((ext, *self._IMAGE_EXTS)))
+        self._id_col = "idx"
+        self._exts = (".jpg",)
         self._pending = pending_images  # shared buffer drained by the run loop
-        self.doc = self._DOC_TEMPLATE.format(max_images=self.MAX_IMAGES, subdir=subdir, id_col=id_col)
+        self.doc = self._DOC_TEMPLATE.format(max_images=self.MAX_IMAGES, subdir=subdir, id_col=self._id_col)
 
     def _find_image(self, image_id: Any):
         for ext in self._exts:
@@ -1018,6 +1013,8 @@ execute_plan("p1")
         quality_evaluator: Any,
         scale_factor: int,
         eval_metric: str | None = None,
+        subset_path: str | pathlib.Path | None = None,
+        normalize_eval_df: Any = None,
     ) -> None:
         import pathlib
 
@@ -1032,6 +1029,8 @@ execute_plan("p1")
         self._quality_evaluator = quality_evaluator
         self._scale_factor = scale_factor
         self._eval_metric = eval_metric
+        self._subset_path = pathlib.Path(subset_path) if subset_path else None
+        self._normalize_eval_df = normalize_eval_df or _normalize_plan_df
 
     def __call__(self, plan_name: str) -> dict:
         import pandas as pd
@@ -1044,7 +1043,9 @@ execute_plan("p1")
             )
         pipeline = entry["plan"]
 
-        subset_path = pathlib.Path(__file__).resolve().parent / "experiments" / "datasubset" / self._use_case / f"sf_{self._scale_factor}" / f"Q{self._query_id}_subset.csv"
+        subset_path = self._subset_path or (
+            SEMBENCH_DATASUBSET_DIR / self._use_case / f"sf_{self._scale_factor}" / f"Q{self._query_id}_subset.csv"
+        )
         plan_exec_error: Exception | None = None
         per_op_list, plan_context, plan_dict = [], None, {}
         try:
@@ -1060,7 +1061,7 @@ execute_plan("p1")
         plan_output_df = pd.DataFrame(
             plan_context.output_records if plan_context is not None else []
         )
-        plan_output_df = _normalize_plan_df(plan_output_df, self._use_case, self._query_id)
+        plan_output_df = self._normalize_eval_df(plan_output_df, self._use_case, self._query_id)
 
         quality_result = None
         if self._quality_evaluator is not None:
@@ -2454,12 +2455,8 @@ class CostModelAgent:
         registry = CostModelRegistry()
         plan_codes: dict = {}  # populated by WritePlanTool; shared with ExecutePlanTool
         data_dir = query_info["data_dir"]
-        # Image-file naming convention (configurable per dataset via query_info). Images live at
-        # <data_dir>/<image_subdir>/<row[image_id_col]><image_ext>; used to build the on-disk path
-        # in both add_image_data (plan code) and the explore_images tool (data exploration).
-        image_id_col = query_info.get("image_id_col", "prod_id")
+        # Image files always follow <data_dir>/<image_subdir>/<idx>.jpg.
         image_subdir = query_info.get("image_subdir", "images")
-        image_ext = query_info.get("image_ext", ".jpg")
 
         # Build oracle client and quality evaluator (oracle runs inside QualityEvaluator)
         oracle_client = OpenRouterClient(self.oracle_model, reasoning_effort=self.oracle_reasoning_effort)
@@ -2479,9 +2476,10 @@ class CostModelAgent:
         _oracle_result_path.unlink(missing_ok=True)
 
         quality_evaluator = None
-        if _QualityEvaluator is not None:
+        quality_evaluator_cls = query_info.get("quality_evaluator_cls", _QualityEvaluator)
+        if quality_evaluator_cls is not None:
             try:
-                quality_evaluator = _QualityEvaluator(
+                quality_evaluator = quality_evaluator_cls(
                     oracle_client=oracle_client,
                     oracle_model=self.oracle_model,
                     query_id=query_info["query_id"],
@@ -2506,12 +2504,12 @@ class CostModelAgent:
 
         def add_image_data(pipeline: PhysicalPipeline, col_name: str = "image_file_path"):
             # `col_name` is the NEW image column being added; the on-disk path is built from the
-            # configured naming convention (<image_subdir>/<row[image_id_col]><image_ext>).
+            # fixed naming convention (<image_subdir>/<row["idx"]>.jpg).
             # `col_name` MUST NOT collide with an existing column (e.g. the id column). PZ's convert
             # only generates fields not already present on the record, so a colliding name produces
             # an empty field_answers and raises `max() iterable argument is empty` on every row.
             pipeline.map(
-                udf=lambda row: {col_name: os.path.join(data_dir, image_subdir, str(row[image_id_col]) + image_ext)},
+                udf=lambda row: {col_name: os.path.join(data_dir, image_subdir, str(row["idx"]) + ".jpg")},
                 cols=[{"name": col_name, "type": pz.ImageFilepath, "description": ""}],
             )
             return pipeline
@@ -2568,7 +2566,7 @@ class CostModelAgent:
             ExploreSampleTool(data_dir),
             ExploreImagesTool(
                 data_dir, self._pending_images,
-                id_col=image_id_col, subdir=image_subdir, ext=image_ext,
+                subdir=image_subdir,
             ),
             GetOpSamplesTool(plan_results),
             ExecutePlanTool(
@@ -2583,6 +2581,8 @@ class CostModelAgent:
                 quality_evaluator=quality_evaluator,
                 scale_factor=query_info["scale_factor"],
                 eval_metric=query_info.get("eval_metric"),
+                subset_path=query_info.get("subset_path"),
+                normalize_eval_df=query_info.get("normalize_eval_df"),
             ),
         ]
 
@@ -2699,9 +2699,7 @@ class CostModelAgent:
             "final_eval_runs": 1,  # times to re-run the chosen plan on the full dataset (fresh pipeline each)
             "data_dir": "experiments/dataset/use_case",
             "gt_dir": "files/use_case/raw_results/ground_truth/sf_0",
-            "image_id_col": "prod_id",
             "image_subdir": "images",
-            "image_ext": ".jpg",
         },
     ) -> Any:
         """Bounded tool loop over `plans`/`plan_results`/`op_results`, returning the JSON final
@@ -2969,8 +2967,11 @@ class CostModelAgent:
 
         # Load evaluator + ground truth once; reused across every repeated final run.
         try:
-            from agent_cost_model.experiments.SemBench.quality_evaluator import load_evaluator
-            evaluator = load_evaluator(use_case, scale_factor)
+            evaluator_loader = query_info.get("evaluator_loader")
+            if evaluator_loader is None:
+                from agent_cost_model.experiments.SemBench.quality_evaluator import load_evaluator
+                evaluator_loader = load_evaluator
+            evaluator = evaluator_loader(use_case, scale_factor)
             gt_df = pd.read_csv(gt_path)
         except Exception as e:
             self._log(f"[final_eval] evaluator/ground-truth load failed: {type(e).__name__}: {e}")
@@ -3000,7 +3001,8 @@ class CostModelAgent:
             raw_name = f"{run_suffix}_{final_run}"
             results_df.to_csv(raw_results_dir / f"{raw_name}.csv", index=False)
             self._log(f"[final_eval] raw results (run {final_run}) → {raw_results_dir / f'{raw_name}.csv'}")
-            eval_df = _normalize_plan_df(results_df, use_case, query_id)
+            normalize_eval_df = query_info.get("normalize_eval_df", _normalize_plan_df)
+            eval_df = normalize_eval_df(results_df, use_case, query_id)
 
             # Wall-clock latency of the full run. plan_dict["latency_s"] is time.time()-based
             # (see PhysicalPipeline.run), so it reflects real elapsed time with the join/convert

@@ -105,7 +105,7 @@ Guidelines:
 
 Examples:
 
-Query: "Based on the image representation of the product, find the prod_id of
+Query: "Based on the image representation of the product, find the idx of
 products where the image shows a bag of items that are red, blue, or white."
 Answer:
 [{"filter": null, "description": "bag, tote, backpack. red, blue, white"}]
@@ -161,7 +161,7 @@ class LLM_Sampler:
         scale_factor: int,
         llm_client: Any,
         embedding_model: str = "qwen/qwen3-embedding-8b",
-        id_col: str = "prod_id",
+        id_col: str = "idx",
         image_dir: str | None = None,
         text_cols: list[str] | None = None,
         sample_size: int = NUM_SAMPLES,
@@ -425,7 +425,7 @@ class LLM_Sampler:
         for _, row in self.df.iterrows():
             rid = str(row[self.id_col])
             # Skip text embeddings entirely when the table has no text columns
-            # (e.g. an image-only query like Q2 whose table is just prod_id).
+            # (e.g. an image-only query like Q2 whose table is just idx).
             if self.text_cols and rid not in self._text_emb:
                 tvec, tcost, tlat = self._embed_text(self._row_text(row))
                 self._text_emb[rid] = tvec
@@ -763,7 +763,7 @@ def _main() -> None:
     ap.add_argument("--data-dir", default=None, help="defaults to experiments/dataset/{use_case}/sf_{scale_factor}")
     ap.add_argument("--csv", default=None, help="source CSV filename; defaults to styles_details.csv")
     ap.add_argument("--query", required=True, help="natural-language query text")
-    ap.add_argument("--id-col", default="prod_id")
+    ap.add_argument("--id-col", default="idx")
     ap.add_argument("--model", default="openai/gpt-5", help="identifier LLM (OpenRouter id)")
     ap.add_argument("--embedding-model", default="qwen/qwen3-embedding-8b")
     ap.add_argument("--images", action="store_true", help="use per-row image embeddings")

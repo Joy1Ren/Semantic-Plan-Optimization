@@ -39,7 +39,7 @@ QUERY_ID    = "11"                                # results.json key for this qu
 QUERY       = "black. watch, jewellery, jewelry, bag, purse, handbag"             # description the sampler embeds
 MODALITIES  = ["text", "image"]                         # subset of {"text", "image"} to score on
 # GT = [10037, 10102, 3312, 3462, 41825]  # 2
-GT = pd.read_csv(ANALYSIS_DIR / "styles_details_blackbags.csv")["prod_id"].tolist()  # ground-truth ids for this query
+GT = pd.read_csv(ANALYSIS_DIR / "styles_details_blackbags.csv")["idx"].tolist()  # ground-truth ids for this query
 # GT = [1623, 5299, 5300, 5303, 5314, 1624, 5301] #1
 # GT = [3479, 4811, 12799, 2045, 2048, 2606, 2607, 4038, 43047, 4800, 4805, 4817] #13
 FILTER      = "row[\"price\"] <= 500"                         # optional row predicate, e.g. 'row["price"] <= 500'; empty = no filter
@@ -58,7 +58,7 @@ SHARED    = f"{CACHE_DIR}/{SLUG}_embeddings.npz"     # shared cache: ids/text + 
 RESULTS = RESULTS_DIR / "sampling" / USE_CASE / "results.json"
 PLOT_OUT = RESULTS_DIR / "sampling" / USE_CASE / f"Q{QUERY_ID}_blackbags_{'keyword+cos' if KEYWORD else 'cos'}_cdf.png"
 SOURCE_CSV = SEMBENCH_DATASET_DIR / USE_CASE / f"sf_{SCALE_FACTOR}" / "styles_details.csv"
-ID_COL     = "prod_id"                              # key linking source rows to embedding ids
+ID_COL     = "idx"                                  # key linking source rows to embedding ids
 BASE_URL  = "https://openrouter.ai/api/v1"
 API_KEY   = os.environ.get("OPENROUTER_API_KEY")
 

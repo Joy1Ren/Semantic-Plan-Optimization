@@ -219,14 +219,14 @@ def main() -> None:
     tasks = {
         "ecomm":{
             1: """Based on the textual description and the title of the product,
-            find the `prod_id` of products that are backpacks from Reebok.""",
+            find the `idx` of products that are backpacks from Reebok.""",
             2: """Based on the image representation of the product,
-                find the `prod_id` of products where the image shows
+                find the `idx` of products where the image shows
                 a pair of sports shoes that are predominantly yellow and silver.""",
             3: """For each product, extract the brand name from the product description and title.
                 Return the product id and the brand in a column titled 'category'.""",
             4: """For each product, use the image to extract the single primary color of the depicted product.
-                Return `prod_id` and the primary color in a column titled 'category'.""", #note: added "single"
+                Return `idx` and the primary color in a column titled 'category'.""", #note: added "single"
             5: """Based solely on the title and description of the product, classify each product into one of the following categories:
                 Dress: A dress is a one-piece outer garment that is worn on the torso, hangs down over the legs, and often consist of a bodice attached to a skirt.
                 Bottomwear: Bottomwear refers to clothing worn on the lower part of the body, such as trousers, jeans, skirts, shorts, and leggings.
@@ -234,7 +234,7 @@ def main() -> None:
                 Topwear: Topwear refers to clothing worn on the upper part of the body, such as shirts, blouses, t-shirts, and jackets.
                 Innerwear: Innerwear refers to clothing worn beneath outer garments, typically close to the skin, such as underwear, bras, and undershirts.
                 Each product can only have one category.
-                Return `prod_id` and the category.""",
+                Return `idx` and the category.""",
             6: """Based solely on the image of the product, classify each product into one of the following categories:
                 Dress: A dress is a one-piece outer garment that is worn on the torso, hangs down over the legs, and often consist of a bodice attached to a skirt.
                 Bottomwear: Bottomwear refers to clothing worn on the lower part of the body, such as trousers, jeans, skirts, shorts, and leggings.
@@ -242,37 +242,37 @@ def main() -> None:
                 Topwear: Topwear refers to clothing worn on the upper part of the body, such as shirts, blouses, t-shirts, and jackets.
                 Innerwear: Innerwear refers to clothing worn beneath outer garments, typically close to the skin, such as underwear, bras, and undershirts.
                 Each product can only have one category.
-                Return `prod_id` and the category.""",
+                Return `idx` and the category.""",
             7: """Find all pairs of products priced at $500 or less where both products
                 are of the same category and from the same brand based on their descriptions.
                 The pairs may be the same and output all orders of pairs (e.g., include pair a,b and b,a and a,a).
-                Return the two `prod_id` columns in this order: first product's `prod_id`, second product's `prod_id`.""", ## added instruction to not remove pairs
+                Return the two `idx` columns in this order: first product's `idx`, second product's `idx`.""", ## added instruction to not remove pairs
             8: """Perform a self-join of the dataset.
                 For each product, find the matching product images based on the title
-                and the description of the product. You MAY NOT use the `prod_id` to make the join.
+                and the description of the product. You MAY NOT use the `idx` to make the join.
                 You must use the image to match the text.""", #removed 3000 min character
             9: """Based on product images, find pairs of distinct products under $800
                 in a single base color (Black, Blue, Red, White, Orange, or Green)
                 that depict objects of the same category and the same dominant surface color.
                 The pairs MAY NOT be the same but output all order of pairs (e.g., include pair a,b and b,a but not a,a).
-                Return the two `prod_id` columns in this order: first product's `prod_id`, second product's `prod_id`.""",
+                Return the two `idx` columns in this order: first product's `idx`, second product's `idx`.""",
             10: """Based on product images and descriptions, find matching outfits consisting of shoes,
                 bottomwear, and topwear in Black, Blue, Red, or White,
                 where all three items are from the same brand, same color,
-                and each is priced at $1000 or less. Return the three `prod_id` columns in
-                this order: shoes `prod_id`, bottomwear `prod_id`, topwear `prod_id`.""", #added "descriptions" because pz and lotus use text columns too
+                and each is priced at $1000 or less. Return the three `idx` columns in
+                this order: shoes `idx`, bottomwear `idx`, topwear `idx`.""", #added "descriptions" because pz and lotus use text columns too
             11: """Based on product images and descriptions, find matching all-black outfits
                 consisting of shoes, bottomwear (excluding swimwear), topwear (excluding swimwear),
                 and an accessory (watch, jewellery, or bag priced at $500 or less),
-                where all four items are from the same brand. Return the four prod_id columns
-                in this order: shoes prod_id, bottomwear prod_id, topwear prod_id, accessory prod_id""",
+                where all four items are from the same brand. Return the four idx columns
+                in this order: shoes idx, bottomwear idx, topwear idx, accessory idx""",
             12: """For each Adidas or Puma product, use the product image and description
-                to generate the following columns in this order: prod_id, brand name (lowercase),
+                to generate the following columns in this order: idx, brand name (lowercase),
                 and master category classified as 'accessories', 'apparel', or 'footwear'.""",
             13: """Based on product images and descriptions, find men's running shirts
                 with round neck and short sleeves, in blue or black (not bright colors
                 like white, and definitely not green), with a striped design,
-                suitable for outdoor running in warm weather. Return prod_id.""",
+                suitable for outdoor running in warm weather. Return idx.""",
             14: """For each fashion product that costs less than 130,
                 find the single image that best matches the product's textual description
                 (including the product name and full description),
@@ -330,9 +330,7 @@ def main() -> None:
                             "final_eval_runs": FINAL_EVAL_RUNS,
                             "data_dir": data_dir,
                             "gt_dir": SEMBENCH_FILES_DIR / USE_CASE / "raw_results" / "ground_truth" / f"sf_{SCALE_FACTOR}",
-                            "image_id_col": "idx",
                             "image_subdir": "images",
-                            "image_ext": ".jpg",
                         "runcount": args.runcount,
                         })
 

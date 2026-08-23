@@ -1,0 +1,132 @@
+name: SemBench
+quality_adapter: agent_cost_model.experiments.SemBench.quality_evaluator
+final_answer_path: "{results_dir}/final_answer/SemBench/{use_case}/{agent_type}/sf_{scale_factor}/Q{query_id}.json"
+
+use_cases:
+  ecomm:
+    query_source:
+      type: toml
+      path: "{sembench_root}/files/ecomm/queries/q{query_id}.toml"
+    query_metrics:
+      "1": f1-score
+      "2": f1-score
+      "3": adjusted-rand-index
+      "4": adjusted-rand-index
+      "5": adjusted-rand-index
+      "6": adjusted-rand-index
+      "7": f1-score
+      "8": f1-score
+      "9": f1-score
+      "10": f1-score
+      "11": f1-score
+      "12": f1-score
+      "13": f1-score
+      "14": f1-score
+    task_prompts:
+      "1": |-
+        Based on the textual description and the title of the product,
+        find the `idx` of products that are backpacks from Reebok.
+      "2": |-
+        Based on the image representation of the product,
+        find the `idx` of products where the image shows
+        a pair of sports shoes that are predominantly yellow and silver.
+      "3": |-
+        For each product, extract the brand name from the product description and title.
+        Return the product id and the brand in a column titled 'category'.
+      "4": |-
+        For each product, use the image to extract the single primary color of the depicted product.
+        Return `idx` and the primary color in a column titled 'category'.
+      "5": |-
+        Based solely on the title and description of the product, classify each product into one of the following categories:
+        Dress: A dress is a one-piece outer garment that is worn on the torso, hangs down over the legs, and often consist of a bodice attached to a skirt.
+        Bottomwear: Bottomwear refers to clothing worn on the lower part of the body, such as trousers, jeans, skirts, shorts, and leggings.
+        Socks: Socks are a type of clothing worn on the feet, typically made of soft fabric, designed to provide comfort and warmth.
+        Topwear: Topwear refers to clothing worn on the upper part of the body, such as shirts, blouses, t-shirts, and jackets.
+        Innerwear: Innerwear refers to clothing worn beneath outer garments, typically close to the skin, such as underwear, bras, and undershirts.
+        Each product can only have one category.
+        Return `idx` and the category.
+      "6": |-
+        Based solely on the image of the product, classify each product into one of the following categories:
+        Dress: A dress is a one-piece outer garment that is worn on the torso, hangs down over the legs, and often consist of a bodice attached to a skirt.
+        Bottomwear: Bottomwear refers to clothing worn on the lower part of the body, such as trousers, jeans, skirts, shorts, and leggings.
+        Socks: Socks are a type of clothing worn on the feet, typically made of soft fabric, designed to provide comfort and warmth.
+        Topwear: Topwear refers to clothing worn on the upper part of the body, such as shirts, blouses, t-shirts, and jackets.
+        Innerwear: Innerwear refers to clothing worn beneath outer garments, typically close to the skin, such as underwear, bras, and undershirts.
+        Each product can only have one category.
+        Return `idx` and the category.
+      "7": |-
+        Find all pairs of products priced at $500 or less where both products
+        are of the same category and from the same brand based on their descriptions.
+        The pairs may be the same and output all orders of pairs (e.g., include pair a,b and b,a and a,a).
+        Return the two `idx` columns in this order: first product's `idx`, second product's `idx`.
+      "8": |-
+        Perform a self-join of the dataset.
+        For each product, find the matching product images based on the title
+        and the description of the product. You MAY NOT use the `idx` to make the join.
+        You must use the image to match the text.
+      "9": |-
+        Based on product images, find pairs of distinct products under $800
+        in a single base color (Black, Blue, Red, White, Orange, or Green)
+        that depict objects of the same category and the same dominant surface color.
+        The pairs MAY NOT be the same but output all order of pairs (e.g., include pair a,b and b,a but not a,a).
+        Return the two `idx` columns in this order: first product's `idx`, second product's `idx`.
+      "10": |-
+        Based on product images and descriptions, find matching outfits consisting of shoes,
+        bottomwear, and topwear in Black, Blue, Red, or White,
+        where all three items are from the same brand, same color,
+        and each is priced at $1000 or less. Return the three `idx` columns in
+        this order: shoes `idx`, bottomwear `idx`, topwear `idx`.
+      "11": |-
+        Based on product images and descriptions, find matching all-black outfits
+        consisting of shoes, bottomwear (excluding swimwear), topwear (excluding swimwear),
+        and an accessory (watch, jewellery, or bag priced at $500 or less),
+        where all four items are from the same brand. Return the four idx columns
+        in this order: shoes idx, bottomwear idx, topwear idx, accessory idx
+      "12": |-
+        For each Adidas or Puma product, use the product image and description
+        to generate the following columns in this order: idx, brand name (lowercase),
+        and master category classified as 'accessories', 'apparel', or 'footwear'.
+      "13": |-
+        Based on product images and descriptions, find men's running shirts
+        with round neck and short sleeves, in blue or black (not bright colors
+        like white, and definitely not green), with a striped design,
+        suitable for outdoor running in warm weather. Return idx.
+      "14": |-
+        For each fashion product that costs less than 130,
+        find the single image that best matches the product's textual description
+        (including the product name and full description),
+        but only if that image also depicts white socks.
+    dataset:
+      directory: "{benchmark_dir}/dataset/ecomm/sf_{scale_factor}"
+      source_csv: "styles_details_Q{query_id}.csv"
+      image_subdir: images
+    subset_path: "{benchmark_dir}/datasubset_opt/ecomm/sf_{scale_factor}/Q{query_id}_subset.csv"
+    ground_truth_dir: "{sembench_root}/files/ecomm/raw_results/ground_truth/sf_{scale_factor}"
+  movie:
+    query_source:
+      type: text
+      path: "{sembench_root}/files/movie/query/natural_language/Q{query_id}.txt"
+      modalities: [text]
+    query_metrics:
+      "3": relative-error
+      "7": f1-score
+      "9": spearman-rank
+      "10": spearman-rank
+    task_prompts:
+      "3": |-
+        Count of positive reviews for movie `taken_3`. Return one column: `positive_review_cnt`.
+      "7": |-
+        All Pairs of reviews that express the *opposite* sentiment (one is positive and the other is negative) for movie with id `ant_man_and_the_wasp_quantumania`.
+        The two reviewIds MAY NOT be the same but output both orders of pairs (e.g., include pair a,b and b,a but not a,a).
+        Return columns in this order: `movie_name`, `reviewId1`, `reviewId2`
+      "9": |-
+        Score from 1 to 5 how much did the reviewer like the movie based on the movie reviews for movie `ant_man_and_the_wasp_quantumania`.
+        Return columns in this order: `reviewId`, `reviewScore`.
+      "10": |-
+        Rank the movies based on movie reviews. For each movie, score every review of it from 1 to 5, then calculate the average score of these reviews for each movie.
+        Return columns in this order: `movieId`, `movieScore`.
+    dataset:
+      directory: "{benchmark_dir}/dataset/movie/sf_{scale_factor}"
+      source_csv: "Reviews_{scale_factor}.csv"
+    subset_path: "{benchmark_dir}/datasubset_opt/movie/sf_{scale_factor}/Q{query_id}_subset.csv"
+    ground_truth_dir: "{sembench_root}/files/movie/raw_results/ground_truth/sf_{scale_factor}"
