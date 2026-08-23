@@ -5,11 +5,9 @@ __pycache__/
 .venv/
 
 # Experiment inputs and outputs are reproducible/generated data, not source code.
-experiments/dataset/
-experiments/datasubset/
+experiments/*/dataset/
+experiments/*/datasubset*/
 results/
 
 # Keep the directory structure visible after a fresh clone.
-!experiments/dataset/.gitkeep
-!experiments/datasubset/.gitkeep
 !results/.gitkeep

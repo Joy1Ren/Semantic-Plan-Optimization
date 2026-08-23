@@ -9,7 +9,7 @@ import time
 
 from agent_cost_model.cost_model_agent import CostModelAgent, OpenRouterClient, ResultsStore
 from agent_cost_model.llm_sampler import LLM_Sampler
-from agent_cost_model.paths import DATASET_DIR, RESULTS_DIR, SEMBENCH_FILES_DIR
+from agent_cost_model.paths import RESULTS_DIR, SEMBENCH_DATASET_DIR, SEMBENCH_FILES_DIR
 
 
 def main() -> None:
@@ -40,7 +40,7 @@ def main() -> None:
 
     query_id = 10
     source_data = f"Reviews_{SCALE_FACTOR}.csv" #just for LLM_Sampler, not directly given to agent
-    data_dir = str(DATASET_DIR / USE_CASE / f"sf_{SCALE_FACTOR}")
+    data_dir = str(SEMBENCH_DATASET_DIR / USE_CASE / f"sf_{SCALE_FACTOR}")
     # Per-query modality: drives whether the sampler embeds/compares text, images, or both.
     modalities = {
         "ecomm":{

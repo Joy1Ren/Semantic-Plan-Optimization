@@ -35,8 +35,8 @@ except Exception:  # ImportError, or a partial install
 # Add SemBench's src/ to sys.path when the sibling checkout is present.
 # ---------------------------------------------------------------------------
 from agent_cost_model.paths import (
-    DATASUBSET_DIR,
     RESULTS_DIR,
+    SEMBENCH_DATASUBSET_DIR,
     SEMBENCH_FILES_DIR,
     ensure_sembench_src_on_path,
 )
@@ -44,13 +44,13 @@ from agent_cost_model.paths import (
 ensure_sembench_src_on_path()
 
 try:
-    from agent_cost_model.experiments.quality_evaluator import (
+    from agent_cost_model.experiments.SemBench.quality_evaluator import (
         QualityEvaluator as _QualityEvaluator,
         normalize_eval_df as _normalize_eval_df,
     )
 except ImportError:
     try:
-        from experiments.quality_evaluator import (  # type: ignore
+        from experiments.SemBench.quality_evaluator import (  # type: ignore
             QualityEvaluator as _QualityEvaluator,
             normalize_eval_df as _normalize_eval_df,
         )
@@ -2471,7 +2471,7 @@ class CostModelAgent:
         _llm_judge_path.mkdir(parents=True, exist_ok=True)
 
         _oracle_result_path = (
-            DATASUBSET_DIR
+            SEMBENCH_DATASUBSET_DIR
             / query_info["use_case"]
             / f"sf_{query_info['scale_factor']}"
             / f"Q{query_info['query_id']}_oracle_result.csv"
@@ -2969,8 +2969,8 @@ class CostModelAgent:
 
         # Load evaluator + ground truth once; reused across every repeated final run.
         try:
-            from agent_cost_model.experiments.quality_evaluator import _load_evaluator
-            evaluator = _load_evaluator(use_case, scale_factor)
+            from agent_cost_model.experiments.SemBench.quality_evaluator import load_evaluator
+            evaluator = load_evaluator(use_case, scale_factor)
             gt_df = pd.read_csv(gt_path)
         except Exception as e:
             self._log(f"[final_eval] evaluator/ground-truth load failed: {type(e).__name__}: {e}")

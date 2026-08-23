@@ -21,85 +21,9 @@ import random
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any, Callable
 
 import pandas as pd
-
-from agent_cost_model.paths import DATASUBSET_DIR, ensure_sembench_src_on_path
-
-ensure_sembench_src_on_path()
-
-def _id_str(v) -> str:
-    """Stringify an ID value, converting whole-number floats to int first."""
-    if isinstance(v, float) and v.is_integer():
-        return str(int(v))
-    return str(v)
-
-
-def normalize_eval_df(df: pd.DataFrame, use_case: str, query_id: int) -> pd.DataFrame:
-    """Apply use-case/query-specific column normalization for evaluator compatibility.
-
-    Shared by the plan-output and oracle/ground-truth paths so their id columns
-    always line up. Mirrors the per-query dialect output shape expected by the
-    scenario evaluators.
-    """
-    # A plan that filters out every record yields an empty, column-less DataFrame.
-    # Without this guard the per-query branches below would raise an opaque
-    # KeyError ("None of [Index(['id'])] are in the [columns]") from df[["id"]],
-    # masking the real "plan produced no output" condition. Return a canonical
-    # empty id-frame so a zero-row plan scores as empty instead of crashing.
-    if use_case == "ecomm":
-        if query_id in (1, 2, 13, 14):
-            if len(df) == 0:
-                return pd.DataFrame({"id": []})
-            df = df.rename(columns={"prod_id": "id"})
-            df = df[["id"]]
-        elif query_id in (3,4,5,6):
-            if len(df) == 0:
-                return pd.DataFrame({"id": [], "category": []})
-            df = df.rename(columns={"prod_id": "id"})
-            df = df.iloc[:, :2] #keeps prod_id, category
-        elif query_id in (7, 8, 9):
-            if len(df) == 0:
-                return pd.DataFrame({"id": []})
-            df["id"] = df.iloc[:, :2].apply(lambda col: col.map(_id_str)).agg("-".join, axis=1)
-            df = df[["id"]]
-        elif query_id == 10:
-            if len(df) == 0:
-                return pd.DataFrame({"id": []})
-            assert df.shape[1] == 3, f"ecomm Q10 expects 3 columns, got {df.shape[1]}"
-            df["id"] = df.iloc[:, :3].apply(lambda col: col.map(_id_str)).agg("-".join, axis=1)
-            df = df[["id"]]
-        elif query_id == 11:
-            if len(df) == 0:
-                return pd.DataFrame({"id": []})
-            assert df.shape[1] == 4, f"ecomm Q11 expects 4 columns, got {df.shape[1]}"
-            df["id"] = df.iloc[:, :4].apply(lambda col: col.map(_id_str)).agg("-".join, axis=1)
-            df = df[["id"]]
-        elif query_id == 12:
-            if len(df) == 0:
-                return pd.DataFrame({"id": []})
-            assert df.shape[1] == 3, f"ecomm Q12 expects 3 columns, got {df.shape[1]}"
-            df["id"] = df.iloc[:, :3].apply(
-                lambda r: json.dumps(
-                    {"id": int(r.iloc[0]), "brand": r.iloc[1], "category": r.iloc[2]},
-                    separators=(",", ":"),
-                ),
-                axis=1,
-            )
-            df = df[["id"]]
-    return df
-
-
-def _load_evaluator(use_case: str, scale_factor: int):
-    """Import and instantiate the concrete evaluator for the given use_case."""
-    if use_case == "movie":
-        from scenario.movie.evaluation.evaluate import MovieEvaluator
-        return MovieEvaluator(use_case, scale_factor)
-    if use_case == "ecomm":
-        from scenario.ecomm.evaluation.evaluate import EcommEvaluator  # type: ignore
-        return EcommEvaluator(use_case, scale_factor)
-    raise ValueError(f"No evaluator registered for use_case={use_case!r}")
-
 
 @dataclass
 class QualityResult:
@@ -179,17 +103,17 @@ class _MemoizingGenerator:
         return field_answers, reasoning, gen_stats, messages
 
 
-class QualityEvaluator:
-    """Evaluates plan quality against an oracle (strong LLM model)."""
+class OracleQualityEvaluator:
+    """Benchmark-agnostic oracle execution, memoization, and operator scoring."""
 
     def __init__(
         self,
         oracle_client,
         oracle_model: str,
         query_id: int,
-        use_case: str,
-        scale_factor: int,
-        agent_dir: str,
+        subset_path: str | Path,
+        normalize_df: Callable[[pd.DataFrame], pd.DataFrame],
+        evaluator_factory: Callable[[], Any],
         llm_judge_dir: str | Path,
         oracle_reasoning_effort: str | None = None,
     ) -> None:
@@ -197,9 +121,8 @@ class QualityEvaluator:
         self._oracle_model = oracle_model          # string, used for OpenRouterClient judge calls
         self._oracle_reasoning_effort = oracle_reasoning_effort
         self._query_id = query_id
-        self._use_case = use_case
-        self._scale_factor = scale_factor
-        self._agent_dir = agent_dir
+        self._subset_path = Path(subset_path)
+        self._normalize_df_fn = normalize_df
         self._llm_judge_dir = Path(llm_judge_dir)
         self.total_oracle_cost_usd = 0.0
         self._canonical_oracle_df: "pd.DataFrame | None" = None
@@ -222,7 +145,7 @@ class QualityEvaluator:
 
         self._evaluator = None
         try:
-            self._evaluator = _load_evaluator(use_case, scale_factor)
+            self._evaluator = evaluator_factory()
         except Exception as e:
             print(f"[QualityEvaluator] evaluator init failed: {e}")
 
@@ -342,9 +265,7 @@ class QualityEvaluator:
             # operators this plan shares with an already-evaluated plan reuse the oracle's
             # verdicts instead of re-calling the LLM.
             self._install_oracle_cache(oracle_pipeline)
-            subset_cache_path = (
-                DATASUBSET_DIR / self._use_case / f"sf_{self._scale_factor}" / f"Q{self._query_id}_subset.csv"
-            )
+            subset_cache_path = self._subset_path
             if not subset_cache_path.exists():
                 raise FileNotFoundError(
                     f"Subset CSV not found at {subset_cache_path}. "
@@ -374,8 +295,8 @@ class QualityEvaluator:
         oracle_df.to_csv(csv_path, index=False)
         self._save_op_decisions_cache(op_cache_path, oracle_context)
 
-        oracle_result_path = (
-            DATASUBSET_DIR / self._use_case / f"sf_{self._scale_factor}" / f"Q{self._query_id}_oracle_result.csv"
+        oracle_result_path = subset_cache_path.with_name(
+            f"Q{self._query_id}_oracle_result.csv"
         )
         if not oracle_result_path.exists():
             oracle_result_path.parent.mkdir(parents=True, exist_ok=True)
@@ -385,7 +306,7 @@ class QualityEvaluator:
 
     def _normalize_df(self, df: pd.DataFrame) -> pd.DataFrame:
         """Apply use-case/query-specific column normalization (mirrors ExecutePlanTool)."""
-        return normalize_eval_df(df, self._use_case, self._query_id)
+        return self._normalize_df_fn(df)
 
     # ------------------------------------------------------------------
     # Op-level decision caching

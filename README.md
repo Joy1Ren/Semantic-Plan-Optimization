@@ -17,12 +17,13 @@ dicts).
 |------|------------|
 | `cost_model_agent.py`, `local_python_executor.py`, `physical_pipeline.py`, `llm_sampler.py` | reusable cost-model implementation |
 | `PHYSICAL_PIPELINE_DESIGN.md`, `available_models.txt` | model documentation and configuration |
-| `experiments/` | experiment drivers (`demo.py`, `run_opt.py`, `quality_evaluator.py`) and their datasets/subsets |
+| `oracle_quality_evaluator.py` | reusable oracle execution, memoization, and per-operator quality scoring |
+| `experiments/SemBench/` | SemBench-specific drivers, output normalization, evaluator setup, datasets, and subsets |
 | `results/` | generated cost models, final answers, metrics, sampling cache, and trajectories |
 | `analysis/` | result-inspection scripts, notebook, and CSV analysis inputs |
 
-`experiments/dataset/`, `experiments/datasubset/`, and `results/` are ignored by
-Git because they contain generated or large experiment artifacts. They are created
+`experiments/*/dataset/`, `experiments/*/datasubset*/`, and `results/` are ignored
+by Git because they contain generated or large experiment artifacts. They are created
 automatically by the corresponding scripts.
 
 SemBench-dependent commands resolve the sibling `SemBench/` checkout by default.
@@ -37,12 +38,12 @@ export SEMBENCH_ROOT=/absolute/path/to/SemBench
 ```bash
 # 1. from the SemPlan_Opt workspace root
 # 2a. offline smoke test -- no API key or network required:
-python3 -m agent_cost_model.experiments.demo --offline
+python3 -m agent_cost_model.experiments.SemBench.demo --offline
 
 # 2b. real run via OpenRouter:
 pip install openai
 export OPENROUTER_API_KEY=sk-or-...
-python3 -m agent_cost_model.experiments.demo --model openai/gpt-5
+python3 -m agent_cost_model.experiments.SemBench.demo --model openai/gpt-5
 ```
 
 The offline path is the fastest way to confirm your `local_python_executor.py`

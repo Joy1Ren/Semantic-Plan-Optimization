@@ -30,7 +30,7 @@ import matplotlib.pyplot as plt
 
 # Reuse the production sampler's filter/keyword helpers (pure, no network calls).
 from agent_cost_model.llm_sampler import LLM_Sampler
-from agent_cost_model.paths import ANALYSIS_DIR, DATASET_DIR, RESULTS_DIR
+from agent_cost_model.paths import ANALYSIS_DIR, RESULTS_DIR, SEMBENCH_DATASET_DIR
 
 # ============================ EDIT PER QUERY ============================
 USE_CASE    = "ecomm"
@@ -57,7 +57,7 @@ CACHE_DIR = RESULTS_DIR / "sampling" / USE_CASE / "cached_results"
 SHARED    = f"{CACHE_DIR}/{SLUG}_embeddings.npz"     # shared cache: ids/text + image_ids/image
 RESULTS = RESULTS_DIR / "sampling" / USE_CASE / "results.json"
 PLOT_OUT = RESULTS_DIR / "sampling" / USE_CASE / f"Q{QUERY_ID}_blackbags_{'keyword+cos' if KEYWORD else 'cos'}_cdf.png"
-SOURCE_CSV = DATASET_DIR / USE_CASE / f"sf_{SCALE_FACTOR}" / "styles_details.csv"
+SOURCE_CSV = SEMBENCH_DATASET_DIR / USE_CASE / f"sf_{SCALE_FACTOR}" / "styles_details.csv"
 ID_COL     = "prod_id"                              # key linking source rows to embedding ids
 BASE_URL  = "https://openrouter.ai/api/v1"
 API_KEY   = os.environ.get("OPENROUTER_API_KEY")

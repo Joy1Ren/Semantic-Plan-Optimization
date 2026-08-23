@@ -42,7 +42,7 @@ from typing import Any, Callable, Optional
 import numpy as np
 import pandas as pd
 
-from agent_cost_model.paths import DATASET_DIR, DATASUBSET_DIR, RESULTS_DIR
+from agent_cost_model.paths import RESULTS_DIR, SEMBENCH_DATASET_DIR, SEMBENCH_DATASUBSET_DIR
 
 # Keep sample size / seed consistent with PhysicalPipeline.run_subset so the
 # subset we write matches the size the agent expects.
@@ -214,7 +214,7 @@ class LLM_Sampler:
         self.results_path = self.cache_dir / f"sf_{scale_factor}" / "sampling_results.json"
         self.subset_out_path = pathlib.Path(
             subset_out_path
-            or DATASUBSET_DIR / use_case / f"sf_{scale_factor}" / f"Q{query_id}_subset.csv"
+            or SEMBENCH_DATASUBSET_DIR / use_case / f"sf_{scale_factor}" / f"Q{query_id}_subset.csv"
         )
 
         # Embeddings are called over raw HTTP (not the OpenAI SDK helper): the
@@ -778,7 +778,7 @@ def _main() -> None:
 
     from agent_cost_model.cost_model_agent import OpenRouterClient
 
-    data_dir = args.data_dir or str(DATASET_DIR / args.use_case / f"sf_{args.scale_factor}")
+    data_dir = args.data_dir or str(SEMBENCH_DATASET_DIR / args.use_case / f"sf_{args.scale_factor}")
     csv = args.csv or f"styles_details_Q{args.query_id}.csv"
     df = pd.read_csv(os.path.join(data_dir, csv), dtype={args.id_col: str})
     image_dir = os.path.join(data_dir, "images") if args.images else None
