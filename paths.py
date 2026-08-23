@@ -11,14 +11,8 @@ WORKSPACE_ROOT = PACKAGE_ROOT.parent
 
 
 def _default_sembench_root() -> Path:
-    """Prefer the published submodule layout while supporting this checkout."""
-    for candidate in (
-        WORKSPACE_ROOT / "third_party" / "SemBench",
-        WORKSPACE_ROOT / "SemBench",
-    ):
-        if candidate.exists():
-            return candidate
-    return WORKSPACE_ROOT / "third_party" / "SemBench"
+    """Return the SemBench checkout that lives alongside this repository."""
+    return WORKSPACE_ROOT / "SemBench"
 
 
 SEMBENCH_ROOT = Path(os.environ.get("SEMBENCH_ROOT", _default_sembench_root())).expanduser().resolve()
