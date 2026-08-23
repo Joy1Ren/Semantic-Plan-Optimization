@@ -1451,9 +1451,11 @@ class CostHelperAgent:
         # own sandbox: only the update tool + introspection (never share the main
         # agent's executor — WritePlanTool mutates that sandbox's state).
         from agent_cost_model.local_python_executor import LocalPythonExecutor
+        default_imports = ["math", "statistics", "json", "collections", "itertools"]
+        if __import__("importlib").util.find_spec("palimpzest") is not None:
+            default_imports.append("palimpzest")
         self.executor = LocalPythonExecutor(
-            additional_authorized_imports=authorized_imports
-            or ["math", "statistics", "json", "collections", "itertools", "palimpzest"]
+            additional_authorized_imports=authorized_imports or default_imports
         )
         self._update_tool = UpdateCostModelTool(
             registry, op_results=op_results, plan_results=plan_results
@@ -2467,6 +2469,7 @@ class CostModelAgent:
 
         _oracle_result_path = (
             pathlib.Path(__file__).parent
+            / "experiments"
             / "datasubset"
             / query_info["use_case"]
             / f"sf_{query_info['scale_factor']}"
@@ -2491,10 +2494,7 @@ class CostModelAgent:
                 print(f"[run] QualityEvaluator init failed: {e}")
 
         import pandas as pd
-        try:
-            from agent_cost_model.physical_pipeline import PhysicalPipeline
-        except ImportError:
-            from agent_cost_model.physical_pipeline import PhysicalPipeline
+        from agent_cost_model.physical_pipeline import PhysicalPipeline
         try:
             import palimpzest as pz
         except ImportError as exc:

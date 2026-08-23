@@ -28,8 +28,23 @@ from importlib.util import find_spec
 from types import BuiltinFunctionType, FunctionType, ModuleType
 from typing import Any
 
-from agent.tools import Tool
-from agent.utils import BASE_BUILTIN_MODULES, truncate_content
+# Keep the executor independent from SemBench's former ``agent`` package.
+# ``Tool`` is used for type annotation only; runtime tools are duck-typed.
+Tool = Any
+BASE_BUILTIN_MODULES = [
+    "collections", "datetime", "itertools", "math", "queue", "random",
+    "re", "stat", "statistics", "time", "unicodedata",
+]
+
+
+def truncate_content(content: str, max_length: int = 20000) -> str:
+    if len(content) <= max_length:
+        return content
+    return (
+        content[: max_length // 2]
+        + f"\n..._This content has been truncated to stay below {max_length} characters_...\n"
+        + content[-max_length // 2 :]
+    )
 
 
 logger = logging.getLogger(__name__)
