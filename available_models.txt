@@ -1,0 +1,46 @@
+Available LLM Models for Semantic Operators
+============================================
+Costs are per 1M tokens. Latency is seconds per output token.
+Grouped by cost/speed tier (within each tier, sorted by input cost):
+
+--- Fast / Cheap ---
+pz.Model.GPT_5_NANO
+  input: $0.050/1M   output: $0.400/1M   latency: 0.0069 s/output-token
+
+pz.Model.GOOGLE_GEMINI_2_5_FLASH_LITE
+  input: $0.100/1M   output: $0.400/1M   latency: 0.0044 s/output-token
+
+pz.Model.GPT_4_1_NANO
+  input: $0.100/1M   output: $0.400/1M   latency: 0.0068 s/output-token
+
+--- Medium ---
+pz.Model.GPT_4o_MINI
+  input: $0.150/1M   output: $0.600/1M   latency: 0.0140 s/output-token
+
+pz.Model.LLAMA_4_MAVERICK
+  input: $0.150/1M   output: $0.600/1M   latency: 0.0089 s/output-token
+
+pz.Model.GPT_5_MINI
+  input: $0.250/1M   output: $2.000/1M   latency: 0.0105 s/output-token
+
+pz.Model.GOOGLE_GEMINI_2_5_FLASH
+  input: $0.300/1M   output: $2.500/1M   latency: 0.0048 s/output-token
+
+pz.Model.GPT_4_1_MINI
+  input: $0.400/1M   output: $1.600/1M   latency: 0.0128 s/output-token
+
+--- Slow / More Expensive ---
+pz.Model.o4_MINI
+  input: $1.100/1M   output: $4.400/1M   latency: 0.0060 s/output-token
+
+pz.Model.GOOGLE_GEMINI_2_5_PRO
+  input: $1.250/1M   output: $10.000/1M  latency: 0.0074 s/output-token
+
+pz.Model.GPT_5
+  input: $1.250/1M   output: $10.000/1M  latency: 0.0144 s/output-token
+
+pz.Model.GPT_4_1
+  input: $2.000/1M   output: $8.000/1M   latency: 0.0072 s/output-token
+
+pz.Model.GPT_4o
+  input: $2.500/1M   output: $10.000/1M  latency: 0.0050 s/output-token
