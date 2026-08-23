@@ -34,11 +34,14 @@ except Exception:  # ImportError, or a partial install
 # Guarded SemBench evaluator import.
 # Add SemBench's src/ to sys.path when the sibling checkout is present.
 # ---------------------------------------------------------------------------
-import sys as _sys
-from pathlib import Path as _Path
-_src_dir = str(_Path(os.environ.get("SEMBENCH_ROOT", _Path(__file__).resolve().parent.parent / "SemBench")) / "src")
-if _src_dir not in _sys.path:
-    _sys.path.insert(0, _src_dir)
+from agent_cost_model.paths import (
+    DATASUBSET_DIR,
+    RESULTS_DIR,
+    SEMBENCH_FILES_DIR,
+    ensure_sembench_src_on_path,
+)
+
+ensure_sembench_src_on_path()
 
 try:
     from agent_cost_model.experiments.quality_evaluator import (
@@ -2272,7 +2275,7 @@ class CostModelAgent:
             return
         import pandas as pd
         import pathlib
-        metrics_dir = pathlib.Path(__file__).parent / "trajectory" / self.use_case / f"sf_{query_info['scale_factor']}"
+        metrics_dir = RESULTS_DIR / "trajectory" / self.use_case / f"sf_{query_info['scale_factor']}"
         metrics_dir.mkdir(parents=True, exist_ok=True)
         rc = query_info.get("runcount")
         qkey = f"Q{query_info['query_id']}_{rc}" if rc is not None else f"Q{query_info['query_id']}"
@@ -2319,7 +2322,7 @@ class CostModelAgent:
         if not results.rows:
             return
         import pathlib
-        metrics_dir = pathlib.Path(__file__).parent / "metrics" / self.use_case / f"sf_{query_info['scale_factor']}"
+        metrics_dir = RESULTS_DIR / "metrics" / self.use_case / f"sf_{query_info['scale_factor']}"
         metrics_dir.mkdir(parents=True, exist_ok=True)
         rc = query_info.get("runcount")
         qkey = f"Q{query_info['query_id']}_{rc}" if rc is not None else f"Q{query_info['query_id']}"
@@ -2460,7 +2463,7 @@ class CostModelAgent:
 
         # Build oracle client and quality evaluator (oracle runs inside QualityEvaluator)
         oracle_client = OpenRouterClient(self.oracle_model, reasoning_effort=self.oracle_reasoning_effort)
-        llm_judge_dir = f"files/{query_info['use_case']}/llm_judge"
+        llm_judge_dir = RESULTS_DIR / "llm_judge" / query_info["use_case"]
         import shutil
         _llm_judge_path = pathlib.Path(llm_judge_dir)
         if _llm_judge_path.exists():
@@ -2468,9 +2471,7 @@ class CostModelAgent:
         _llm_judge_path.mkdir(parents=True, exist_ok=True)
 
         _oracle_result_path = (
-            pathlib.Path(__file__).parent
-            / "experiments"
-            / "datasubset"
+            DATASUBSET_DIR
             / query_info["use_case"]
             / f"sf_{query_info['scale_factor']}"
             / f"Q{query_info['query_id']}_oracle_result.csv"
@@ -2951,7 +2952,7 @@ class CostModelAgent:
         scale_factor = query_info["scale_factor"]
         runcount = query_info.get("runcount")
         run_suffix = f"Q{query_id}_{runcount}" if runcount is not None else f"Q{query_id}"
-        gt_dir = query_info.get("gt_dir", f"files/{use_case}/raw_results/ground_truth/sf_{scale_factor}")
+        gt_dir = query_info.get("gt_dir", SEMBENCH_FILES_DIR / use_case / "raw_results" / "ground_truth" / f"sf_{scale_factor}")
 
         import dataclasses
         import pathlib
@@ -2963,7 +2964,7 @@ class CostModelAgent:
             self._log(f"[final_eval] ground truth not found at {gt_path} — skipping")
             return
 
-        raw_results_dir = pathlib.Path(f"files/{use_case}/raw_results/palimpzest/{self.agent_dir}/sf_{scale_factor}")
+        raw_results_dir = RESULTS_DIR / "raw_results" / use_case / self.agent_dir / f"sf_{scale_factor}"
         raw_results_dir.mkdir(parents=True, exist_ok=True)
 
         # Load evaluator + ground truth once; reused across every repeated final run.
@@ -3038,7 +3039,7 @@ class CostModelAgent:
                 "quality": quality,
             }
 
-        metrics_path = pathlib.Path(f"files/{use_case}/metrics/sf_{scale_factor}/{self.agent_dir}.json")
+        metrics_path = RESULTS_DIR / "metrics" / use_case / f"sf_{scale_factor}" / f"{self.agent_dir}.json"
         metrics_path.parent.mkdir(parents=True, exist_ok=True)
         entry: dict = {}
         if metrics_path.exists():

@@ -9,7 +9,7 @@ import time
 
 from agent_cost_model.cost_model_agent import CostModelAgent, OpenRouterClient, ResultsStore
 from agent_cost_model.llm_sampler import LLM_Sampler
-from agent_cost_model.paths import DATASET_DIR, RESULTS_DIR
+from agent_cost_model.paths import DATASET_DIR, RESULTS_DIR, SEMBENCH_FILES_DIR
 
 
 def main() -> None:
@@ -176,7 +176,7 @@ def main() -> None:
                             "eval_metric": eval_metrics[USE_CASE][query_id],
                             "final_eval_runs": FINAL_EVAL_RUNS,
                             "data_dir": data_dir,
-                            "gt_dir": f"files/{USE_CASE}/raw_results/ground_truth/sf_{SCALE_FACTOR}",
+                            "gt_dir": SEMBENCH_FILES_DIR / USE_CASE / "raw_results" / "ground_truth" / f"sf_{SCALE_FACTOR}",
                             "image_id_col": "idx",
                             "image_subdir": "images",
                             "image_ext": ".jpg",

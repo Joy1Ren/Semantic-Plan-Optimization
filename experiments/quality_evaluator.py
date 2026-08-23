@@ -24,6 +24,10 @@ from pathlib import Path
 
 import pandas as pd
 
+from agent_cost_model.paths import DATASUBSET_DIR, ensure_sembench_src_on_path
+
+ensure_sembench_src_on_path()
+
 def _id_str(v) -> str:
     """Stringify an ID value, converting whole-number floats to int first."""
     if isinstance(v, float) and v.is_integer():
@@ -339,7 +343,7 @@ class QualityEvaluator:
             # verdicts instead of re-calling the LLM.
             self._install_oracle_cache(oracle_pipeline)
             subset_cache_path = (
-                Path(__file__).parent / "datasubset" / self._use_case / f"sf_{self._scale_factor}" / f"Q{self._query_id}_subset.csv"
+                DATASUBSET_DIR / self._use_case / f"sf_{self._scale_factor}" / f"Q{self._query_id}_subset.csv"
             )
             if not subset_cache_path.exists():
                 raise FileNotFoundError(
@@ -371,7 +375,7 @@ class QualityEvaluator:
         self._save_op_decisions_cache(op_cache_path, oracle_context)
 
         oracle_result_path = (
-            Path(__file__).parent / "datasubset" / self._use_case / f"sf_{self._scale_factor}" / f"Q{self._query_id}_oracle_result.csv"
+            DATASUBSET_DIR / self._use_case / f"sf_{self._scale_factor}" / f"Q{self._query_id}_oracle_result.csv"
         )
         if not oracle_result_path.exists():
             oracle_result_path.parent.mkdir(parents=True, exist_ok=True)

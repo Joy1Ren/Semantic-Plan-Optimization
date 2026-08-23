@@ -25,6 +25,14 @@ dicts).
 Git because they contain generated or large experiment artifacts. They are created
 automatically by the corresponding scripts.
 
+SemBench-dependent commands resolve the SemBench checkout from `SEMBENCH_ROOT`.
+The default is `third_party/SemBench` in a published clone, with `../SemBench`
+supported for the current workspace layout. Override it when needed:
+
+```bash
+export SEMBENCH_ROOT=/absolute/path/to/SemBench
+```
+
 ## Run it
 
 ```bash
