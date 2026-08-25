@@ -1,15 +1,25 @@
 """Oracle-based quality evaluator for the cost model agent.
 
-Per-operator quality:
-  sem_filter / sem_join: agreement rate between plan decisions and oracle decisions.
-  sem_map: oracle judges whether each output field is correct (batched LLM call).
+Per-operator quality (identical regardless of use_oracle_ground_truth — only needs the plan's own
+execution samples, never a separately-run oracle-substituted pipeline):
+  sem_filter / sem_join / rag_filter: the oracle directly judges each of the plan's own inputs
+    against the operator's condition (one batched call per operator); per-op quality is the
+    agreement rate between the oracle's decisions and the plan's own pass/fail decisions.
+  sem_map / rag_map: the oracle judges whether each output field is correct (batched LLM call).
+  Any other op_type (rag_join doesn't exist; project, filter, groupby, join, map, ...) is
+  non-semantic and never scored here — an empty per_sem_op_quality for a plan built only from
+  those isn't a bug, just nothing semantic to score.
 
-Plan quality: plan output vs. oracle plan output using the original quality metrics
-  (f1, relative_error, spearman_correlation, accuracy).
-
-Oracle plan output is cached per plan_name in llm_judge_dir. In addition, oracle LLM
-calls are memoized per-operator across plans (see _MemoizingGenerator): a semantic
-operator shared by two plans is judged by the oracle only once.
+Plan quality: plan output vs. ground truth, using the original quality metrics (f1,
+relative_error, spearman_correlation, accuracy). The ground truth is either:
+  - oracle-generated (use_oracle_ground_truth=True, the default): the plan rebuilt with every
+    semantic operator replaced by the oracle model, run once and cached per plan_name in
+    llm_judge_dir. Oracle LLM calls are also memoized per-operator across plans (see
+    _MemoizingGenerator): a semantic operator shared by two plans is judged by the oracle only
+    once.
+  - directly supplied (use_oracle_ground_truth=False, via ground_truth_loader): skips building
+    the oracle-substituted plan entirely, avoiding the cost of running the whole plan through the
+    oracle.
 """
 from __future__ import annotations
 
@@ -116,6 +126,8 @@ class OracleQualityEvaluator:
         evaluator_factory: Callable[[], Any],
         llm_judge_dir: str | Path,
         oracle_reasoning_effort: str | None = None,
+        use_oracle_ground_truth: bool = True,
+        ground_truth_loader: Callable[[], pd.DataFrame] | None = None,
     ) -> None:
         self._oracle_client = oracle_client
         self._oracle_model = oracle_model          # string, used for OpenRouterClient judge calls
@@ -126,6 +138,14 @@ class OracleQualityEvaluator:
         self._llm_judge_dir = Path(llm_judge_dir)
         self.total_oracle_cost_usd = 0.0
         self._canonical_oracle_df: "pd.DataFrame | None" = None
+
+        # When False, evaluate() skips the oracle-substituted plan entirely (no oracle LLM
+        # calls, no per-operator quality) and scores plan quality against ground_truth_loader's
+        # output instead.
+        self._use_oracle_ground_truth = use_oracle_ground_truth
+        self._ground_truth_loader = ground_truth_loader
+        self._direct_ground_truth_df: "pd.DataFrame | None" = None
+        self._direct_ground_truth_loaded = False
 
         # Cross-plan per-operator oracle cache: (operator identity, input content) ->
         # field_answers. Shared by every oracle pipeline this evaluator runs, so a semantic
@@ -138,7 +158,7 @@ class OracleQualityEvaluator:
         # surfaces bad model names early).
         self._oracle_pz_model = None
         try:
-            from agent_cost_model.physical_pipeline import _str_to_pz_model
+            from agent_cost_model.opt_agent.physical_pipeline import _str_to_pz_model
             self._oracle_pz_model = _str_to_pz_model(oracle_model)
         except Exception as e:
             print(f"[QualityEvaluator] could not resolve oracle pz model '{oracle_model}': {e}")
@@ -161,50 +181,71 @@ class OracleQualityEvaluator:
         plan_output_df: pd.DataFrame, # already normalized for evaluator
     ) -> QualityResult:
         """Run oracle evaluation and return QualityResult."""
-        oracle_df, oracle_context = self._get_oracle_context(plan, plan_name)
-        if oracle_df is not None and not oracle_df.empty and (
-            self._canonical_oracle_df is None or self._canonical_oracle_df.empty
-        ):
-            self._canonical_oracle_df = oracle_df
-        gt_df = self._canonical_oracle_df
+        if self._use_oracle_ground_truth:
+            oracle_df = self._get_oracle_context(plan, plan_name)
+            if oracle_df is not None and not oracle_df.empty and (
+                self._canonical_oracle_df is None or self._canonical_oracle_df.empty
+            ):
+                self._canonical_oracle_df = oracle_df
+            gt_df = self._canonical_oracle_df
+        else:
+            gt_df = self._get_direct_ground_truth()
 
-        # Per-op quality
+        # Per-op quality: identical regardless of use_oracle_ground_truth. sem_map only ever
+        # needed the plan's own input/output samples. sem_filter/sem_join ask the oracle to
+        # directly judge each of the plan's own inputs against the operator's condition (a
+        # single batched call), then score agreement with the plan's own pass/fail decisions —
+        # in oracle-ground-truth mode this piggybacks on judging done in the same run rather than
+        # comparing against a separately-run oracle-substituted pipeline.
         per_sem_op_quality: dict[str, float] = {}
-        if oracle_context is not None:
-            for stage_idx, info in plan_context.per_sem_op_info.items():
-                op_name = info["op_name"]
-                op_type = info["op_type"]
-                oracle_info = oracle_context.per_sem_op_info.get(stage_idx)
-                try:
-                    if op_type in ("sem_filter", "sem_join") and oracle_info is not None:
+        for stage_idx, info in plan_context.per_sem_op_info.items():
+            op_name = info["op_name"]
+            op_type = info["op_type"]
+            try:
+                if op_type in ("sem_filter", "sem_join", "rag_filter"):
+                    condition = info["attributes"].get("condition")
+                    if condition:
                         max_pairs = len(plan_context.sampled_records) if op_type == "sem_join" else None
-                        q = self._score_filter_join_op(info["samples"], oracle_info["samples"], max_pairs=max_pairs)
+                        q = self._oracle_judge_filter_join_op(
+                            op_type, condition, info["samples"], max_pairs=max_pairs, op_name=op_name,
+                        )
                         if q is not None:
                             per_sem_op_quality[op_name] = q
-                    elif op_type == "sem_map":
-                        q = self._score_map_op(info)
-                        if q is not None:
-                            per_sem_op_quality[op_name] = q
-                except Exception as e:
-                    print(f"[QualityEvaluator] per-op quality failed for {op_name}: {e}")
+                    else:
+                        print(f"[QualityEvaluator] per-op quality skipped for {op_name}: no condition in attributes")
+                elif op_type in ("sem_map", "rag_map"):
+                    q = self._score_map_op(info)
+                    if q is not None:
+                        per_sem_op_quality[op_name] = q
+            except Exception as e:
+                print(f"[QualityEvaluator] per-op quality failed for {op_name}: {e}")
 
         # Plan quality
         quality = float("nan")
         quality_note = None
         if gt_df is None or gt_df.empty:
-            # The oracle produced no rows on this subset, so there is nothing to score the plan
-            # against — quality is undefined. Keep it NaN but attach a note so the agent's
-            # observation can explain why (rather than showing a bare NaN).
-            quality_note = "subset produces empty result, so plan quality is N/A"
+            # No rows to score the plan against — quality is undefined. Keep it NaN but attach
+            # a note so the agent's observation can explain why (rather than showing a bare NaN).
+            quality_note = (
+                "subset produces empty result, so plan quality is N/A" if self._use_oracle_ground_truth
+                else "ground truth is empty or unavailable, so plan quality is N/A"
+            )
         elif self._evaluator is not None:
             try:
                 import dataclasses
-                # Serialize any list-valued columns so the evaluator can hash them
+                # Serialize any list-valued columns so the evaluator can hash them. Must be
+                # JSON (not plain str()/repr) -- adapters like CUAD's normalize_eval_df put
+                # JSON-parseable list-of-dict cells (e.g. "clauses") into these columns and
+                # parse them back out with json.loads(); a Python repr ("[{'a': 'b'}]", single
+                # quotes) fails that parse silently and gets treated as "no predictions",
+                # zeroing out quality regardless of how good the plan's output actually was.
                 def _sanitize(df: pd.DataFrame) -> pd.DataFrame:
                     df = df.copy()
                     for col in df.columns:
                         if df[col].apply(lambda x: isinstance(x, (list, dict))).any():
-                            df[col] = df[col].apply(lambda x: str(x) if isinstance(x, (list, dict)) else x)
+                            df[col] = df[col].apply(
+                                lambda x: json.dumps(x, default=str) if isinstance(x, (list, dict)) else x
+                            )
                     return df
                 plan_output_df = _sanitize(plan_output_df)
                 gt_df = _sanitize(gt_df)
@@ -245,17 +286,12 @@ class OracleQualityEvaluator:
                 gen, self._oracle_call_cache, model_value, reff, self._oracle_cache_stats
             )
 
-    def _get_oracle_context(
-        self, plan, plan_name: str
-    ) -> tuple[pd.DataFrame | None, object | None]:
+    def _get_oracle_context(self, plan, plan_name: str) -> "pd.DataFrame | None":
         self._llm_judge_dir.mkdir(parents=True, exist_ok=True)
         csv_path = self._llm_judge_dir / f"Q{self._query_id}_{plan_name}_gt.csv"
-        op_cache_path = self._llm_judge_dir / f"Q{self._query_id}_{plan_name}_op_decisions.json"
 
         if csv_path.exists():
-            oracle_df = pd.read_csv(csv_path)
-            oracle_context = self._load_op_decisions_cache(op_cache_path)
-            return oracle_df, oracle_context
+            return pd.read_csv(csv_path)
 
         try:
             # Prefer the resolved pz.Model enum; fall back to string (triggers _str_to_pz_model)
@@ -288,12 +324,11 @@ class OracleQualityEvaluator:
             #       f"({hits + misses} LLM calls, avoided so far: {self._oracle_cache_stats['hits']})")
         except Exception as e:
             print(f"[QualityEvaluator] oracle pipeline run failed: {e}")
-            return None, None
+            return None
 
         oracle_df = pd.DataFrame(oracle_context.output_records)
         oracle_df = self._normalize_df(oracle_df)
         oracle_df.to_csv(csv_path, index=False)
-        self._save_op_decisions_cache(op_cache_path, oracle_context)
 
         oracle_result_path = subset_cache_path.with_name(
             f"Q{self._query_id}_oracle_result.csv"
@@ -302,90 +337,38 @@ class OracleQualityEvaluator:
             oracle_result_path.parent.mkdir(parents=True, exist_ok=True)
             oracle_df.to_csv(oracle_result_path, index=False)
 
-        return oracle_df, oracle_context
+        return oracle_df
 
     def _normalize_df(self, df: pd.DataFrame) -> pd.DataFrame:
         """Apply use-case/query-specific column normalization (mirrors ExecutePlanTool)."""
         return self._normalize_df_fn(df)
 
-    # ------------------------------------------------------------------
-    # Op-level decision caching
-    # ------------------------------------------------------------------
+    def _get_direct_ground_truth(self) -> "pd.DataFrame | None":
+        """Load the real ground truth once (via ground_truth_loader) and reuse it across plans.
 
-    def _save_op_decisions_cache(self, path: Path, oracle_context) -> None:
-        cache: dict[str, dict] = {}
-        for stage_idx, info in oracle_context.per_sem_op_info.items():
-            decisions: dict[str, bool] = {}
-            for inp, out in info["samples"]:
-                if hasattr(inp, "source_indices"):
-                    decisions[str(inp.source_indices)] = out is not None
-            if decisions:
-                cache[str(stage_idx)] = {"op_type": info["op_type"], "decisions": decisions}
-        path.write_text(json.dumps(cache))
-
-    def _load_op_decisions_cache(self, path: Path):
-        """Return a minimal object with per_sem_op_info populated from JSON cache."""
-        if not path.exists():
-            return None
-        try:
-            from agent_cost_model.physical_pipeline import SubsetExecutionContext
-            raw = json.loads(path.read_text())
-            per_sem_op_info: dict[int, dict] = {}
-            for stage_str, v in raw.items():
-                stage_idx = int(stage_str)
-                # Represent cached decisions as (source_idx_str, passed_bool) tuples
-                samples = [(src, passed) for src, passed in v["decisions"].items()]
-                per_sem_op_info[stage_idx] = {
-                    "op_name": f"_oracle_op{stage_idx}",
-                    "op_type": v.get("op_type", "sem_filter"),
-                    "attributes": {"model": self._oracle_model},
-                    "samples": samples,
-                }
-            return SubsetExecutionContext(
-                sampled_records=[],
-                output_records=[],
-                per_sem_op_info=per_sem_op_info,
-                has_join=False,
-                right_sampled_records=None,
-            )
-        except Exception as e:
-            print(f"[QualityEvaluator] op decisions cache load failed: {e}")
-            return None
+        Used instead of the oracle-substituted plan when use_oracle_ground_truth=False. The real
+        ground truth is computed over the full dataset, but the plan only ever sees the
+        optimization subset — so when both share an 'idx' column, the ground truth is restricted
+        to the idx values present in the subset (mirrors what the oracle pipeline would produce
+        by construction, since it too only ever runs over the subset).
+        """
+        if not self._direct_ground_truth_loaded:
+            self._direct_ground_truth_loaded = True
+            if self._ground_truth_loader is not None:
+                try:
+                    gt_df = self._ground_truth_loader()
+                    if "idx" in gt_df.columns and self._subset_path.exists():
+                        subset_df = pd.read_csv(self._subset_path)
+                        if "idx" in subset_df.columns:
+                            gt_df = gt_df[gt_df["idx"].isin(subset_df["idx"].unique())]
+                    self._direct_ground_truth_df = gt_df
+                except Exception as e:
+                    print(f"[QualityEvaluator] direct ground-truth load failed: {e}")
+        return self._direct_ground_truth_df
 
     # ------------------------------------------------------------------
     # Per-operator quality scoring
     # ------------------------------------------------------------------
-
-    def _score_filter_join_op(self, plan_samples: list, oracle_samples: list, max_pairs: int | None = None) -> float | None:
-        """Agreement rate between plan filter and oracle filter on the same records.
-
-        For sem_join, pass max_pairs=n to randomly sample n pairs from the common
-        set (instead of scoring all n^2 pairs).
-        """
-        def _to_decisions(samples) -> dict[str, bool]:
-            d: dict[str, bool] = {}
-            for item in samples:
-                if not (isinstance(item, tuple) and len(item) == 2):
-                    continue
-                inp, out = item
-                if hasattr(inp, "source_indices"):
-                    # DataRecord sample: out is DataRecord or None
-                    # source_indices may be a list (joined records) — stringify for hashing
-                    d[str(inp.source_indices)] = out is not None
-                elif isinstance(inp, str):
-                    # Cached format: (source_idx_str, passed_bool)
-                    d[inp] = bool(out)
-            return d
-
-        plan_dec = _to_decisions(plan_samples)
-        oracle_dec = _to_decisions(oracle_samples)
-        common = set(plan_dec) & set(oracle_dec)
-        if not common:
-            return None
-        keys = list(common)
-        if max_pairs is not None and len(keys) > max_pairs:
-            keys = random.sample(keys, max_pairs)
-        return sum(1 for k in keys if plan_dec[k] == oracle_dec[k]) / len(keys)
 
     def _oracle_generate(self, content: str | list) -> str:
         """Call oracle client; handle both str and (str, reasoning) return types.
@@ -428,27 +411,115 @@ class OracleQualityEvaluator:
         except Exception:
             return None
 
+    @staticmethod
+    def _dr_to_dict(dr) -> dict:
+        schema_cls = dr.schema if isinstance(dr.schema, type) else type(dr.schema)
+        return {k: getattr(dr, k, None) for k in schema_cls.model_fields}
+
+    def _oracle_judge_filter_join_op(
+        self, op_type: str, condition: str, samples: list, max_pairs: int | None = None,
+        op_name: str = "?",
+    ) -> float | None:
+        """Directly ask the oracle to judge each of the plan's own filter/join inputs against
+        `condition` (a single batched call — same technique as _score_map_op), then score
+        agreement between the oracle's decisions and the plan's own pass/fail decisions.
+
+        Used for per-operator quality regardless of use_oracle_ground_truth: it only needs the
+        plan's own execution samples, never a separately-run oracle-substituted pipeline.
+        """
+        # Dedupe by source_indices (samples may repeat the same record across batches) and
+        # capture the plan's own pass/fail decision (out is not None) per candidate.
+        candidates: dict[str, tuple] = {}  # key -> (input_record, plan_passed)
+        for item in samples:
+            if not (isinstance(item, tuple) and len(item) == 2):
+                continue
+            inp, out = item
+            if not hasattr(inp, "_source_indices"):
+                continue
+            candidates[str(inp._source_indices)] = (inp, out is not None)
+        if not candidates:
+            print(f"[QualityEvaluator] per-op quality skipped for {op_name}: no samples with source_indices")
+            return None
+
+        keys = list(candidates)
+        if max_pairs is not None and len(keys) > max_pairs:
+            keys = random.sample(keys, max_pairs)
+
+        unit = "pair of records satisfies the join condition" if op_type == "sem_join" else "record satisfies the filter condition"
+        content: list[dict] = [{
+            "type": "text",
+            "text": f"You are evaluating whether each {unit} below.\nCondition: {condition}",
+        }]
+        for i, key in enumerate(keys):
+            inp_d = self._dr_to_dict(candidates[key][0])
+            image_urls: list[str] = []
+            text_inp: dict = {}
+            for k, v in inp_d.items():
+                url = self._maybe_image_url(v)
+                if url is not None:
+                    text_inp[k] = "<image attached below>"
+                    image_urls.append(url)
+                else:
+                    text_inp[k] = v
+            content.append({
+                "type": "text",
+                "text": f"\nRecord {i}:\n  INPUT: {json.dumps(text_inp, default=str)}",
+            })
+            for url in image_urls:
+                content.append({"type": "image_url", "image_url": {"url": url}})
+
+        content.append({
+            "type": "text",
+            "text": (
+                f"\n\nFor each record, decide true if it satisfies the condition, false otherwise.\n"
+                f"Return ONLY valid JSON: {{\"decisions\": [true_or_false, ...]}} "
+                f"with {len(keys)} entries, in the same order as the records above."
+            ),
+        })
+
+        try:
+            response = self._oracle_generate(content)
+            m = re.search(r"\{.*\}", response, re.DOTALL)
+            if not m:
+                print(
+                    f"[QualityEvaluator] per-op quality failed for {op_name}: oracle response "
+                    f"had no JSON object (len={len(response)}): {response[:300]!r}"
+                )
+                return None
+            decisions = json.loads(m.group()).get("decisions", [])
+            if len(decisions) < len(keys):
+                print(
+                    f"[QualityEvaluator] per-op quality failed for {op_name}: expected "
+                    f"{len(keys)} decisions, got {len(decisions)}"
+                )
+                return None
+            return sum(
+                1 for key, dec in zip(keys, decisions) if bool(dec) == candidates[key][1]
+            ) / len(keys)
+        except Exception as e:
+            print(f"[QualityEvaluator] per-op quality failed for {op_name} ({op_type}): {e}")
+            return None
+
     def _score_map_op(self, info: dict) -> float | None:
         """Oracle judges whether plan's sem_map output fields are correct (batched call).
 
         Image-valued input fields are attached to the judge call as vision
         inputs so the oracle can actually verify vision-derived output fields.
         """
+        op_name = info.get("op_name", "?")
         samples = info["samples"]
         cols_names: list[str] = info["attributes"].get("cols", [])
         if not cols_names:
+            print(f"[QualityEvaluator] per-op quality skipped for {op_name}: no 'cols' in attributes")
             return None
 
         valid: list[tuple] = [
             (inp, out) for inp, out in samples
-            if out is not None and hasattr(inp, "source_indices")
+            if out is not None and hasattr(inp, "_source_indices")
         ]
         if not valid:
+            print(f"[QualityEvaluator] per-op quality skipped for {op_name}: no samples with a non-None output")
             return None
-
-        def _dr_to_dict(dr) -> dict:
-            schema_cls = dr.schema if isinstance(dr.schema, type) else type(dr.schema)
-            return {k: getattr(dr, k, None) for k in schema_cls.model_fields}
 
         n_fields = len(cols_names)
         # Build an OpenAI-style multimodal content list: per-record text, with any
@@ -461,8 +532,8 @@ class OracleQualityEvaluator:
             ),
         }]
         for i, (inp, out) in enumerate(valid):
-            inp_d = _dr_to_dict(inp)
-            out_d = _dr_to_dict(out)
+            inp_d = self._dr_to_dict(inp)
+            out_d = self._dr_to_dict(out)
             mapped = {
                 k: ("" if out_d.get(k) is None or (
                     isinstance(out_d.get(k), float) and __import__("math").isnan(out_d.get(k))
@@ -503,10 +574,15 @@ class OracleQualityEvaluator:
             response = self._oracle_generate(content)
             m = re.search(r"\{.*\}", response, re.DOTALL)
             if not m:
+                print(
+                    f"[QualityEvaluator] per-op quality failed for {op_name}: oracle response "
+                    f"had no JSON object (len={len(response)}): {response[:300]!r}"
+                )
                 return None
             data = json.loads(m.group())
             scores_2d: list[list] = data.get("scores", [])
             if not scores_2d:
+                print(f"[QualityEvaluator] per-op quality failed for {op_name}: 'scores' was empty/missing in {data!r}")
                 return None
             n_records = len(valid)
             # Average per field across records, then average across fields
@@ -519,7 +595,13 @@ class OracleQualityEvaluator:
                 ]
                 if field_vals:
                     field_avgs.append(sum(field_vals) / len(field_vals))
-            return sum(field_avgs) / len(field_avgs) if field_avgs else None
+            if not field_avgs:
+                print(
+                    f"[QualityEvaluator] per-op quality failed for {op_name}: got {len(scores_2d)} score "
+                    f"row(s) for {n_records} record(s) x {n_fields} field(s), none usable"
+                )
+                return None
+            return sum(field_avgs) / len(field_avgs)
         except Exception as e:
-            print(f"[QualityEvaluator] sem_map scoring failed: {e}")
+            print(f"[QualityEvaluator] per-op quality failed for {op_name} (sem_map/rag_map): {e}")
             return None

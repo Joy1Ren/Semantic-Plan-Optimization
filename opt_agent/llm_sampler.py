@@ -25,7 +25,7 @@ the precomputed per-row costs for the rows whose embeddings were actually used,
 each counted once, plus the description embeddings) and ``target`` (the single
 identifier-LLM call).
 
-Run standalone via ``python -m agent_cost_model.llm_sampler --help`` or wired
+Run standalone via ``python -m agent_cost_model.opt_agent.llm_sampler --help`` or wired
 into ``demo.py`` before ``agent.run(...)``.
 """
 
@@ -776,7 +776,7 @@ def _main() -> None:
                     help="ignore image embeddings when scoring, even if the dataset has images (avoids costly image embedding)")
     args = ap.parse_args()
 
-    from agent_cost_model.cost_model_agent import OpenRouterClient
+    from agent_cost_model.opt_agent.cost_model_agent import OpenRouterClient
 
     data_dir = args.data_dir or str(SEMBENCH_DATASET_DIR / args.use_case / f"sf_{args.scale_factor}")
     csv = args.csv or f"styles_details_Q{args.query_id}.csv"

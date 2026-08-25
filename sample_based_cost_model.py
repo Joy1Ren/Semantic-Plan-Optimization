@@ -4,7 +4,7 @@ from collections import defaultdict
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from agent_cost_model.cost_model_agent import PlanCostEstimate, ResultsStore
+    from agent_cost_model.opt_agent.cost_model_agent import PlanCostEstimate, ResultsStore
 
 # Mirrors palimpzest constants used in org_SampleBasedCostModel._compute_naive_plan_cost.
 # Loaded lazily so this module works even without palimpzest installed.
@@ -136,7 +136,7 @@ class SampleBasedCostModel:
         Uses MODEL_CARDS for LLM operators (same formulas as LLMFilter/LLMConvert
         .naive_cost_estimates in palimpzest). Uses fixed constants for non-LLM ops.
         """
-        from agent_cost_model.cost_model_agent import get_op_model, get_op_type
+        from agent_cost_model.opt_agent.cost_model_agent import get_op_model, get_op_type
         op_type = get_op_type(op)
         model = get_op_model(op)
 
@@ -182,7 +182,7 @@ class SampleBasedCostModel:
 
     def _lookup(self, op: Any) -> dict:
         """Level 1: sampled op_id stats. Level 2 (fallback): naive estimates."""
-        from agent_cost_model.cost_model_agent import get_op_id
+        from agent_cost_model.opt_agent.cost_model_agent import get_op_id
         op_id = get_op_id(op)
         if op_id in self.op_id_to_stats:
             return self.op_id_to_stats[op_id]
@@ -201,7 +201,7 @@ class SampleBasedCostModel:
 
         Initial cardinality comes from the first operator's cardinality attribute.
         """
-        from agent_cost_model.cost_model_agent import get_op_id, get_op_type, iter_operators, PlanCostEstimate
+        from agent_cost_model.opt_agent.cost_model_agent import get_op_id, get_op_type, iter_operators, PlanCostEstimate
 
         self.op_id_to_stats = self._compute_op_stats(self._results)
         cardinality = self._source_cardinality(plan)
@@ -249,7 +249,7 @@ class SampleBasedCostModel:
         Falls back to a `cardinality` attribute on the first operator (for
         demo/duck-typed plans), then to 100 if nothing else is available.
         """
-        from agent_cost_model.cost_model_agent import iter_operators
+        from agent_cost_model.opt_agent.cost_model_agent import iter_operators
         if hasattr(plan, "_df"):
             return float(len(plan._df))
         ops = iter_operators(plan)

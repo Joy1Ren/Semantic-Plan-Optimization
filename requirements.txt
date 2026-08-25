@@ -1,0 +1,11 @@
+# agent_cost_model dependencies (dedicated venv: agent_cost_model/.venv-agentcostmodel)
+palimpzest==1.5.3
+litellm>=1.0.0
+httpx>=0.24.0
+pandas>=2.0.0,<3.0.0
+numpy
+pydantic>=2.0.0
+pyyaml>=6.0
+matplotlib>=3.5.0
+python-Levenshtein>=0.21.0  # experiments/cuad/quality_evaluator.py reuses docetl's cuad.py evaluator, which needs this
+rank_bm25>=0.2.2  # physical_pipeline.py's rag_map/rag_filter bm25 similarity_method (mirrors docetl's topk method="fts")

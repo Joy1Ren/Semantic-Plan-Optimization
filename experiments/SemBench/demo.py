@@ -29,8 +29,8 @@ import json
 import pandas as pd
 import time
 
-from agent_cost_model.cost_model_agent import CostModelAgent, OpenRouterClient, ResultsStore
-from agent_cost_model.llm_sampler import LLM_Sampler
+from agent_cost_model.opt_agent.cost_model_agent import CostModelAgent, OpenRouterClient, ResultsStore
+from agent_cost_model.opt_agent.llm_sampler import LLM_Sampler
 from agent_cost_model.paths import RESULTS_DIR, SEMBENCH_DATASET_DIR, SEMBENCH_FILES_DIR
 
 

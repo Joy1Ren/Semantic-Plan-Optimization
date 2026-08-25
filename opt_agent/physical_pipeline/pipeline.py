@@ -1,554 +1,50 @@
-"""Physical pipeline: chain PZ physical operators directly with per-operator model selection."""
+"""PhysicalPipeline: chain PZ physical operators directly with per-operator model selection.
+
+This module defines the overall pipeline structure (the fluent builder API and the
+execution engine). The individual operators it dispatches to live in operators/.
+"""
 from __future__ import annotations
 
-import hashlib
-import inspect
-import json
 import time
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass, field
-from typing import Any, Callable, Optional
+from typing import TYPE_CHECKING, Any, Callable, Optional
 
 import pandas as pd
-
 from pydantic import BaseModel
 from pydantic.fields import FieldInfo
 
-from palimpzest.constants import NAIVE_EST_JOIN_SELECTIVITY, Model, PromptStrategy
-from palimpzest.core.elements.filters import Filter
-from palimpzest.core.elements.groupbysig import GroupBySig
-from palimpzest.core.elements.records import DataRecord, DataRecordCollection, DataRecordSet
-from palimpzest.core.lib.schemas import ImageFilepath, _create_pickleable_model, create_schema_from_df
-from palimpzest.core.models import ExecutionStats, OperatorCostEstimates, RecordOpStats
-from palimpzest.query.operators.aggregate import ApplyGroupByOp
-from palimpzest.query.operators.convert import LLMConvertBonded, NonLLMConvert
-from palimpzest.query.operators.filter import LLMFilter, NonLLMFilter
-from palimpzest.query.operators.join import JoinOp, NestedLoopsJoin
-from palimpzest.query.operators.limit import LimitScanOp
-from palimpzest.query.operators.physical import PhysicalOperator
-from palimpzest.query.operators.project import ProjectOp
+from palimpzest.constants import Model
+from palimpzest.core.elements.groupbysig import GroupBySig  # noqa: F401 -- re-exported for callers that reach through here
+from palimpzest.core.elements.records import DataRecord, DataRecordCollection
+from palimpzest.core.lib.schemas import create_schema_from_df
+from palimpzest.core.models import ExecutionStats
+
+from .base import (
+    DEFAULT_RAG_EMBEDDING_MODEL,
+    NUM_SAMPLES,
+    SUBSET_SEED,
+    SubsetExecutionContext,
+    _make_schema,
+    _str_to_pz_model,
+)
+from .operators import (
+    AddColSuffix,
+    ExactFilter,
+    GroupBy,
+    Join,
+    Limit,
+    Map,
+    Project,
+    RagFilter,
+    RagMap,
+    SemFilter,
+    SemJoin,
+    SemMap,
+)
+
+if TYPE_CHECKING:
+    from .base import Operator
 
-NUM_SAMPLES = 10
-SUBSET_SEED = 42
-
-
-def _str_to_pz_model(model_str: str) -> Model:
-    """Map an OpenRouter/PZ model string to pz.Model enum value.
-
-    Accepts exact matches or unambiguous prefix matches so callers can pass
-    short names like "openai/o4-mini" for "openai/o4-mini-2025-04-16".
-    """
-    for m in Model:
-        if m.value == model_str:
-            return m
-    # Prefix fallback: "openai/o4-mini" → "openai/o4-mini-2025-04-16"
-    matches = [m for m in Model if m.value.startswith(model_str)]
-    if len(matches) == 1:
-        return matches[0]
-    if len(matches) > 1:
-        raise ValueError(
-            f"Ambiguous oracle model {model_str!r}: matches "
-            f"{[m.value for m in matches]}. Use a more specific string."
-        )
-    raise ValueError(
-        f"Unknown oracle model: {model_str!r}. "
-        f"Available: {[m.value for m in Model]}"
-    )
-
-
-@dataclass
-class SubsetExecutionContext:
-    """Execution context returned by run_subset(), used by QualityEvaluator."""
-    sampled_records: list[dict]               # sampled left-side input rows as plain dicts
-    output_records: list[dict]                # final pipeline output rows as plain dicts
-    per_sem_op_info: dict[int, dict]          # stage_idx → {op_name, op_type, attributes, samples} (all ops, not just semantic)
-    has_join: bool
-    right_sampled_records: list[dict] | None  # right-side sampled rows if join, else None
-
-
-def _resolve_reasoning_effort(model: Model) -> str | None:
-    """Mirror PZ optimizer logic: disable thinking tokens for reasoning models by default."""
-    if model is None or not model.is_reasoning_model():
-        return None
-    if model.is_vertex_model() or model.is_google_model():
-        if model in (getattr(Model, 'GEMINI_2_5_PRO', None), getattr(Model, 'GOOGLE_GEMINI_2_5_PRO', None)):
-            return "low"
-        return "disable"
-    if model.is_openai_model():
-        if model == getattr(Model, 'o4_MINI', None):
-            return "low"
-        return "minimal"
-    return None
-
-
-def _compute_op_id(op_type: str, params: dict) -> str:
-    """Stable 10-char hex id derived from op_type and id params."""
-    payload = json.dumps({"op_type": op_type, **{k: str(v) for k, v in params.items()}}, sort_keys=True)
-    return hashlib.sha256(payload.encode()).hexdigest()[:10]
-
-
-def _make_schema(field_defs: dict):
-    # Use palimpzest's pickleable/cached schema so all schemas live in the same
-    # registry and work correctly with union_schemas, from_parent, etc.
-    safe_defs = {
-        k: (ann, fi if isinstance(fi, FieldInfo) else FieldInfo(default=None))
-        for k, (ann, fi) in field_defs.items()
-    }
-    return _create_pickleable_model(safe_defs)
-
-
-# ------------------------------------------------------------------
-# Non-LLM column-suffix physical operator: append a fixed suffix to every column name
-# (a deterministic rename). Useful before a join to disambiguate columns — e.g.
-# left.add_col_suffix("_dish"); right.add_col_suffix("_table") — so the join's inputs
-# have no colliding names.
-# ------------------------------------------------------------------
-
-class NonLLMColSuffix(PhysicalOperator):
-    """Rename every field `name -> f"{name}{suffix}"`. 1:1, deterministic, zero cost."""
-
-    def __init__(self, suffix: str, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.suffix = suffix
-
-    def get_id_params(self):
-        return {"suffix": self.suffix, **super().get_id_params()}
-
-    def get_op_params(self):
-        return {"suffix": self.suffix, **super().get_op_params()}
-
-    def naive_cost_estimates(self, source_op_cost_estimates: OperatorCostEstimates) -> OperatorCostEstimates:
-        return OperatorCostEstimates(
-            cardinality=source_op_cost_estimates.cardinality,
-            time_per_record=0.0, cost_per_record=0.0, quality=1.0,
-        )
-
-    def __call__(self, candidate: DataRecord) -> DataRecordSet:
-        start_time = time.time()
-        field_vals = {}
-        for field_name in [f.split(".")[-1] for f in candidate.get_field_names()]:
-            field_vals[f"{field_name}{self.suffix}"] = candidate[field_name]
-        new_dr = DataRecord(
-            self.output_schema(**field_vals),
-            source_indices=candidate._source_indices,
-            parent_ids=[candidate._id],
-        )
-        record_op_stats = RecordOpStats(
-            record_id=new_dr._id,
-            record_parent_ids=new_dr._parent_ids,
-            record_source_indices=new_dr._source_indices,
-            record_state=new_dr.to_dict(include_bytes=False),
-            full_op_id=self.get_full_op_id(),
-            logical_op_id=self.logical_op_id,
-            op_name=self.op_name(),
-            time_per_record=time.time() - start_time,
-            cost_per_record=0.0,
-            fn_call_duration_secs=time.time() - start_time,
-            op_details={k: str(v) for k, v in self.get_id_params().items()},
-        )
-        return DataRecordSet([new_dr], [record_op_stats])
-
-
-# ------------------------------------------------------------------
-# Non-LLM join physical operator (PZ has no non-LLM join; this mirrors PZ's
-# NestedLoopsJoin structure but decides each pair with a Python predicate — the
-# join analogue of PZ's NonLLMFilter / NonLLMConvert).
-# ------------------------------------------------------------------
-
-class NonLLMJoin(JoinOp):
-    """Non-LLM nested-loops join.
-
-    Same execution structure as PZ's ``NestedLoopsJoin`` — nested loops over
-    new/stored left×right with input accumulation across calls (so the total pairs
-    across calls stay |L|×|R|), and a ``DataRecordSet`` (or ``None`` when empty) as
-    output — but each candidate pair is accepted/rejected by a deterministic predicate
-    ``join_fn(left_dict, right_dict) -> bool`` instead of an LLM call. The predicate is
-    fast and I/O-free, so pairs are evaluated sequentially (no ``ThreadPoolExecutor``).
-    """
-
-    def __init__(self, join_fn: Callable[[dict, dict], bool], *args, **kwargs):
-        # JoinOp.__init__ consumes condition/desc and forwards output_schema/input_schema/
-        # depends_on to PhysicalOperator. No model or Generator is created.
-        super().__init__(*args, **kwargs)
-        self.join_fn = join_fn
-        self.join_idx = 0
-        self._left_input_records: list[DataRecord] = []
-        self._right_input_records: list[DataRecord] = []
-        try:
-            self._fn_src = inspect.getsource(join_fn).strip()
-        except (OSError, TypeError):
-            self._fn_src = repr(join_fn)
-
-    def is_image_join(self) -> bool:
-        return False
-
-    def get_id_params(self):
-        id_params = super().get_id_params()
-        return {"join_fn": self._fn_src, **id_params}
-
-    def naive_cost_estimates(
-        self,
-        left_source_op_cost_estimates: OperatorCostEstimates,
-        right_source_op_cost_estimates: OperatorCostEstimates,
-    ) -> OperatorCostEstimates:
-        # deterministic predicate: ~1 ms/pair, no LLM cost, perfect quality
-        cardinality = NAIVE_EST_JOIN_SELECTIVITY * (
-            left_source_op_cost_estimates.cardinality * right_source_op_cost_estimates.cardinality
-        )
-        return OperatorCostEstimates(
-            cardinality=cardinality, time_per_record=0.001, cost_per_record=0.0, quality=1.0,
-        )
-
-    def _process_join_candidate_pair(
-        self, left_candidate: DataRecord, right_candidate: DataRecord,
-    ) -> tuple[list[DataRecord], list[RecordOpStats]]:
-        start_time = time.time()
-        try:
-            passed_operator = bool(self.join_fn(left_candidate.to_dict(), right_candidate.to_dict()))
-        except Exception as e:
-            print(f"Error invoking user-defined function for join: {e}")
-            raise
-        join_dr = DataRecord.from_join_parents(self.output_schema, left_candidate, right_candidate)
-        join_dr._passed_operator = passed_operator
-        elapsed = time.time() - start_time
-        record_op_stats = RecordOpStats(
-            record_id=join_dr._id,
-            record_parent_ids=join_dr._parent_ids,
-            record_source_indices=join_dr._source_indices,
-            record_state=join_dr.to_dict(include_bytes=False),
-            full_op_id=self.get_full_op_id(),
-            logical_op_id=self.logical_op_id,
-            op_name=self.op_name(),
-            time_per_record=elapsed,
-            cost_per_record=0.0,
-            model_name=None,
-            join_condition=self.condition,
-            fn_call_duration_secs=elapsed,
-            answer={"passed_operator": passed_operator},
-            passed_operator=passed_operator,
-            op_details={k: str(v) for k, v in self.get_id_params().items()},
-        )
-        return [join_dr], [record_op_stats]
-
-    def __call__(
-        self, left_candidates: list[DataRecord], right_candidates: list[DataRecord],
-    ) -> tuple[DataRecordSet | None, int]:
-        # Mirror NestedLoopsJoin.__call__: join new×new, new×stored, stored×new, then
-        # accumulate this call's inputs for future calls.
-        output_records, output_record_op_stats, num_inputs_processed = [], [], 0
-
-        def _join_all(lefts, rights):
-            nonlocal num_inputs_processed
-            for left_candidate in lefts:
-                for right_candidate in rights:
-                    recs, stats = self._process_join_candidate_pair(left_candidate, right_candidate)
-                    output_records.extend(recs)
-                    output_record_op_stats.extend(stats)
-                    num_inputs_processed += 1
-
-        _join_all(left_candidates, right_candidates)            # new left × new right
-        _join_all(left_candidates, self._right_input_records)   # new left × stored right
-        _join_all(self._left_input_records, right_candidates)   # stored left × new right
-
-        # store input records to join with new records added later
-        self._left_input_records.extend(left_candidates)
-        self._right_input_records.extend(right_candidates)
-
-        # return None if no output records were produced (matches NestedLoopsJoin)
-        if len(output_records) == 0:
-            return None, num_inputs_processed
-        return DataRecordSet(output_records, output_record_op_stats), num_inputs_processed
-
-
-# ------------------------------------------------------------------
-# Operator base class and subclasses
-# ------------------------------------------------------------------
-
-class Operator:
-    """Base class for PhysicalPipeline operators.
-
-    Each subclass sets class-level `stage_type` (execution dispatch key) and
-    `op_type` (human-readable name used in stats), and populates instance
-    attributes `attributes`, `params_id`, and `_pz_op` in its __init__.
-    """
-
-    stage_type: str  # filter | convert | project | limit | groupby | join
-    op_type: str     # sem_filter | sem_map | sem_join | filter | project | limit | groupby
-    attributes: dict
-    params_id: str #10-char hex from op_type and attributes
-
-    def __init__(self):
-        self.logical_op_id: str | None = None
-
-    def __call__(self, *args, **kwargs):
-        return self._pz_op(*args, **kwargs)
-
-    def __str__(self) -> str:
-        if not self.attributes:
-            return self.op_type
-        attr_str = "\n".join(f"{k}={v!r}" for k, v in self.attributes.items())
-        return f"{self.op_type}({attr_str})"
-
-
-class SemFilter(Operator):
-    """LLM-based row filter."""
-    stage_type = "filter"
-    op_type = "sem_filter"
-
-    def __init__(self, condition: str, model: Model, schema, depends_on: list[str] | None = None, reasoning_effort_override: str | None = None):
-        super().__init__()
-        self.model = model
-        eff = reasoning_effort_override if reasoning_effort_override is not None else _resolve_reasoning_effort(model)
-        self._pz_op = LLMFilter(
-            model=model,
-            filter=Filter(filter_condition=condition),
-            output_schema=schema,
-            input_schema=schema,
-            depends_on=depends_on,
-            reasoning_effort=eff,
-        )
-        self._pz_op.model = model
-        self.depends_on = depends_on
-        self.attributes = {"condition": condition, "model": model.value, "depends_on": depends_on}
-        self.params_id = _compute_op_id(self.op_type, {"model": model.value})
-        # self.params_id = _compute_op_id(self.op_type, self.attributes)
-
-
-def _has_image_field(schema, field_names: list[str] | None) -> bool:
-    """Return True if any of the given fields (or all fields if None) in schema have ImageFilepath type."""
-    fields_to_check = field_names if field_names is not None else list(schema.model_fields)
-    for name in fields_to_check:
-        fi = schema.model_fields.get(name)
-        if fi is not None and fi.annotation in (ImageFilepath, ImageFilepath | None):
-            return True
-    return False
-
-
-class SemMap(Operator):
-    """LLM-based column derivation."""
-    stage_type = "convert"
-    op_type = "sem_map"
-
-    def __init__(self, cols: list[dict], model: Model, input_schema, output_schema, depends_on: list[str] | None = None, reasoning_effort_override: str | None = None):
-        super().__init__()
-        self.model = model
-        eff = reasoning_effort_override if reasoning_effort_override is not None else _resolve_reasoning_effort(model)
-        is_image = _has_image_field(input_schema, depends_on)
-        if is_image:
-            prompt_strategy = PromptStrategy.COT_QA_IMAGE_NO_REASONING if (model.is_reasoning_model() and eff in (None, "minimal", "low", "disable")) else PromptStrategy.COT_QA_IMAGE
-        else:
-            prompt_strategy = PromptStrategy.COT_QA_NO_REASONING if (model.is_reasoning_model() and eff in (None, "minimal", "low", "disable")) else PromptStrategy.COT_QA
-        self._pz_op = LLMConvertBonded(
-            model=model,
-            prompt_strategy=prompt_strategy,
-            output_schema=output_schema,
-            input_schema=input_schema,
-            depends_on=depends_on,
-            reasoning_effort=eff,
-        )
-        self._pz_op.model = model
-        self.depends_on = depends_on
-        self._cols_full = cols  # preserved for make_oracle_copy
-        self.attributes = {"model": model.value, "cols": sorted(col["name"] for col in cols), "depends_on": depends_on}
-        self.params_id = _compute_op_id(self.op_type, self.attributes)
-
-
-class SemJoin(Operator):
-    """LLM-based nested-loops join."""
-    stage_type = "join"
-    op_type = "sem_join"
-
-    def __init__(
-        self,
-        other: "PhysicalPipeline | None",
-        condition: str,
-        model: Model,
-        join_parallelism: int,
-        depends_on: list[str] | None,
-        schema,
-        reasoning_effort_override: str | None = None,
-        self_join: bool = False,
-    ):
-        super().__init__()
-        self.model = model
-        eff = reasoning_effort_override if reasoning_effort_override is not None else _resolve_reasoning_effort(model)
-        self._pz_op = NestedLoopsJoin(
-            model=model,
-            condition=condition,
-            output_schema=schema,
-            input_schema=schema,
-            join_parallelism=join_parallelism,
-            depends_on=depends_on,
-            reasoning_effort=eff,
-        )
-        self._pz_op.model = model
-        self.depends_on = depends_on
-        # For a self-join `other` is None: the left upstream is run ONCE and its output is
-        # joined with itself (see PhysicalPipeline.sem_join / _execute_core). This is a
-        # common-subexpression optimization *beyond* PZ — PZ's Cascades groups dedupe only
-        # in the optimizer memo, and its extracted physical plan runs the upstream twice.
-        self.other = other
-        self.self_join = self_join
-        self.attributes = {"condition": condition, "model": model.value, "join_parallelism": join_parallelism, "depends_on": depends_on}
-        self.params_id = _compute_op_id(self.op_type, {"model": model.value})
-        # self.params_id = _compute_op_id(self.op_type, self.attributes)
-
-
-class ExactFilter(Operator):
-    """Exact (non-LLM) row filter."""
-    stage_type = "filter"
-    op_type = "filter"
-
-    def __init__(self, fn: Callable, schema):
-        super().__init__()
-        self._pz_op = NonLLMFilter(
-            filter=Filter(filter_fn=fn),
-            output_schema=schema,
-            input_schema=schema,
-        )
-        self._fn = fn  # preserved for make_oracle_copy
-        try:
-            fn_src = inspect.getsource(fn).strip()
-        except (OSError, TypeError):
-            fn_src = repr(fn)
-        self.attributes = {"condition": fn_src}
-        self.params_id = _compute_op_id(self.op_type, self.attributes)
-
-
-class Map(Operator):
-    """Deterministic (non-LLM) column derivation via UDF."""
-    stage_type = "convert"
-    op_type = "map"
-
-    def __init__(self, udf: Callable, cols: list[dict], input_schema, output_schema):
-        super().__init__()
-        self._pz_op = NonLLMConvert(
-            udf=udf,
-            output_schema=output_schema,
-            input_schema=input_schema,
-        )
-        self._udf = udf          # preserved for make_oracle_copy
-        self._cols_full = cols   # preserved for make_oracle_copy
-        try:
-            fn_src = inspect.getsource(udf).strip()
-        except (OSError, TypeError):
-            fn_src = repr(udf)
-        col_names = sorted(col["name"] for col in cols)
-        self.attributes = {"cols": col_names, "udf": fn_src}
-        self.params_id = _compute_op_id(self.op_type, {"cols": col_names, "udf": fn_src})
-
-
-class Join(Operator):
-    """Exact (non-LLM) nested-loops join via a Python predicate."""
-    stage_type = "join"
-    op_type = "join"
-
-    def __init__(self, other: "PhysicalPipeline | None", condition_fn: Callable[[dict, dict], bool], schema, depends_on: list[str] | None = None, self_join: bool = False):
-        super().__init__()
-        try:
-            fn_src = inspect.getsource(condition_fn).strip()
-        except (OSError, TypeError):
-            fn_src = repr(condition_fn)
-        self._pz_op = NonLLMJoin(
-            join_fn=condition_fn,
-            condition=fn_src,
-            output_schema=schema,
-            input_schema=schema,
-            depends_on=depends_on,
-        )
-        self._fn = condition_fn  # preserved for make_oracle_copy
-        # For a self-join `other` is None (left run once, joined with itself). See SemJoin.
-        self.other = other
-        self.self_join = self_join
-        self.depends_on = depends_on
-        self.attributes = {"condition": fn_src, "depends_on": depends_on}
-        self.params_id = _compute_op_id(self.op_type, {"condition": fn_src})
-
-
-class AddColSuffix(Operator):
-    """Append a fixed suffix to every column name (non-LLM rename)."""
-    stage_type = "convert"   # per-record transform; dispatched like map/convert
-    op_type = "add_col_suffix"
-
-    def __init__(self, suffix: str, input_schema, output_schema):
-        super().__init__()
-        self._pz_op = NonLLMColSuffix(
-            suffix=suffix,
-            output_schema=output_schema,
-            input_schema=input_schema,
-        )
-        self.suffix = suffix   # preserved for make_oracle_copy
-        self.attributes = {"suffix": suffix}
-        self.params_id = _compute_op_id(self.op_type, {"suffix": suffix})
-
-
-class Project(Operator):
-    """Column projection."""
-    stage_type = "project"
-    op_type = "project"
-
-    def __init__(self, cols: list[str], input_schema, output_schema):
-        super().__init__()
-        self._pz_op = ProjectOp(
-            project_cols=cols,
-            output_schema=output_schema,
-            input_schema=input_schema,
-        )
-        self.attributes = {"project_cols": sorted(cols)}
-        self.params_id = _compute_op_id(self.op_type, self.attributes)
-
-
-class Limit(Operator):
-    """Row limit."""
-    stage_type = "limit"
-    op_type = "limit"
-
-    def __init__(self, n: int, schema):
-        super().__init__()
-        self._pz_op = LimitScanOp(
-            limit=n,
-            output_schema=schema,
-            input_schema=schema,
-        )
-        self.n = n
-        self.attributes = {"limit": n}
-        self.params_id = _compute_op_id(self.op_type, self.attributes)
-
-
-class GroupBy(Operator):
-    """Group-by aggregation (barrier operator)."""
-    stage_type = "groupby"
-    op_type = "groupby"
-
-    def __init__(
-        self,
-        group_by_fields: list[str],
-        agg_funcs: list[str],
-        agg_fields: list[str],
-        input_schema,
-    ):
-        super().__init__()
-        sig = GroupBySig(
-            group_by_fields=group_by_fields,
-            agg_funcs=agg_funcs,
-            agg_fields=agg_fields,
-        )
-        self.output_schema = sig.output_schema()
-        self._pz_op = ApplyGroupByOp(
-            group_by_sig=sig,
-            output_schema=self.output_schema,
-            input_schema=input_schema,
-        )
-        self.attributes = {
-            "group_by_fields": sorted(group_by_fields),
-            "agg_pairs": sorted(zip(agg_funcs, agg_fields)),
-        }
-        self.params_id = _compute_op_id(self.op_type, self.attributes)
-
-
-# ------------------------------------------------------------------
-# Pipeline
-# ------------------------------------------------------------------
 
 class PhysicalPipeline:
     """
@@ -577,7 +73,7 @@ class PhysicalPipeline:
             for name, field in self._initial_schema.model_fields.items()
         }
         self._schema = self._initial_schema
-        self._ops: list[Operator] = []
+        self._ops: list["Operator"] = []
         self._last_exec_stats = None      # populated by run(); used by to_results_row()
 
     def _flat_ops(self) -> list[tuple[str, "Operator"]]:
@@ -692,6 +188,94 @@ class PhysicalPipeline:
         ))
         self._defs = merged_defs
         self._schema = joined_schema
+        return self
+
+    def rag_filter(
+        self,
+        condition: str,
+        embedding_query: str,
+        model: Model,
+        chunk_size: "int | str" = 20000,
+        num_chunks_per_field: int | None = None,
+        similarity_threshold: float | None = None,
+        embedding_model: str = DEFAULT_RAG_EMBEDDING_MODEL,
+        similarity_method: str = "embedding",
+        depends_on: list[str] | None = None,
+        reasoning_effort_override: str | None = None,
+    ) -> "PhysicalPipeline":
+        """
+        Chunk long fields, retrieve their most relevant chunks, then LLM-filter over just
+        those chunks. Keeps records where condition is true.
+
+        embedding_query is the retrieval query text (used for either similarity_method) and
+        can (should) be phrased differently from condition: condition instructs the LLM, while
+        embedding_query should just be the terms/phrases expected to score highest against the
+        relevant passage -- keyword-dense for similarity_method="bm25", or phrased to sit close
+        to the relevant passage in embedding space for similarity_method="embedding".
+
+        similarity_method: "embedding" (cosine similarity, default) or "bm25" (keyword/full-text
+        search via rank_bm25 -- no embedding calls, so cheaper, and often stronger when the
+        target content hinges on specific terminology rather than paraphrase-level meaning).
+
+        chunk_size: a fixed int (characters), or a string expression evaluated per field against
+        that field's own length via the name `input_length`, e.g. "max(10000, input_length / 5)"
+        (only arithmetic + max/min/abs/round are allowed -- see operators/rag_common.py).
+
+        Specify exactly one of num_chunks_per_field (keep the top-k most similar chunks) or
+        similarity_threshold (keep every chunk with similarity >= threshold, always keeping at
+        least the single best-scoring chunk). Retrieved chunks are labeled with their rank and
+        similarity score when passed to the LLM (see operators/rag_common.py's _format_ranked_chunks).
+        """
+        self._ops.append(RagFilter(
+            condition=condition, embedding_query=embedding_query, model=model, schema=self._schema,
+            chunk_size=chunk_size, num_chunks_per_field=num_chunks_per_field,
+            similarity_threshold=similarity_threshold, embedding_model=embedding_model,
+            similarity_method=similarity_method,
+            depends_on=depends_on, reasoning_effort_override=reasoning_effort_override,
+        ))
+        return self
+
+    def rag_map(
+        self,
+        cols: list[dict],
+        embedding_query: str,
+        model: Model,
+        chunk_size: "int | str" = 20000,
+        num_chunks_per_field: int | None = None,
+        similarity_threshold: float | None = None,
+        embedding_model: str = DEFAULT_RAG_EMBEDDING_MODEL,
+        similarity_method: str = "embedding",
+        depends_on: list[str] | None = None,
+        reasoning_effort_override: str | None = None,
+    ) -> "PhysicalPipeline":
+        """
+        Chunk long fields, retrieve their most relevant chunks, then LLM-derive new columns
+        (cols, same shape as sem_map) from just those chunks.
+
+        See rag_filter for embedding_query, similarity_method ("embedding" or "bm25"),
+        chunk_size (fixed int or an "input_length"-based expression), and the
+        num_chunks_per_field / similarity_threshold chunk-selection parameters (exactly one
+        must be given).
+        """
+        new_defs = {}
+        for col in cols:
+            name = col["name"]
+            if name in self._defs:
+                # Preserve the existing annotation to avoid union_schemas type mismatch
+                ann = self._defs[name][0]
+            else:
+                ann = Optional[col.get("type", Any)]
+            new_defs[name] = (ann, FieldInfo(default=None, description=col["description"]))
+        output_schema = _make_schema({**self._defs, **new_defs})
+        self._ops.append(RagMap(
+            cols=cols, embedding_query=embedding_query, model=model, input_schema=self._schema,
+            output_schema=output_schema, chunk_size=chunk_size, num_chunks_per_field=num_chunks_per_field,
+            similarity_threshold=similarity_threshold, embedding_model=embedding_model,
+            similarity_method=similarity_method,
+            depends_on=depends_on, reasoning_effort_override=reasoning_effort_override,
+        ))
+        self._defs = {**self._defs, **new_defs}
+        self._schema = output_schema
         return self
 
     # ------------------------------------------------------------------
@@ -834,9 +418,7 @@ class PhysicalPipeline:
         records: list[DataRecord] = []
         for i in range(len(df)):
             row = df.iloc[i].to_dict()
-            dr = DataRecord(data_item=self._initial_schema(), source_indices=f"{self._source}-{i}")
-            for k, v in row.items():
-                setattr(dr, k, v)
+            dr = DataRecord(data_item=self._initial_schema(**row), source_indices=f"{self._source}-{i}")
             records.append(dr)
         return records
 
@@ -1367,7 +949,7 @@ class PhysicalPipeline:
         num_samples: int = NUM_SAMPLES,
         seed: int = SUBSET_SEED,
         subset_cache_path: str | None = None,
-    ) -> tuple[list[dict], SubsetExecutionContext, dict]:
+    ) -> tuple[list[dict], "SubsetExecutionContext", dict]:
         """Execute on a random sample of num_samples records.
 
         If subset_cache_path is given and the file already exists, the cached
@@ -1573,6 +1155,34 @@ class PhysicalPipeline:
                     oracle.sem_map(
                         cols=cols,
                         model=oracle_model,
+                        depends_on=getattr(op, "depends_on", None),
+                        reasoning_effort_override=oracle_reasoning_effort,
+                    )
+            elif isinstance(op, RagFilter):
+                oracle.rag_filter(
+                    condition=op.attributes["condition"],
+                    embedding_query=op.attributes["embedding_query"],
+                    model=oracle_model,
+                    chunk_size=op.attributes.get("chunk_size", 20000),
+                    num_chunks_per_field=op.attributes.get("num_chunks_per_field"),
+                    similarity_threshold=op.attributes.get("similarity_threshold"),
+                    embedding_model=op.attributes.get("embedding_model", DEFAULT_RAG_EMBEDDING_MODEL),
+                    similarity_method=op.attributes.get("similarity_method", "embedding"),
+                    depends_on=getattr(op, "depends_on", None),
+                    reasoning_effort_override=oracle_reasoning_effort,
+                )
+            elif isinstance(op, RagMap):
+                cols = getattr(op, "_cols_full", None)
+                if cols:
+                    oracle.rag_map(
+                        cols=cols,
+                        embedding_query=op.attributes["embedding_query"],
+                        model=oracle_model,
+                        chunk_size=op.attributes.get("chunk_size", 20000),
+                        num_chunks_per_field=op.attributes.get("num_chunks_per_field"),
+                        similarity_threshold=op.attributes.get("similarity_threshold"),
+                        embedding_model=op.attributes.get("embedding_model", DEFAULT_RAG_EMBEDDING_MODEL),
+                        similarity_method=op.attributes.get("similarity_method", "embedding"),
                         depends_on=getattr(op, "depends_on", None),
                         reasoning_effort_override=oracle_reasoning_effort,
                     )

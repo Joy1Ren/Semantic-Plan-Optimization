@@ -57,11 +57,11 @@ except ImportError as _e:
     sys.exit(f"palimpzest not installed: {_e}")
 
 try:
-    from agent_cost_model.physical_pipeline import PhysicalPipeline  # noqa: E402
+    from agent_cost_model.opt_agent.physical_pipeline import PhysicalPipeline  # noqa: E402
 except ImportError as exc:
     sys.exit(f"Could not import agent_cost_model: {exc}")
 
-from agent_cost_model.cost_model_agent import (  # noqa: E402
+from agent_cost_model.opt_agent.cost_model_agent import (  # noqa: E402
     ResultsStore,
     iter_operators,
     get_op_type,

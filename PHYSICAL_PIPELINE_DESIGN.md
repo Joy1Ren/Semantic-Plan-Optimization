@@ -44,6 +44,8 @@ Each `Operator` subclass sets two class fields and builds a PZ operator in `__in
 | `SemFilter` | `filter` | `LLMFilter` | yes |
 | `SemMap` | `convert` | `LLMConvertBonded` | yes |
 | `SemJoin` | `join` | `NestedLoopsJoin` | yes |
+| `RagFilter` | `filter` | `RAGFilter` §§ | yes |
+| `RagMap` | `convert` | `RAGConvert` §§ | yes |
 | `ExactFilter` | `filter` | `NonLLMFilter` | no |
 | `Map` | `convert` | `NonLLMConvert` | no |
 | `AddColSuffix` | `convert` | `NonLLMColSuffix` ‡ | no |
@@ -63,6 +65,94 @@ renames every column `name -> f"{name}{suffix}"` — a deterministic 1:1 rename.
 (suffix)` is handy *before a join* to disambiguate columns so the two sides have no colliding names,
 e.g. `left.add_col_suffix("_dish"); right.add_col_suffix("_table")` — the join then keeps both sets of
 names as-is (no `_right` auto-suffix needed).
+
+§§ `RAGFilter` / `RAGConvert` (also defined in `physical_pipeline.py`) subclass PZ's own
+`palimpzest.query.operators.rag.RAGFilter` / `RAGConvert` (imported aliased as `_PZRAGFilter` /
+`_PZRAGConvert`) — see §2.1 below.
+
+### 2.1 `rag_filter` / `rag_map` — chunk + retrieve before the LLM call
+
+`RagFilter`/`RagMap` wrap chunking-and-retrieval versions of `sem_filter`/`sem_map`: instead of sending
+a field's **full** text to the LLM, they split it into chunks (`chunk_text`, inherited unchanged from
+PZ — `chunk_size` characters, no overlap; `chunk_size` may also be a per-field expression instead of a
+fixed int — see Chunk size below), score each chunk for relevance, keep only the most-relevant chunks,
+and run the normal filter/map LLM call over just those, each retrieved chunk labeled with its rank and
+similarity score. This is cheaper (and can be more accurate) than `sem_filter`/`sem_map` when a field
+is long but only a small part of it is actually relevant — e.g. a long product description where only
+one sentence mentions the attribute being filtered/extracted.
+
+**`embedding_query` is a separate parameter from the LLM instruction — this is the whole point.**
+`rag_filter(condition, embedding_query, …)` and `rag_map(cols, embedding_query, …)` both take an
+`embedding_query` string that is *only* used to score/retrieve chunks (embedded for cosine similarity,
+or tokenized as the bm25 query — see Similarity method below); it is never sent to the LLM. PZ's own
+`RAGFilter`/`RAGConvert` embed the filter `condition` (or the output fields' `description`s) directly
+as the retrieval query — but that text is phrased as an **instruction to an LLM** ("the review
+complains about a broken zipper"), which does not sit close to the relevant passage in embedding space
+(or share its exact keywords, for bm25) nearly as well as text phrased like the passage itself would be
+("broken zipper, zipper stuck, zipper fell off"). So here the two are decoupled:
+
+- `condition` / `cols[i]["description"]` — unchanged meaning, sent to the LLM for the actual
+  filter/derive step, phrased as an instruction.
+- `embedding_query` — sent only to the retrieval step (embedding model or bm25 tokenizer), phrased as
+  keyword-dense terms/phrases you'd expect to find written *in* the relevant chunk itself, with no
+  instruction framing.
+
+```python
+pipeline.rag_filter(
+    condition="the review complains about a broken zipper",     # -> LLM
+    embedding_query="broken zipper, zipper stuck, zipper fell off",  # -> retrieval only, not the LLM
+    model=pz.Model.CLAUDE_3_5_HAIKU,
+    num_chunks_per_field=2,
+)
+```
+
+**Chunk selection — exactly one of two modes:**
+- `num_chunks_per_field: int` — keep the top-k chunks by similarity to `embedding_query` (PZ's original
+  behavior).
+- `similarity_threshold: float` — keep every chunk with similarity `>= threshold`; if none pass, keep
+  the single best-scoring chunk anyway (a field is never dropped to nothing).
+
+Both modes require the caller to specify exactly one — `RAGFilter`/`RAGConvert.__init__` raise a
+`ValueError` if neither or both are given. Selection is done by `_rag_select_chunk_indices`; kept
+chunks are then formatted by `_format_ranked_chunks`, **not** a plain `"..."`-join: each chunk is
+labeled with its similarity rank and score (e.g. `[Chunk rank 1/3, cosine similarity 0.8421]` /
+`[Chunk rank 1/3, bm25 score 6.2103]`) and presented in rank order (most relevant first) — mirroring
+docetl's own topk-retrieval reduce-step chunk annotations, so the LLM sees which chunks were judged
+most relevant and by how much, instead of an unlabeled blob in document order.
+
+**Similarity method — `similarity_method: "embedding" | "bm25"` (default `"embedding"`).**
+- `"embedding"` — cosine similarity between `embedding_query`'s embedding and each chunk's embedding
+  (see Embedding model below). Better for paraphrase/meaning-level matches.
+- `"bm25"` — keyword/full-text search via `rank_bm25.BM25Okapi` (`_rag_bm25_scores`), scoring each
+  chunk as its own "document" against the tokenized `embedding_query`. No embedding calls at all, so
+  cheaper, and often stronger when the target content hinges on specific terminology/phrasing rather
+  than semantic meaning (e.g. legal or technical boilerplate). Tokenization (`_rag_bm25_tokenize`)
+  matches docetl's own `topk(method="fts")`: lowercase, strip non-alphanumeric, split on whitespace —
+  no stemming, so exact word forms matter ("governed" won't match a query for "governing").
+
+**Chunk size — fixed int or a per-field expression.** `chunk_size` (characters) may be a plain `int`
+(unchanged), or a string expression evaluated separately per field against that field's own character
+length via the name `input_length`, e.g. `"max(10000, input_length / 5)"` — letting chunk size scale
+with document length instead of one fixed size for every field/document. `_resolve_chunk_size` /
+`_eval_chunk_size_node` evaluate this with a small whitelisted-AST interpreter (arithmetic operators,
+`max`/`min`/`abs`/`round`, and the name `input_length` only) rather than `eval()` — this runs during
+plan **execution**, in `physical_pipeline.py` itself, outside the sandboxed `LocalPythonExecutor` plan
+code normally runs in, so a permissive `eval()` on an LLM-authored string here would be a real
+arbitrary-code-execution hole.
+
+**Embedding model** (`similarity_method="embedding"` only — `"bm25"` skips this path entirely, no
+embedding calls). Chunks and `embedding_query` are embedded with an OpenRouter-hosted model, default
+`"qwen/qwen3-embedding-8b"` (`DEFAULT_RAG_EMBEDDING_MODEL`), via a direct HTTP call to OpenRouter's
+`/embeddings` endpoint (`_rag_embed` — the same raw-HTTP approach `LLM_Sampler._embed_call` in
+[llm_sampler.py](llm_sampler.py) uses, reading `OPENROUTER_API_KEY`). This bypasses PZ's own embedding
+path entirely: the installed PZ `RAGFilter`/`RAGConvert` route embeddings through `litellm` keyed off a
+`palimpzest.constants.Model`, but `qwen/qwen3-embedding-8b` isn't in PZ's curated model registry, so
+constructing a `Model` for it raises. `RAGFilter.__init__`/`RAGConvert.__init__` therefore pass a
+placeholder `Model` (`_RAG_PLACEHOLDER_MODEL = Model.TEXT_EMBEDDING_3_SMALL`) to satisfy PZ's
+constructor signature — it is **never actually used to embed anything**, since `compute_embedding` is
+fully overridden to call `_rag_embed` instead. `get_id_params`/`get_op_params`/`__str__` are likewise
+overridden to skip PZ's own versions (which assume `self.embedding_model` is a `Model`) and go straight
+to `LLMFilter`/`LLMConvert`'s, reporting the real (string) `embedding_model` instead.
 
 **Model & reasoning effort.** For LLM ops the constructor resolves a default reasoning effort with
 `_resolve_reasoning_effort(model)` (mirrors PZ's optimizer: disable/minimize thinking tokens for
@@ -86,7 +176,7 @@ pipeline.limit(5)
 records, per_op_list, plan_dict = pipeline.run()
 ```
 
-Semantic (need a `model`): `sem_filter`, `sem_map`, `sem_join`.
+Semantic (need a `model`): `sem_filter`, `sem_map`, `sem_join`, `rag_filter`, `rag_map` (see §2.1).
 Non-semantic: `filter`, `map`, `add_col_suffix`, `join`, `project`, `limit`, `groupby`.
 
 Each call appends an `Operator` to `self._ops` and updates the schema. `sem_map`/`map` add columns;

@@ -29,7 +29,7 @@ matplotlib.use("Agg")  # file output only; no display needed
 import matplotlib.pyplot as plt
 
 # Reuse the production sampler's filter/keyword helpers (pure, no network calls).
-from agent_cost_model.llm_sampler import LLM_Sampler
+from agent_cost_model.opt_agent.llm_sampler import LLM_Sampler
 from agent_cost_model.paths import ANALYSIS_DIR, RESULTS_DIR, SEMBENCH_DATASET_DIR
 
 # ============================ EDIT PER QUERY ============================

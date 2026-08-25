@@ -15,12 +15,13 @@ from typing import Any
 import pandas as pd
 import yaml
 
-from agent_cost_model.cost_model_agent import CostModelAgent, OpenRouterClient, ResultsStore
-from agent_cost_model.llm_sampler import LLM_Sampler
+from agent_cost_model.opt_agent.cost_model_agent import CostModelAgent, OpenRouterClient, ResultsStore
+from agent_cost_model.opt_agent.llm_sampler import LLM_Sampler
 from agent_cost_model.paths import RESULTS_DIR, SEMBENCH_ROOT
 
 # Optimization policy: intentionally kept in code rather than benchmark YAML.
-MODEL = "openai/gpt-5.4"
+# MODEL = "openai/gpt-5.4"
+MODEL = "openai/gpt-5" # for matching docetl
 HELPER_MODEL = "openai/gpt-5.4"
 MAX_STEPS = 40
 FINAL_EVAL_RUNS = 2
@@ -76,7 +77,7 @@ def main() -> None:
     parser.add_argument("--use-case", required=True)
     parser.add_argument("--query-id", type=int, required=True)
     parser.add_argument("--scale-factor", type=int, required=True)
-    parser.add_argument("--runcount", type=int, default=None)
+    parser.add_argument("--runcount", type=int, default=1)
     parser.add_argument(
         "--opt-subsample",
         action="store_true",
@@ -95,6 +96,17 @@ def main() -> None:
     )
     parser.add_argument("--keyword", action="store_true")
     parser.add_argument("--no-image-emb", action="store_true")
+    parser.add_argument(
+        "--use-oracle-ground-truth",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "score plan quality against an oracle-substituted pipeline run (default). "
+            "Pass --no-use-oracle-ground-truth to score against the benchmark's real "
+            "ground truth instead (e.g. CUAD, which has real annotations and doesn't "
+            "need an oracle-generated pseudo-ground-truth)."
+        ),
+    )
     args = parser.parse_args()
 
     config_path = args.config.resolve()
@@ -152,6 +164,7 @@ def main() -> None:
     agent = CostModelAgent(
         llm, max_steps=MAX_STEPS, verbose=True,
         agent_dir=f"{AGENT_TYPE}_agent", use_case=args.use_case, helper_model=HELPER_MODEL,
+        use_oracle_ground_truth=args.use_oracle_ground_truth,
     )
     answer = agent.run(
         task, plans={}, plan_results=ResultsStore([]), op_results=ResultsStore([]), mode=AGENT_TYPE,
