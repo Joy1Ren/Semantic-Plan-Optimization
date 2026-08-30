@@ -7,7 +7,7 @@ import shutil
 
 import pandas as pd
 
-from agent_cost_model.paths import SEMBENCH_DATASET_DIR, SEMBENCH_FILES_DIR
+from agent_cost_model.experiments.SemBench.paths import DATASET_DIR, sembench_files_dir
 
 
 def _type_name(value) -> str | None:
@@ -55,11 +55,11 @@ def main() -> None:
     parser.add_argument("--no-images", action="store_true")
     args = parser.parse_args()
 
-    source_dir = SEMBENCH_FILES_DIR / "ecomm" / "data" / f"sf_{args.scale_factor}"
+    source_dir = sembench_files_dir() / "ecomm" / "data" / f"sf_{args.scale_factor}"
     source_path = source_dir / "styles_details.parquet"
     if not source_path.exists():
         raise FileNotFoundError(f"SemBench source data not found: {source_path}")
-    destination_dir = SEMBENCH_DATASET_DIR / "ecomm" / f"sf_{args.scale_factor}"
+    destination_dir = DATASET_DIR / "ecomm" / f"sf_{args.scale_factor}"
     destination_dir.mkdir(parents=True, exist_ok=True)
 
     full_df = pd.read_parquet(source_path).rename(columns={"id": "idx"})

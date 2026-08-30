@@ -5,7 +5,7 @@ import argparse
 
 import pandas as pd
 
-from agent_cost_model.paths import SEMBENCH_DATASET_DIR, SEMBENCH_FILES_DIR
+from agent_cost_model.experiments.SemBench.paths import DATASET_DIR, sembench_files_dir
 
 
 def main() -> None:
@@ -13,8 +13,8 @@ def main() -> None:
     parser.add_argument("--scale-factor", type=int, required=True)
     args = parser.parse_args()
 
-    source_dir = SEMBENCH_FILES_DIR / "movie" / "data" / f"sf_{args.scale_factor}"
-    output_dir = SEMBENCH_DATASET_DIR / "movie" / f"sf_{args.scale_factor}"
+    source_dir = sembench_files_dir() / "movie" / "data" / f"sf_{args.scale_factor}"
+    output_dir = DATASET_DIR / "movie" / f"sf_{args.scale_factor}"
     # movies_path = source_dir / "Movies.csv"
     reviews_path = source_dir / "Reviews.csv"
     # if not movies_path.exists() or not reviews_path.exists():
