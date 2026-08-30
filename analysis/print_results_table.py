@@ -8,17 +8,21 @@ from pathlib import Path
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from agent_cost_model.paths import RESULTS_DIR, SEMBENCH_FILES_DIR
+from agent_cost_model.experiments.SemBench.paths import sembench_files_dir
+from agent_cost_model.experiments.config import results_prefix
 
 use_case = 'ecomm'
 # Results are organized per scale factor: {dir}/{use_case}/sf_{scale_factor}/...
 SCALE_FACTORS = {'ecomm': 500, 'movie': 2000}
 scale_factor = SCALE_FACTORS.get(use_case, 500)
-METRICS_DIR = RESULTS_DIR / "metrics" / use_case / f"sf_{scale_factor}"
-FINAL_ANSWER_DIR = RESULTS_DIR / "final_answer" / use_case
-AGENT_TYPES = {"sampleCost_agent", "execute_agent", "customCost_agent"}
-ORACLE_AGENT_TYPES = {"execute_oracle_agent", "customCost_oracle_agent", "customCost_oracle_helper_agent"}
-ORACLE_METRICS_DIR = SEMBENCH_FILES_DIR / use_case / "metrics"
+AGENT_TYPES = {"sampleCost", "execute", "customCost"}
+ORACLE_AGENT_TYPES = {"execute_oracle", "customCost_oracle", "customCost_oracle_helper"}
+
+
+def runner_prefix(agent_type: str) -> Path:
+    """Where one runner's results live for this use case / scale factor."""
+    return results_prefix("SemBench", agent_type, use_case=use_case, scale_factor=scale_factor)
+ORACLE_METRICS_DIR = sembench_files_dir() / use_case / "metrics"
 
 # Per-use-case query metadata.
 # Labels use abbreviated operator names: F=Filter, J=Join, M=Map, C=Classify, R=Rank, L=Limit
@@ -286,7 +290,7 @@ def load_agent_data(agent_type):
     selected_data, plans_executed, unique_plans_executed, total_costs = {}, {}, {}, {}
     for qid in all_queries:
         num = qid[1:]
-        path = os.path.join(METRICS_DIR, f"Q{num}_{agent_type}_results.csv")
+        path = os.path.join(runner_prefix(agent_type), "metrics", f"Q{num}_results.csv")
         if not os.path.exists(path):
             continue
         with open(path, newline='') as f:
@@ -314,7 +318,7 @@ def load_agent_data(agent_type):
 def load_plans_written(agent_type):
     plans_written = {}
     for qid in all_queries:
-        path = os.path.join(FINAL_ANSWER_DIR, agent_type, f"sf_{scale_factor}", f"{qid}.json")
+        path = os.path.join(runner_prefix(agent_type), "final_answer", f"{qid}.json")
         if not os.path.exists(path):
             continue
         with open(path) as f:
@@ -372,7 +376,7 @@ def main(argv: list[str] | None = None) -> None:
         title = agent_titles[arg]
         print_agent_table(title, rows_from_agent_data(selected_data, plans_executed, unique_plans_executed, total_costs, plans_written))
     else:
-        metrics_file = Path(arg) if arg else SEMBENCH_FILES_DIR / use_case / "metrics" / "palimpzest_physical_planner_agent.json"
+        metrics_file = Path(arg) if arg else sembench_files_dir() / use_case / "metrics" / "palimpzest_physical_planner_agent.json"
         with metrics_file.open() as f:
             data = json.load(f)
         print_table("Physical Planner Agent", rows_from_json(data))

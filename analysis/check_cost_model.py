@@ -69,10 +69,10 @@ from agent_cost_model.opt_agent.cost_model_agent import (  # noqa: E402
     get_op_model,
 )
 from agent_cost_model.sample_based_cost_model import SampleBasedCostModel  # noqa: E402
-from agent_cost_model.paths import SEMBENCH_DATASET_DIR, ensure_sembench_src_on_path  # noqa: E402
+from agent_cost_model.experiments.SemBench.paths import DATASET_DIR, activate_sembench  # noqa: E402
 
 # Make src/ importable for MovieEvaluator
-ensure_sembench_src_on_path()
+activate_sembench()
 
 try:
     from scenario.movie.evaluation.evaluate import MovieEvaluator  # noqa: E402
@@ -80,7 +80,7 @@ try:
 except ImportError:
     _EVALUATOR_AVAILABLE = False
 
-DATA_DIR = SEMBENCH_DATASET_DIR / "movie"
+DATA_DIR = DATASET_DIR / "movie"
 
 import litellm as _litellm
 _litellm.suppress_debug_info = True

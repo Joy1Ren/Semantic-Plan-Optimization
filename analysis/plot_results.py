@@ -19,7 +19,8 @@ import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
 import numpy as np
 
-from agent_cost_model.paths import RESULTS_DIR, SEMBENCH_FILES_DIR
+from agent_cost_model.experiments.SemBench.paths import sembench_files_dir
+from agent_cost_model.paths import RESULTS_DIR
 
 # ─── CONFIGURATION ────────────────────────────────────────────────────────────
 USE_CASE     = "ecomm"
@@ -30,9 +31,9 @@ id_list = [1,2,3,4,5,6,7,9,11,12,13] #ecomm 500
 # id_list = [10] # movie 16000
 QUERIES = [f"Q{id}" for id in id_list]
 RUNNERS      = ["palimpzest", "lotus", "execute_oracle_sampler_agent"]
-METRICS_DIR = SEMBENCH_FILES_DIR / USE_CASE / "metrics" / f"sf_{SCALE_FACTOR}"
-SAMPLING_DIR = RESULTS_DIR / "sampling" / USE_CASE / f"sf_{SCALE_FACTOR}"
-OUTPUT_DIR = RESULTS_DIR / "analysis" / USE_CASE / f"sf_{SCALE_FACTOR}"
+METRICS_DIR = sembench_files_dir() / USE_CASE / "metrics" / f"sf_{SCALE_FACTOR}"
+SAMPLING_DIR = RESULTS_DIR / "SemBench" / USE_CASE / f"sf_{SCALE_FACTOR}" / "_sampling"
+OUTPUT_DIR = RESULTS_DIR / "_analysis" / USE_CASE / f"sf_{SCALE_FACTOR}"
 # ─────────────────────────────────────────────────────────────────────────────
 
 # Only FLASH_LITE and FLASH are plotted from palimpzest; others are ignored.
@@ -223,7 +224,7 @@ def _get_lotus_quality(entry):
 def _load_lotus_tier(tier):
     """Load and average lotus.json for one tier across all repeat dirs. Returns {qid: {cost, quality, latency}}."""
     fragment = LOTUS_DIR_FRAGMENT[tier]
-    pattern = SEMBENCH_FILES_DIR / USE_CASE / "metrics" / f"across_system_{fragment}_sf{SCALE_FACTOR}_repeat*" / "lotus.json"
+    pattern = sembench_files_dir() / USE_CASE / "metrics" / f"across_system_{fragment}_sf{SCALE_FACTOR}_repeat*" / "lotus.json"
     paths = sorted(glob.glob(str(pattern)))
     if not paths:
         return {}

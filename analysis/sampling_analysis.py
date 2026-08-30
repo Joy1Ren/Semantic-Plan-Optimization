@@ -30,7 +30,8 @@ import matplotlib.pyplot as plt
 
 # Reuse the production sampler's filter/keyword helpers (pure, no network calls).
 from agent_cost_model.opt_agent.llm_sampler import LLM_Sampler
-from agent_cost_model.paths import ANALYSIS_DIR, RESULTS_DIR, SEMBENCH_DATASET_DIR
+from agent_cost_model.experiments.SemBench.paths import DATASET_DIR
+from agent_cost_model.paths import ANALYSIS_DIR, RESULTS_DIR
 
 # ============================ EDIT PER QUERY ============================
 USE_CASE    = "ecomm"
@@ -53,11 +54,11 @@ N_TRIALS    = 20000                            # Monte-Carlo trials for inclusio
 
 # ---- derived paths (match llm_sampler's cache layout; usually no need to edit)
 SLUG      = re.sub(r"[^A-Za-z0-9._-]", "_", EMBED_MODEL)
-CACHE_DIR = RESULTS_DIR / "sampling" / USE_CASE / "cached_results"
+CACHE_DIR = RESULTS_DIR / "SemBench" / USE_CASE / "_sampling" / "cache"
 SHARED    = f"{CACHE_DIR}/{SLUG}_embeddings.npz"     # shared cache: ids/text + image_ids/image
-RESULTS = RESULTS_DIR / "sampling" / USE_CASE / "results.json"
-PLOT_OUT = RESULTS_DIR / "sampling" / USE_CASE / f"Q{QUERY_ID}_blackbags_{'keyword+cos' if KEYWORD else 'cos'}_cdf.png"
-SOURCE_CSV = SEMBENCH_DATASET_DIR / USE_CASE / f"sf_{SCALE_FACTOR}" / "styles_details.csv"
+RESULTS = RESULTS_DIR / "SemBench" / USE_CASE / "_sampling" / "results.json"
+PLOT_OUT = RESULTS_DIR / "SemBench" / USE_CASE / "_sampling" / f"Q{QUERY_ID}_blackbags_{'keyword+cos' if KEYWORD else 'cos'}_cdf.png"
+SOURCE_CSV = DATASET_DIR / USE_CASE / f"sf_{SCALE_FACTOR}" / "styles_details.csv"
 ID_COL     = "idx"                                  # key linking source rows to embedding ids
 BASE_URL  = "https://openrouter.ai/api/v1"
 API_KEY   = os.environ.get("OPENROUTER_API_KEY")

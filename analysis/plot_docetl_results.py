@@ -5,26 +5,27 @@ Edit the CONFIGURATION block below, then run:  python plot_docetl_results.py
 
 Produces two comparisons, each as a with/without-opt-cost pair:
   - Full dataset:      the search's frontier plans, re-run on the full 15-doc dataset
-                        (docetl/outputs/{full_run}/) vs. our agent's final selected plan,
-                        also re-run on the full dataset (results/metrics/.../{agent_dir}.json).
+                        (results/CUAD/MOAR/outputs/{full_run}/) vs. our agent's final selected
+                        plan, also re-run on the full dataset ({runner}/metrics/final_eval.json).
   - During optimization: the search's own frontier on the optimization subset
-                        (docetl/outputs/{search_run}/pareto_frontier.json) vs. EVERY plan our
+                        (results/CUAD/MOAR/outputs/{search_run}/pareto_frontier.json) vs. EVERY plan our
                         agent executed during search, not just the one it finally picked
-                        (results/metrics/.../Q{qid}_{opt_run}_{agent_dir}_results.csv).
+                        ({runner}/metrics/Q{qid}_{opt_run}_results.csv).
 
 Data sources:
-  - DocETL MOAR search frontier: docetl/outputs/{search_run}/pareto_frontier.json (flat list of
+  - DocETL MOAR search frontier: results/CUAD/MOAR/outputs/{search_run}/pareto_frontier.json (flat list of
     {cost, accuracy, ...}) + experiment_summary.json's total_search_cost.
-  - DocETL MOAR full-dataset frontier: docetl/outputs/{full_run}/pareto_frontier*.json -- the
-    search frontier's plans re-evaluated on the full dataset. Schema here is nested
-    ({"all_points": [...], "frontier_points": [...]}) rather than a flat list; we plot
-    frontier_points. search cost is still attributed to {search_run} (full_run is just a
-    verification pass, not a fresh search).
+  - DocETL MOAR full-dataset results: results/CUAD/MOAR/outputs/{full_run}/full15_results.json -- the
+    search frontier's plans re-evaluated on the full dataset (falls back to the older
+    pareto_frontier*.json schema if present instead). We compute the non-dominated subset
+    ourselves for the connecting line, since full15_results.json has no precomputed frontier.
+    search cost is still attributed to {search_run} (full_run is just a verification pass,
+    not a fresh search).
   - Cost-model agent ("pz"), final plan on full dataset: agent_cost_model/results/metrics/
-    {use_case}/sf_{scale_factor}/{agent_dir}.json -- same file plot_results.py's load_agent()
-    reads for SemBench, written by CostModelAgent._run_final_evaluation.
+    CUAD/{runner}/metrics/final_eval.json -- written by
+    CostModelAgent._run_final_evaluation.
   - Cost-model agent ("pz"), every plan tried during search: agent_cost_model/results/metrics/
-    {use_case}/sf_{scale_factor}/Q{query_id}_{opt_run}_{agent_dir}_results.csv -- one row per
+    CUAD/{runner}/metrics/Q{query_id}_{opt_run}_results.csv -- one row per
     plan the agent executed on the optimization subset, written by CostModelAgent._save_results_df.
     "final_selected" marks which row was the one actually chosen.
   CUAD has no real scale-factor axis -- sf_15 is just the 15-document full-dataset size, passed
@@ -44,7 +45,8 @@ import matplotlib.lines as mlines
 import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
 
-from agent_cost_model.paths import DOCETL_ROOT, RESULTS_DIR
+from agent_cost_model.experiments.config import results_prefix
+from agent_cost_model.paths import RESULTS_DIR
 
 # ─── CONFIGURATION ────────────────────────────────────────────────────────────
 # DocETL MOAR run pairs to compare: search_run is the optimization run (small subset,
@@ -52,23 +54,26 @@ from agent_cost_model.paths import DOCETL_ROOT, RESULTS_DIR
 # full_run is that search's frontier plans re-evaluated on the full dataset, under
 # docetl/outputs/{full_run}/. Add more pairs here as additional runs are produced.
 RUN_PAIRS = [
-    {"search_run": "cuad_small_smoke_api", "full_run": "cuad_small_full15"},
+    {"search_run": "cuad_small_smoke_api", "full_run": "cuad_small_smoke_api/full15"},
 ]
 
 # Our cost-model agent's variant, and the CUAD query id (benchmark.yaml only
 # defines query "1" for CUAD).
 USE_CASE = "cuad"
 AGENT_TYPE = "execute_oracle_sampler"  # matches run_opt.py's AGENT_TYPE (no "_agent" suffix -- that's agent_dir, a different path segment used by metrics/raw_results, not final_answer_path)
-AGENT_DIR = f"{AGENT_TYPE}_agent"      # matches run_opt.py's agent_dir=f"{AGENT_TYPE}_agent"
+AGENT_DIR = AGENT_TYPE                 # runner name; the `_agent` suffix is gone
 QUERY_ID = 1
 SCALE_FACTOR = 15  # CUAD has no real scale-factor axis; 15 is the full-dataset doc count, passed as --scale-factor to run_opt.py
 
-DOCETL_OUTPUTS_DIR = DOCETL_ROOT / "outputs"
-PZ_METRICS_DIR = RESULTS_DIR / "metrics" / USE_CASE / f"sf_{SCALE_FACTOR}"
+# MOAR's own outputs now live inside this repo, under its runner prefix -- run_moar.py is
+# pointed here via --output_dir, so nothing is written into the docetl checkout.
+DOCETL_OUTPUTS_DIR = results_prefix("CUAD", "MOAR") / "outputs"
+PZ_PREFIX = results_prefix("CUAD", AGENT_TYPE)
+PZ_METRICS_DIR = PZ_PREFIX / "metrics"
 # Same file plot_results.py's load_agent() reads for SemBench, written by
 # CostModelAgent._run_final_evaluation -- carries cost/quality/agent_model/oracle_model.
-PZ_METRICS_PATH = PZ_METRICS_DIR / f"{AGENT_DIR}.json"
-OUTPUT_DIR = RESULTS_DIR / "analysis" / "cuad_docetl"
+PZ_METRICS_PATH = PZ_METRICS_DIR / "final_eval.json"
+OUTPUT_DIR = RESULTS_DIR / "_analysis" / "cuad_docetl"
 # ─────────────────────────────────────────────────────────────────────────────
 
 # One color per system everywhere, one marker per role everywhere -- consistent across all
@@ -106,6 +111,18 @@ def _entries_to_points(entries):
     return points
 
 
+def _pareto_frontier(points):
+    """Non-dominated subset (maximize quality, minimize cost): sorted by cost ascending,
+    keeping only points whose quality beats every cheaper point's quality so far."""
+    frontier = []
+    best_quality = float("-inf")
+    for p in sorted(points, key=lambda p: p["cost"]):
+        if p["quality"] > best_quality:
+            frontier.append(p)
+            best_quality = p["quality"]
+    return frontier
+
+
 def load_docetl_search_frontier(search_run):
     """
     Parse docetl/outputs/{search_run}/pareto_frontier.json -- the search's own frontier,
@@ -125,23 +142,42 @@ def load_docetl_search_frontier(search_run):
 
 def load_docetl_full_frontier(full_run):
     """
-    Parse docetl/outputs/{full_run}/pareto_frontier*.json -- the SAME plans that made up the
-    search frontier, now re-evaluated on the full dataset. Schema here is nested
-    ({"all_points": [...], "frontier_points": [...]}) rather than a flat list.
+    The SAME plans that made up the search frontier, now re-evaluated on the full dataset.
+    "points" (scattered, all of them) should match load_docetl_search_frontier's count --
+    these are the identical plans, just re-scored on more data. "frontier" (connected with a
+    line) is the non-dominated subset: a plan that was non-dominated on the small optimization
+    subset can be dominated once evaluated on the full dataset, so it can be smaller than
+    "points".
 
-    "points" (scattered, all of them) comes from all_points, so the plan count here matches
-    load_docetl_search_frontier's -- these are the identical plans, just re-scored on more
-    data. "frontier" (connected with a line) comes from frontier_points: a plan that was
-    non-dominated on the small optimization subset can be dominated once evaluated on the
-    full dataset, so that subset can be smaller than "points".
+    Tries two schemas, in order:
+      1. full15_results.json: {plan_name: {full15_cost, full15_avg_f1, status, ...}, ...} --
+         current format. We compute the frontier ourselves (no precomputed one in this file).
+      2. pareto_frontier*.json: {"all_points": [...], "frontier_points": [...]} -- older format,
+         frontier precomputed by docetl itself.
     """
     run_dir = DOCETL_OUTPUTS_DIR / full_run
+
+    results_path = run_dir / "full15_results.json"
+    if results_path.exists():
+        with open(results_path) as f:
+            raw = json.load(f)
+        points = []
+        for entry in raw.values():
+            if entry.get("status") != "ok":
+                continue
+            cost, quality = entry.get("full15_cost"), entry.get("full15_avg_f1")
+            if cost is None or quality is None:
+                continue
+            points.append({"cost": cost, "quality": quality})
+        points.sort(key=lambda p: p["cost"])
+        return {"points": points, "frontier": _pareto_frontier(points)}
+
     path = run_dir / "pareto_frontier.json"
     if not path.exists():
         candidates = sorted(run_dir.glob("pareto_frontier*.json"))
         path = candidates[0] if candidates else None
     if path is None or not path.exists():
-        print(f"[docetl] full-dataset frontier not found under {run_dir}")
+        print(f"[docetl] full-dataset results not found under {run_dir}")
         return {"points": [], "frontier": []}
     with open(path) as f:
         raw = json.load(f)
@@ -253,7 +289,7 @@ def load_pz_all_plans():
         print(f"[pz] metrics dir not found yet: {PZ_METRICS_DIR}")
         return points, model_metadata
 
-    for csv_path in sorted(PZ_METRICS_DIR.glob(f"Q{QUERY_ID}_*_{AGENT_DIR}_results.csv")):
+    for csv_path in sorted(PZ_METRICS_DIR.glob(f"Q{QUERY_ID}_*_results.csv")):
         m = csv_pattern.match(csv_path.name)
         if not m:
             continue
