@@ -6,7 +6,6 @@ import pathlib
 from typing import Any
 
 from agent_cost_model.opt_agent.cost_model_types import ResultsStore, _dump_opt_debug_artifacts, _normalize_plan_df
-from agent_cost_model.paths import SEMBENCH_DATASUBSET_DIR
 from agent_cost_model.opt_agent.prompts import _quality_metric_reminder
 
 from .base import Tool
@@ -141,9 +140,11 @@ execute_plan("p1")
         agent_dir: str,
         quality_evaluator: Any,
         scale_factor: int,
+        results_prefix: str | pathlib.Path,
         eval_metric: str | None = None,
         subset_path: str | pathlib.Path | None = None,
         normalize_eval_df: Any = None,
+        runcount: Any = None,
     ) -> None:
         import pathlib
 
@@ -158,6 +159,8 @@ execute_plan("p1")
         self._quality_evaluator = quality_evaluator
         self._scale_factor = scale_factor
         self._eval_metric = eval_metric
+        self._results_prefix = pathlib.Path(results_prefix)
+        self._runcount = runcount
         self._subset_path = pathlib.Path(subset_path) if subset_path else None
         self._normalize_eval_df = normalize_eval_df or _normalize_plan_df
 
@@ -172,9 +175,13 @@ execute_plan("p1")
             )
         pipeline = entry["plan"]
 
-        subset_path = self._subset_path or (
-            SEMBENCH_DATASUBSET_DIR / self._use_case / f"sf_{self._scale_factor}" / f"Q{self._query_id}_subset.csv"
-        )
+        if self._subset_path is None:
+            raise ValueError(
+                "execute_plan needs a datasubset to run on, but no subset_path was supplied. "
+                "It comes from the benchmark's `subset_path` (see benchmark.yaml), threaded "
+                "through query_info by the runner."
+            )
+        subset_path = self._subset_path
         plan_exec_error: Exception | None = None
         per_op_list, plan_context, plan_dict = [], None, {}
         try:
@@ -211,7 +218,14 @@ execute_plan("p1")
 
         try:
             _dump_opt_debug_artifacts(
-                self._query_id, plan_name, raw_output_df, plan_output_df, plan_context, quality_result
+                self._results_prefix, self._query_id, plan_name,
+                raw_output_df, plan_output_df, plan_context, quality_result,
+                runcount=self._runcount,
+                # Set by PlanQualityEvaluator.evaluate on the call just above; absent when
+                # the plan has no evaluator or evaluation raised. The ground truth is not passed
+                # here -- the evaluator owns it and writes one shared copy at the run level.
+                oracle_df=getattr(self._quality_evaluator, "last_oracle_df", None),
+                evaluator=self._quality_evaluator,
             )
         except Exception as e:
             print(f"[execute_plan] opt_results debug dump failed for {plan_name}: {type(e).__name__}: {e}")

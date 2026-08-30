@@ -42,7 +42,6 @@ from typing import Any, Callable, Optional
 import numpy as np
 import pandas as pd
 
-from agent_cost_model.paths import RESULTS_DIR, SEMBENCH_DATASET_DIR, SEMBENCH_DATASUBSET_DIR
 
 # Keep sample size / seed consistent with PhysicalPipeline.run_subset so the
 # subset we write matches the size the agent expects.
@@ -208,14 +207,25 @@ class LLM_Sampler:
         # embedding modality (so it works even for image-only queries with text_cols=[]).
         self._keyword_cols = all_text_cols
 
-        self.cache_dir = pathlib.Path(cache_dir or RESULTS_DIR / "sampling" / use_case)
-        self.cached_results_dir = self.cache_dir / "cached_results"
+        # Sampling builds the datasubset every runner then consumes, so its artifacts are a
+        # shared input rather than one runner's output: the benchmark's `sampling_dir` places
+        # them beside {runner}, not under it. The embedding cache is keyed by model alone, so
+        # it sits above the scale factor too and is reused across queries and runners.
+        if cache_dir is None:
+            raise ValueError(
+                "LLM_Sampler needs a cache_dir. It comes from the benchmark's `sampling_dir` "
+                "(see benchmark.yaml), resolved by the runner."
+            )
+        self.cache_dir = pathlib.Path(cache_dir)
+        self.cached_results_dir = self.cache_dir / "cache"
         print(f"Using cached results from: {self.cached_results_dir}")
-        self.results_path = self.cache_dir / f"sf_{scale_factor}" / "sampling_results.json"
-        self.subset_out_path = pathlib.Path(
-            subset_out_path
-            or SEMBENCH_DATASUBSET_DIR / use_case / f"sf_{scale_factor}" / f"Q{query_id}_subset.csv"
-        )
+        self.results_path = self.cache_dir.parent / f"sf_{scale_factor}" / "_sampling" / "sampling_results.json"
+        if not subset_out_path:
+            raise ValueError(
+                "LLM_Sampler needs a subset_out_path. It comes from the benchmark's "
+                "`subset_path` (see benchmark.yaml), resolved by the runner."
+            )
+        self.subset_out_path = pathlib.Path(subset_out_path)
 
         # Embeddings are called over raw HTTP (not the OpenAI SDK helper): the
         # SDK defaults to base64 encoding + a post-parser that hides provider
@@ -760,7 +770,11 @@ def _main() -> None:
     ap.add_argument("--use-case", default="ecomm")
     ap.add_argument("--scale-factor", type=int, default=500)
     ap.add_argument("--query-id", type=int, required=True)
-    ap.add_argument("--data-dir", default=None, help="defaults to experiments/dataset/{use_case}/sf_{scale_factor}")
+    ap.add_argument("--data-dir", required=True, help="directory holding the source CSV (and images/)")
+    ap.add_argument("--cache-dir", required=True,
+                    help="the benchmark's sampling_dir (see benchmark.yaml)")
+    ap.add_argument("--subset-out", required=True,
+                    help="where to write the datasubset (the benchmark's subset_path)")
     ap.add_argument("--csv", default=None, help="source CSV filename; defaults to styles_details.csv")
     ap.add_argument("--query", required=True, help="natural-language query text")
     ap.add_argument("--id-col", default="idx")
@@ -778,7 +792,7 @@ def _main() -> None:
 
     from agent_cost_model.opt_agent.cost_model_agent import OpenRouterClient
 
-    data_dir = args.data_dir or str(SEMBENCH_DATASET_DIR / args.use_case / f"sf_{args.scale_factor}")
+    data_dir = args.data_dir
     csv = args.csv or f"styles_details_Q{args.query_id}.csv"
     df = pd.read_csv(os.path.join(data_dir, csv), dtype={args.id_col: str})
     image_dir = os.path.join(data_dir, "images") if args.images else None
@@ -793,6 +807,8 @@ def _main() -> None:
         embedding_model=args.embedding_model,
         id_col=args.id_col,
         image_dir=image_dir,
+        cache_dir=args.cache_dir,
+        subset_out_path=args.subset_out,
         sample_method=args.sample_method,
         keyword=args.keyword,
         no_image_emb=args.no_image_emb,

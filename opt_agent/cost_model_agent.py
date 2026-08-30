@@ -31,31 +31,6 @@ from dataclasses import dataclass
 from typing import Any
 
 # ---------------------------------------------------------------------------
-# Guarded SemBench evaluator import.
-# Add SemBench's src/ to sys.path when the sibling checkout is present.
-# ---------------------------------------------------------------------------
-from agent_cost_model.paths import (
-    RESULTS_DIR,
-    SEMBENCH_DATASUBSET_DIR,
-    SEMBENCH_FILES_DIR,
-    ensure_sembench_src_on_path,
-)
-
-ensure_sembench_src_on_path()
-
-try:
-    from agent_cost_model.experiments.SemBench.quality_evaluator import (
-        QualityEvaluator as _QualityEvaluator,
-    )
-except ImportError:
-    try:
-        from experiments.SemBench.quality_evaluator import (  # type: ignore
-            QualityEvaluator as _QualityEvaluator,
-        )
-    except ImportError:
-        _QualityEvaluator = None  # type: ignore
-
-# ---------------------------------------------------------------------------
 # Re-exports (see module docstring) — used both by this module's own code below
 # and by external callers importing them from here.
 # ---------------------------------------------------------------------------
@@ -363,6 +338,7 @@ class CostModelAgent:
         llm: LLMClient,
         *,
         data_dir: str = "dataset/use_case",
+        results_prefix: str | pathlib.Path | None = None,
         agent_dir: str = "no_name",
         use_case: str = "use_case",
         max_steps: int = 40,
@@ -380,6 +356,14 @@ class CostModelAgent:
         self.agent_dir = agent_dir
         self.use_case = use_case
         self.data_dir = data_dir
+        # Every artifact this run writes goes under here. The benchmark's `results_prefix`
+        # template (see its benchmark.yaml) fixes the segments above it -- SemBench keys on
+        # use_case/scale factor, CUAD on neither -- and this agent owns the layout below it.
+        # Falls back to a runner-named directory so a bare CostModelAgent() still writes
+        # somewhere sane inside this repo.
+        self.results_prefix = pathlib.Path(
+            results_prefix if results_prefix is not None else RESULTS_DIR / agent_dir
+        )
         self.oracle_model = oracle_model
         self.oracle_reasoning_effort = oracle_reasoning_effort
         # When False, quality is scored against the benchmark's real ground truth instead of
@@ -420,12 +404,11 @@ class CostModelAgent:
         if not self.trajectory_steps:
             return
         import pandas as pd
-        import pathlib
-        metrics_dir = RESULTS_DIR / "trajectory" / self.use_case / f"sf_{query_info['scale_factor']}"
-        metrics_dir.mkdir(parents=True, exist_ok=True)
+        out_dir = self.results_prefix / "trajectory"
+        out_dir.mkdir(parents=True, exist_ok=True)
         rc = query_info.get("runcount")
         qkey = f"Q{query_info['query_id']}_{rc}" if rc is not None else f"Q{query_info['query_id']}"
-        out = metrics_dir / f"{qkey}_{self.agent_dir}_trajectory.csv"
+        out = out_dir / f"{qkey}.csv"
         pd.DataFrame(self.trajectory_steps).to_csv(out, index=False)
         self._log(f"[run] trajectory → {out}")
 
@@ -447,12 +430,11 @@ class CostModelAgent:
 
     def _save_cost_model_codes(self, codes: dict, query_info: dict) -> None:
         """Save all versioned cost model code strings to
-        results/costModel/{use_case}/{agent_dir}/Q{id}_{rc}.json."""
+        {results_prefix}/costModel/Q{id}_{rc}.json."""
         if not codes:
             return
         import json
-        import pathlib
-        out_dir = pathlib.Path(__file__).resolve().parent / "results" / "costModel" / self.use_case / self.agent_dir
+        out_dir = self.results_prefix / "costModel"
         out_dir.mkdir(parents=True, exist_ok=True)
         rc = query_info.get("runcount")
         qkey = f"Q{query_info['query_id']}_{rc}" if rc is not None else f"Q{query_info['query_id']}"
@@ -467,12 +449,11 @@ class CostModelAgent:
         """Dump the accumulated plan-level results table to CSV."""
         if not results.rows:
             return
-        import pathlib
-        metrics_dir = RESULTS_DIR / "metrics" / self.use_case / f"sf_{query_info['scale_factor']}"
+        metrics_dir = self.results_prefix / "metrics"
         metrics_dir.mkdir(parents=True, exist_ok=True)
         rc = query_info.get("runcount")
         qkey = f"Q{query_info['query_id']}_{rc}" if rc is not None else f"Q{query_info['query_id']}"
-        out = metrics_dir / f"{qkey}_{self.agent_dir}_results.csv"
+        out = metrics_dir / f"{qkey}_results.csv"
         df = results.df
         df["use_case"] = query_info["use_case"]
         df["query_id"] = query_info["query_id"]
@@ -597,23 +578,39 @@ class CostModelAgent:
 
         # Build oracle client and quality evaluator (oracle runs inside QualityEvaluator)
         oracle_client = OpenRouterClient(self.oracle_model, reasoning_effort=self.oracle_reasoning_effort)
-        llm_judge_dir = RESULTS_DIR / "llm_judge" / query_info["use_case"]
+        # Scoped per query: the judge cache is keyed by plan, so two runs on different queries
+        # in the same use case/scale factor would otherwise wipe each other's cache mid-flight.
+        llm_judge_dir = self.results_prefix / "llm_judge" / f"Q{query_info['query_id']}"
         import shutil
-        _llm_judge_path = pathlib.Path(llm_judge_dir)
-        if _llm_judge_path.exists():
-            shutil.rmtree(_llm_judge_path)
-        _llm_judge_path.mkdir(parents=True, exist_ok=True)
+        if llm_judge_dir.exists():
+            shutil.rmtree(llm_judge_dir)
+        llm_judge_dir.mkdir(parents=True, exist_ok=True)
 
-        _oracle_result_path = (
-            SEMBENCH_DATASUBSET_DIR
-            / query_info["use_case"]
-            / f"sf_{query_info['scale_factor']}"
-            / f"Q{query_info['query_id']}_oracle_result.csv"
+        # PlanQualityEvaluator writes this cache next to the datasubset it ran on
+        # (subset_cache_path.with_name(...)), so derive the stale-cache path the same way
+        # rather than rebuilding it from a benchmark-specific layout -- rebuilding it is how
+        # this silently missed CUAD's copy and reused a previous run's oracle output.
+        _subset_path = query_info.get("subset_path")
+        if _subset_path:
+            pathlib.Path(_subset_path).with_name(
+                f"Q{query_info['query_id']}_oracle_result.csv"
+            ).unlink(missing_ok=True)
+
+        # This run's opt_results directory. The evaluator writes the run's single shared ground
+        # truth here; ExecutePlanTool writes one subdirectory of debug artifacts per plan.
+        _rc = query_info.get("runcount")
+        opt_run_dir = self.results_prefix / "opt_results" / (
+            f"Q{query_info['query_id']}_{_rc}" if _rc is not None else f"Q{query_info['query_id']}"
         )
-        _oracle_result_path.unlink(missing_ok=True)
+        # Start each run without a ground truth, for the same reason llm_judge is wiped above:
+        # the evaluator persists it on the first plan and reads it back for every later plan, so
+        # a leftover file from a previous run of this same runcount would be reused even if the
+        # datasubset has since been resampled -- scoring the new subset against the old subset's
+        # ground truth.
+        (opt_run_dir / "oracle_ground_truth.csv").unlink(missing_ok=True)
 
         quality_evaluator = None
-        quality_evaluator_cls = query_info.get("quality_evaluator_cls", _QualityEvaluator)
+        quality_evaluator_cls = query_info.get("quality_evaluator_cls")
         if quality_evaluator_cls is not None:
             try:
                 quality_evaluator = quality_evaluator_cls(
@@ -622,10 +619,13 @@ class CostModelAgent:
                     query_id=query_info["query_id"],
                     use_case=query_info["use_case"],
                     scale_factor=query_info["scale_factor"],
-                    agent_dir=self.agent_dir,
                     llm_judge_dir=llm_judge_dir,
+                    subset_path=query_info["subset_path"],
+                    ground_truth_path=query_info["gt_path"],
+                    run_dir=opt_run_dir,
                     oracle_reasoning_effort=self.oracle_reasoning_effort,
                     use_oracle_ground_truth=self.use_oracle_ground_truth,
+                    op_sample_seed=query_info.get("op_sample_seed"),
                 )
             except Exception as e:
                 print(f"[run] QualityEvaluator init failed: {e}")
@@ -718,6 +718,8 @@ class CostModelAgent:
                 agent_dir=self.agent_dir,
                 quality_evaluator=quality_evaluator,
                 scale_factor=query_info["scale_factor"],
+                results_prefix=self.results_prefix,
+                runcount=query_info.get("runcount"),
                 eval_metric=query_info.get("eval_metric"),
                 subset_path=query_info.get("subset_path"),
                 normalize_eval_df=query_info.get("normalize_eval_df"),
@@ -784,6 +786,10 @@ class CostModelAgent:
         # Kept so _run_final_evaluation can re-instantiate a fresh pipeline from a plan's source code
         # (rebuilding for each repeated final run keeps runs independent).
         self._plan_executor = plan_executor
+        # Kept for the same reason: the full-dataset evaluation scores through this same object,
+        # so search-time and final quality go through one flow (the adapter's own score_plan and
+        # has_ground_truth) instead of the engine reassembling the steps itself.
+        self._quality_evaluator = quality_evaluator
 
         tools = base_tools + [write_plan_tool]
         executor.send_tools({t.name: t for t in tools})
@@ -834,9 +840,9 @@ class CostModelAgent:
             "scale_factor": 0,
             "query_id": 0,
             "eval_metric": None,  # e.g. "f1-score" / "adjusted-rand-index"; explains the quality metric in the briefing
-            "final_eval_runs": 1,  # times to re-run the chosen plan on the full dataset (fresh pipeline each)
+            "num_final_eval_runs": 1,  # times to re-run the chosen plan on the full dataset (fresh pipeline each)
             "data_dir": "experiments/dataset/use_case",
-            "gt_dir": "files/use_case/raw_results/ground_truth/sf_0",
+            "gt_path": "files/use_case/raw_results/ground_truth/sf_0/Q0.csv",
             "image_subdir": "images",
         },
     ) -> Any:
@@ -1078,7 +1084,7 @@ class CostModelAgent:
     ) -> None:
         """Run the agent-selected plan on the full dataset vs. real ground truth; append to metrics JSON.
 
-        The chosen plan is re-run `final_eval_runs` times (each a fresh pipeline) to average out LLM
+        The chosen plan is re-run `num_final_eval_runs` times (each a fresh pipeline) to average out LLM
         stochasticity. The metrics entry keeps the agent-search-level fields once, with per-run
         full-dataset execution metrics nested under run1/run2/…; raw output of run k is saved as
         Q{query_id}_{runcount}_{k}.csv."""
@@ -1094,34 +1100,49 @@ class CostModelAgent:
         scale_factor = query_info["scale_factor"]
         runcount = query_info.get("runcount")
         run_suffix = f"Q{query_id}_{runcount}" if runcount is not None else f"Q{query_id}"
-        gt_dir = query_info.get("gt_dir", SEMBENCH_FILES_DIR / use_case / "raw_results" / "ground_truth" / f"sf_{scale_factor}")
+        gt_path_str = query_info.get("gt_path")
+        if not gt_path_str:
+            self._log("[final_eval] no gt_path in query_info — skipping")
+            return
 
         import dataclasses
         import pathlib
 
         import pandas as pd
 
-        gt_path = pathlib.Path(gt_dir) / f"Q{query_id}.csv"
+        # The benchmark declares the ground-truth FILE (benchmark.yaml's ground_truth_path),
+        # rather than the engine assuming a {dir}/Q{id}.csv naming convention -- CUAD's is a
+        # single file covering every query, under a different name entirely.
+        gt_path = pathlib.Path(gt_path_str)
         if not gt_path.exists():
             self._log(f"[final_eval] ground truth not found at {gt_path} — skipping")
             return
 
-        raw_results_dir = RESULTS_DIR / "raw_results" / use_case / self.agent_dir / f"sf_{scale_factor}"
+        raw_results_dir = self.results_prefix / "raw_results"
         raw_results_dir.mkdir(parents=True, exist_ok=True)
 
-        # Load evaluator + ground truth once; reused across every repeated final run.
+        # Score through the run's QualityEvaluator -- the same object, and the same adapter
+        # methods, the search loop scores with. Only the ground truth differs: the full-dataset
+        # evaluation always scores against the benchmark's REAL ground truth (gt_path), never an
+        # oracle-substituted run, so `ground_truth_path_in_use()` is deliberately not consulted.
+        evaluator = getattr(self, "_quality_evaluator", None)
+        if evaluator is None:
+            self._log("[final_eval] no quality evaluator — skipping")
+            return
+        # These runs are on the FULL dataset, not the optimization subset, so a benchmark whose
+        # scorer measures over a document population must score over the full dataset's
+        # documents -- otherwise a document the plan dropped would not be counted against it.
+        population_path = query_info.get("dataset_path")
+        # Loaded once and reused across every repeated final run. A benchmark that scores from
+        # the ground-truth FILE ignores this frame; has_ground_truth below decides whether the
+        # form it does consume is actually there.
         try:
-            evaluator_loader = query_info.get("evaluator_loader")
-            if evaluator_loader is None:
-                from agent_cost_model.experiments.SemBench.quality_evaluator import load_evaluator
-                evaluator_loader = load_evaluator
-            evaluator = evaluator_loader(use_case, scale_factor)
             gt_df = pd.read_csv(gt_path)
         except Exception as e:
-            self._log(f"[final_eval] evaluator/ground-truth load failed: {type(e).__name__}: {e}")
-            evaluator, gt_df = None, None
+            self._log(f"[final_eval] ground-truth load failed: {type(e).__name__}: {e}")
+            gt_df = None
 
-        n_runs = max(1, int(query_info.get("final_eval_runs", 1) or 1))
+        n_runs = max(1, int(query_info.get("num_final_eval_runs", 1) or 1))
         metric_type = "unknown"
         runs: dict[str, dict] = {}
         for final_run in range(1, n_runs + 1):
@@ -1159,25 +1180,16 @@ class CostModelAgent:
             total_cost = sum(r.get("cost_usd", 0) for r in op_results_full)
 
             quality = float("nan")
-            if evaluator is not None and gt_df is not None:
+            if evaluator.has_ground_truth(gt_df, gt_path):
                 try:
-                    qm = evaluator._evaluate_single_query(query_id, eval_df, gt_df)
-                    qm_dict = dataclasses.asdict(qm)
-                    qm_type = type(qm).__name__
-                    if "Retrieval" in qm_type:
-                        metric_type = "f1_score"
-                        quality = float(qm_dict.get("f1_score", float("nan")))
-                    elif "Aggregation" in qm_type:
-                        metric_type = "relative_error"
-                        quality = 1.0 / (1.0 + float(qm_dict.get("relative_error", 1.0)))
-                    elif "Rank" in qm_type:
-                        metric_type = "spearman_correlation"
-                        quality = float(qm_dict.get("spearman_correlation", float("nan")))
-                    elif "SingleAccuracy" in qm_type:
-                        metric_type = "accuracy"
-                        quality = float(qm_dict.get("accuracy", float("nan")))
+                    quality = float(evaluator.score_plan(
+                        eval_df, gt_df, gt_path, population_path
+                    ))
+                    metric_type = query_info.get("eval_metric", metric_type)
                 except Exception as e:
                     self._log(f"[final_eval] evaluation failed (run {final_run}): {type(e).__name__}: {e}")
+            else:
+                self._log(f"[final_eval] no ground truth at {gt_path} — quality is N/A")
 
             runs[f"run{final_run}"] = {
                 "latency": round(total_latency, 4),
@@ -1185,7 +1197,7 @@ class CostModelAgent:
                 "quality": quality,
             }
 
-        metrics_path = RESULTS_DIR / "metrics" / use_case / f"sf_{scale_factor}" / f"{self.agent_dir}.json"
+        metrics_path = self.results_prefix / "metrics" / "final_eval.json"
         metrics_path.parent.mkdir(parents=True, exist_ok=True)
         entry: dict = {}
         if metrics_path.exists():

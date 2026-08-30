@@ -31,7 +31,9 @@ import time
 
 from agent_cost_model.opt_agent.cost_model_agent import CostModelAgent, OpenRouterClient, ResultsStore
 from agent_cost_model.opt_agent.llm_sampler import LLM_Sampler
-from agent_cost_model.paths import RESULTS_DIR, SEMBENCH_DATASET_DIR, SEMBENCH_FILES_DIR
+from agent_cost_model.experiments.SemBench.paths import DATASET_DIR, DATASUBSET_DIR, sembench_files_dir
+from agent_cost_model.experiments.config import results_prefix
+from agent_cost_model.paths import RESULTS_DIR
 
 
 # ---------------------------------------------------------------------------
@@ -186,14 +188,19 @@ def main() -> None:
     # agent_type = "customCost_oracle_helper"
     USE_CASE = "movie"
     SCALE_FACTOR = 16000
-    FINAL_EVAL_RUNS = 2
+    NUM_FINAL_EVAL_RUNS = 2
     llm = ScriptedLLM() if args.offline else OpenRouterClient(args.model, reasoning_effort="medium")
-    agent = CostModelAgent(llm, max_steps=args.max_steps, verbose=True, agent_dir=f"{agent_type}_agent", use_case = USE_CASE, helper_model=args.helper_model)
+    # Same prefix run_opt.py resolves from SemBench's benchmark.yaml, so a demo run lands
+    # beside real runs of the same runner instead of in a layout of its own.
+    RESULTS_PREFIX = results_prefix("SemBench", agent_type, use_case=USE_CASE, scale_factor=SCALE_FACTOR)
+    agent = CostModelAgent(llm, max_steps=args.max_steps, verbose=True, agent_dir=agent_type,
+                           results_prefix=RESULTS_PREFIX, use_case=USE_CASE,
+                           helper_model=args.helper_model)
 
 
     query_id = 10
     source_data = f"Reviews_{SCALE_FACTOR}.csv" #just for LLM_Sampler, not directly given to agent
-    data_dir = str(SEMBENCH_DATASET_DIR / USE_CASE / f"sf_{SCALE_FACTOR}")
+    data_dir = str(DATASET_DIR / USE_CASE / f"sf_{SCALE_FACTOR}")
     # Per-query modality: drives whether the sampler embeds/compares text, images, or both.
     modalities = {
         "ecomm":{
@@ -296,7 +303,7 @@ def main() -> None:
         source_df = pd.read_csv(os.path.join(data_dir, source_data), dtype={"idx": str})
         modality = modalities[USE_CASE][query_id]
         image_dir = os.path.join(data_dir, "images") if "image" in modality else None
-        cache_dir = str(RESULTS_DIR / "sampling" / USE_CASE)
+        cache_dir = str(RESULTS_DIR / "SemBench" / USE_CASE / "_sampling")
         text_cols = None if "text" in modality else []
         sampler = LLM_Sampler(
             query_id=query_id,
@@ -327,16 +334,17 @@ def main() -> None:
                             "scale_factor": SCALE_FACTOR,
                             "query_id": query_id,
                             "eval_metric": eval_metrics[USE_CASE][query_id],
-                            "final_eval_runs": FINAL_EVAL_RUNS,
+                            "num_final_eval_runs": NUM_FINAL_EVAL_RUNS,
                             "data_dir": data_dir,
-                            "gt_dir": SEMBENCH_FILES_DIR / USE_CASE / "raw_results" / "ground_truth" / f"sf_{SCALE_FACTOR}",
+                            "gt_path": sembench_files_dir() / USE_CASE / "raw_results" / "ground_truth" / f"sf_{SCALE_FACTOR}" / f"Q{query_id}.csv",
+                            "subset_path": DATASUBSET_DIR / USE_CASE / f"sf_{SCALE_FACTOR}" / f"Q{query_id}_subset.csv",
                             "image_subdir": "images",
                         "runcount": args.runcount,
                         })
 
     print("\n=== FINAL ANSWER ===")
     print(answer)
-    output_path = RESULTS_DIR / "final_answer" / USE_CASE / f"{agent_type}_agent" / f"sf_{SCALE_FACTOR}" / f"Q{query_id}.json"
+    output_path = RESULTS_PREFIX / "final_answer" / f"Q{query_id}.json"
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     run_key = str(args.runcount) if args.runcount is not None else "0"
     answers_by_run = {}

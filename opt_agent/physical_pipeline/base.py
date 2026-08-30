@@ -42,7 +42,7 @@ def _patch_convert_empty_field_answers() -> None:
     `range(max(n_records, 1))` once, producing exactly ONE output record with every one of this
     op's own target fields set to None and every OTHER (parent) field carried through unchanged.
     That single-record-with-None-fields shape is what downstream CUAD scoring
-    (experiments/cuad/quality_evaluator.py's normalize_eval_df -> _row_clauses) already
+    (experiments/cuad/quality_evaluator.py's _predicted_records) already
     interprets as "this clause type is not present in the document" -- it filters None/NaN/blank
     values out of the clauses list entirely, which is exactly the semantics we want.
 
@@ -50,8 +50,9 @@ def _patch_convert_empty_field_answers() -> None:
     (e.g. CUAD's Q1_p1, nine sequential rag_map calls each adding a few columns), zero records out
     of one op means the record never reaches any downstream op -- the WHOLE document silently
     disappears from the plan's final output, not just this op's own columns. That underscores an
-    entire document as a blanket false negative on all 41 clause types (and can also throw off
-    _pick_population_json's row-count heuristic), which is a much bigger and less honest failure
+    entire document as a blanket false negative on all 41 clause types (it also drops the document
+    from the scored population, which is derived from the plan's own predicted rows -- see
+    quality_evaluator.py's _evaluate), which is a much bigger and less honest failure
     than "this op's own few clauses are absent". Idempotent.
     """
     from palimpzest.query.operators.convert import ConvertOp

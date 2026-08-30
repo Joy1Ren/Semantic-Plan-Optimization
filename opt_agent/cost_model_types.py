@@ -29,27 +29,6 @@ except Exception:  # ImportError, or a partial install
     HAVE_PALIMPZEST = False
 
 
-# ---------------------------------------------------------------------------
-# Guarded SemBench evaluator import.
-# Add SemBench's src/ to sys.path when the sibling checkout is present.
-# ---------------------------------------------------------------------------
-from agent_cost_model.paths import RESULTS_DIR, ensure_sembench_src_on_path
-
-ensure_sembench_src_on_path()
-
-try:
-    from agent_cost_model.experiments.SemBench.quality_evaluator import (
-        normalize_eval_df as _normalize_eval_df,
-    )
-except ImportError:
-    try:
-        from experiments.SemBench.quality_evaluator import (  # type: ignore
-            normalize_eval_df as _normalize_eval_df,
-        )
-    except ImportError:
-        _normalize_eval_df = None  # type: ignore
-
-
 # ===========================================================================
 # Cost-model data types + the contract the agent's CostModel must satisfy
 # ===========================================================================
@@ -208,25 +187,62 @@ def make_observed_op_stats(op_results: Any):
 
 
 def _dump_opt_debug_artifacts(
+    results_prefix: Any,
     query_id: int,
     plan_name: str,
     raw_output_df: Any,
     normalized_output_df: Any,
     plan_context: Any,
     quality_result: Any,
+    runcount: Any = None,
+    oracle_df: Any = None,
+    evaluator: Any = None,
 ) -> None:
-    """Write execute_plan's intermediate state to results/opt_results/Q{query_id}_{plan_name}/
-    for debugging quality/per_sem_op_quality mysteries (e.g. comparing against a standalone
-    re-run via experiments/cuad/run_single_plan.py). Overwritten on every execute_plan call for
-    that (query_id, plan_name), so it always reflects the most recent execution -- this is
-    scratch debug output, not accumulated history."""
-    import json as _json
+    """Write execute_plan's intermediate state under the run's opt_results directory, for
+    debugging quality/per_sem_op_quality mysteries (e.g. comparing against a standalone re-run
+    via experiments/cuad/run_single_plan.py).
 
-    out_dir = RESULTS_DIR / "opt_results" / f"Q{query_id}_{plan_name}"
+        opt_results/Q1_2/                  <- one directory per (query, runcount)
+            oracle_ground_truth.csv        <- the run's oracle ground truth, ONE copy shared by
+                                              every plan (written and read by
+                                              PlanQualityEvaluator, in whatever shape the
+                                              benchmark's scorer reads back). Oracle mode only:
+                                              in direct mode the benchmark's own ground-truth
+                                              file is scored against in place, never copied.
+            p1/
+                raw_output.csv             the plan's own output, before normalization
+                normalized_output.json     exactly what the benchmark's scorer was handed
+                                           (written by evaluator.write_scoring_input)
+                oracle_result.csv          THIS plan's own oracle-substituted output
+                quality_result.json        the resulting scores
+                per_sem_op_info.json       per-semantic-operator input/output samples
+            p2/ ...
+
+    The run directory carries `runcount` so a second run of the same query keeps its own copies
+    instead of overwriting the first run's (matching how trajectory/ and metrics/ filenames are
+    keyed). Within one run a plan's directory is overwritten on re-execution, so it reflects
+    that plan's most recent run -- scratch debug output, not accumulated history.
+
+    `oracle_result.csv` is per-plan and is NOT the ground truth: in oracle mode the first plan's
+    oracle output becomes the canonical ground truth for the whole run, so every later plan's
+    own oracle result diverges from it. Comparing the two is often what explains a surprising
+    quality score.
+    """
+    import json as _json
+    import pathlib as _pathlib
+
+    run_key = f"Q{query_id}_{runcount}" if runcount is not None else f"Q{query_id}"
+    out_dir = _pathlib.Path(results_prefix) / "opt_results" / run_key / str(plan_name)
     out_dir.mkdir(parents=True, exist_ok=True)
 
     raw_output_df.to_csv(out_dir / "raw_output.csv", index=False)
-    normalized_output_df.to_csv(out_dir / "normalized_output.csv", index=False)
+    # The scorer's actual input, not a CSV rendering of it: for CUAD the two differ (docetl is
+    # handed narrow {filename, clauses} records that no frame in the engine holds), and the
+    # whole point of this artifact is to read a surprising score back to what produced it.
+    if evaluator is not None:
+        evaluator.write_scoring_input(normalized_output_df, out_dir / "normalized_output.json")
+    if oracle_df is not None:
+        oracle_df.to_csv(out_dir / "oracle_result.csv", index=False)
 
     quality_summary = None
     if quality_result is not None:
@@ -258,12 +274,15 @@ def _normalize_plan_df(
     use_case: str,
     query_id: int,
 ) -> "pd.DataFrame":
-    """Apply use-case/query-specific column normalization for evaluator compatibility.
+    """Identity fallback when a benchmark supplies no `normalize_eval_df`.
 
-    Delegates to the canonical `normalize_eval_df` so plan-output and oracle
-    ground-truth normalization stay in sync.
+    Reshaping a plan's output into the shape a benchmark's evaluator expects is inherently
+    benchmark-specific, so the real implementation lives in each adapter
+    (experiments/*/quality_evaluator.py) and reaches the engine via
+    query_info["normalize_eval_df"]. A benchmark whose evaluator already accepts the plan's
+    natural output needs no override.
     """
-    return _normalize_eval_df(df, use_case, query_id)
+    return df
 
 
 # ===========================================================================

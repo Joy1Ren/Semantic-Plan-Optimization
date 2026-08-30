@@ -18,34 +18,86 @@ bounded tool-loop LLM agent that:
 
 ## Layout
 
+The repo is three layers, with one rule: **the engine names no benchmark, and a benchmark
+never re-derives a path its config already declares.**
+
 | path | what it is |
 |------|------------|
-| `cost_model_agent.py` | the agent: system prompt, tools, sandboxed step loop, final evaluation |
-| `physical_pipeline.py` | `PhysicalPipeline` — the plan IR/executor: operators, subset sampling, oracle-copy construction |
+| `opt_agent/` | **the engine** — benchmark-agnostic. Knows nothing about SemBench, CUAD, or MOAR. |
+| `opt_agent/cost_model_agent.py` | the agent: system prompt, tools, sandboxed step loop, final evaluation |
+| `opt_agent/physical_pipeline/` | `PhysicalPipeline` — the plan IR/executor: operators, subset sampling, oracle-copy construction |
+| `opt_agent/local_python_executor.py` | sandboxed Python executor the agent's tool calls run in |
+| `opt_agent/llm_sampler.py` | builds the optimization datasubset (random or top-k / embedding-based sampling) |
 | `oracle_quality_evaluator.py` | benchmark-agnostic quality scoring (oracle- or ground-truth-based) |
-| `local_python_executor.py` | sandboxed Python executor the agent's tool calls run in |
-| `llm_sampler.py` | builds the optimization datasubset (random or top-k / embedding-based sampling) |
 | `sample_based_cost_model.py` | optional cost model used only by the legacy `sampleCost` mode |
-| `available_models.txt`, `PHYSICAL_PIPELINE_DESIGN.md` | model catalog and plan-IR design notes |
+| `paths.py` | this repo's own locations — five constants, no benchmark names |
 | `experiments/run_opt.py` | CLI entry point: wires a benchmark config to one `CostModelAgent.run()` call |
-| `experiments/SemBench/` | the SemBench benchmark adapter — `benchmark.yaml`, `quality_evaluator.py`, `demo.py`, extractors, datasets, datasubsets |
-| `results/` | generated metrics, trajectories, final answers, sampling cache, raw full-dataset results |
+| `experiments/config.py` | loads a `benchmark.yaml` and resolves its path templates (used by the runner *and* by `analysis/`, so they can't drift) |
+| `experiments/external_repo.py` | resolves the external checkouts and puts them on `sys.path` |
+| `experiments/SemBench/`, `experiments/cuad/` | **the benchmark adapters** — `benchmark.yaml`, `quality_evaluator.py`, `paths.py`, data prep, datasets, datasubsets |
+| `results/` | everything any run produces (see below) |
 | `analysis/` | result-inspection scripts/notebooks over `results/` |
 
-`experiments/*/dataset/`, `experiments/*/datasubset*/`, and `results/` are gitignored
-(generated/large artifacts, created automatically by the scripts below).
+`experiments/*/dataset/`, `experiments/*/datasubset*/`, `experiments/*/ground_truth/`, and
+`results/` are gitignored (generated/large artifacts, created by the scripts below).
 
-SemBench-dependent commands resolve the sibling `SemBench/` checkout by default; override with:
+### External benchmark checkouts
+
+SemBench and docetl are used **in place, never vendored**, so their own evaluators stay the
+single source of truth for how a benchmark is scored. Neither is importable as an installed
+package for our purposes: SemBench ships no packaging metadata and its modules import each
+other as top-level packages rooted at `src/`; docetl is packaged but its build excludes
+`experiments/**`, which is where the CUAD scorer lives. Each benchmark therefore declares its
+checkout in its own `benchmark.yaml`:
+
+```yaml
+external_repo:
+  env_var: SEMBENCH_ROOT     # override the location
+  default: ../SemBench       # relative to this repo's root
+  python_path: src           # subdir to place on sys.path
+```
+
+`experiments/external_repo.py` is the only code that puts an external repo on `sys.path`.
+Override a location with its env var:
 
 ```bash
 export SEMBENCH_ROOT=/absolute/path/to/SemBench
+export DOCETL_ROOT=/absolute/path/to/docetl
+```
+
+### Where results go
+
+**External checkouts are read-only inputs; everything written lands in `results/`.** Each
+benchmark declares the prefix, so the path carries only the axes that benchmark actually has
+(CUAD has neither a use case nor a scale factor):
+
+```
+results/SemBench/{use_case}/sf_{scale_factor}/{runner}/...
+results/CUAD/{runner}/...
+```
+
+`{runner}` names one optimizer or variant — `execute_oracle_sampler`, `customCost`,
+`execute_oracle`, `sampleCost`, … alongside external ones like `MOAR`. It is the axis you
+compare across. **Everything below the prefix is that runner's own layout**, whatever it
+natively produces: `trajectory/`, `metrics/`, `final_answer/`, `opt_results/`, `llm_judge/`
+for this agent; `outputs/` for MOAR (point `run_moar.py --output_dir` at
+`results/CUAD/MOAR/outputs`, and nothing is written into the docetl checkout).
+
+Artifacts shared by *every* runner sit beside `{runner}`, not under it, so they aren't
+duplicated per runner — sampling builds the datasubset all runners consume:
+
+```
+results/SemBench/{use_case}/_sampling/cache/      # embedding cache, keyed by model alone
+results/SemBench/{use_case}/sf_{sf}/_sampling/    # per-scale-factor sampling output
+results/_analysis/                                # cross-runner comparison plots
 ```
 
 ## Run it
 
 ```bash
-# offline smoke test — no API key or network required, exercises the sandbox + tools
-python3 -m agent_cost_model.experiments.SemBench.demo --offline
+# offline smoke test — exercises the sandbox + tools with a scripted LLM (no network calls,
+# but OPENROUTER_API_KEY must still be set: the oracle client is constructed unconditionally)
+OPENROUTER_API_KEY=sk-or-dummy python3 -m agent_cost_model.experiments.SemBench.demo --offline
 
 # a real optimization run, via the SemBench-specific CLI wrapper
 export OPENROUTER_API_KEY=sk-or-...
@@ -55,10 +107,11 @@ python3 -m agent_cost_model.experiments.run_opt \
     --opt-subsample   # first run only: builds the optimization datasubset
 ```
 
-`run_opt.py` reads `benchmark.yaml` for query/data/evaluation details (task prompt,
-quality metric, dataset paths, ground-truth location) and owns the optimization *policy*
-in code (model, `max_steps`, agent mode, subset size/seed) so the same runner works for
-another benchmark by pointing `--config` elsewhere.
+`run_opt.py` reads `benchmark.yaml` for query/data/evaluation details (task prompt, quality
+metric, dataset paths, ground-truth location, and the `results_prefix` template) and owns the
+optimization *policy* in code (model, `max_steps`, agent mode, subset size/seed) so the same
+runner works for another benchmark by pointing `--config` elsewhere. `AGENT_TYPE` is the
+runner name that lands in the results path.
 
 ## The optimization loop
 
@@ -99,7 +152,7 @@ The suggested/enforced workflow (see the `execute_briefing` system-prompt text) 
 
 On a final answer (or on running out of steps, which forces one terminal turn), the agent
 saves the trajectory/results tables and then runs `_run_final_evaluation`: it rebuilds the
-chosen plan from its saved source code and re-executes it — fresh, `final_eval_runs` times
+chosen plan from its saved source code and re-executes it — fresh, `num_final_eval_runs` times
 — on the **full** dataset against the benchmark's real ground truth CSV, independent of
 whatever quality mode scored it during search. This is the only place true, full-dataset,
 non-subsampled numbers get produced.
@@ -224,8 +277,14 @@ call made (full pipeline run, per-op judge calls, or both) and rolls up into the
 - `LLMClient` is a one-method protocol (`generate(system, messages) -> str`);
   `OpenRouterClient` (in `cost_model_agent.py`) is the default OpenRouter-backed
   implementation used for the main agent, the oracle, and the cheap image describer.
-- A new benchmark needs: a `QualityEvaluator` subclass of `OracleQualityEvaluator` (wiring
-  `subset_path`, `normalize_df`, `evaluator_factory`, and optionally `ground_truth_loader`
-  for direct-ground-truth mode), a `benchmark.yaml` (query source, metrics, task prompts,
-  dataset/ground-truth paths — see `experiments/SemBench/benchmark.yaml`), and a dataset
-  extractor that produces the per-query source CSV `run_opt.py` expects.
+- A new benchmark is a new directory under `experiments/`, and needs nothing changed in
+  `opt_agent/`:
+  1. `benchmark.yaml` — query source, metrics, task prompts, dataset/ground-truth paths,
+     `external_repo` (if it reads from a checkout), and `results_prefix` (which axes its
+     results path carries). See `experiments/SemBench/benchmark.yaml`.
+  2. `quality_evaluator.py` — a `QualityEvaluator` subclass of `OracleQualityEvaluator`,
+     taking `subset_path`/`ground_truth_dir` from the config rather than re-deriving them,
+     plus `normalize_df`, `evaluator_factory`, and optionally `ground_truth_loader` for
+     direct-ground-truth mode.
+  3. `paths.py` — any file locations only that adapter reads.
+  4. a data-prep script producing the per-query source CSV `run_opt.py` expects.

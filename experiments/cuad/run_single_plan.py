@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import tempfile
 from pathlib import Path
 
 import pandas as pd
@@ -28,13 +27,12 @@ import palimpzest as pz
 
 from agent_cost_model.opt_agent.cost_model_agent import patch_litellm_for_openrouter
 from agent_cost_model.experiments.cuad.quality_evaluator import (
-    _load_cuad_eval_module,
-    _pick_population_json,
-    _predicted_records,
+    _evaluate,
     normalize_eval_df,
 )
 from agent_cost_model.opt_agent.local_python_executor import LocalPythonExecutor
-from agent_cost_model.paths import CUAD_DATASET_DIR, CUAD_DATASUBSET_DIR, CUAD_GROUND_TRUTH_CSV, RESULTS_DIR
+from agent_cost_model.experiments.cuad.paths import DATASET_DIR, DATASUBSET_DIR, cuad_ground_truth_csv
+from agent_cost_model.paths import RESULTS_DIR
 from agent_cost_model.opt_agent.physical_pipeline import PhysicalPipeline
 
 DEFAULT_FINAL_ANSWER_PATH = RESULTS_DIR / "final_answer" / "cuad" / "execute_oracle_sampler" / "Q1.json"
@@ -50,7 +48,7 @@ def _build_pipeline(code: str, plan_name: str) -> PhysicalPipeline:
     explore_data, just what plan code itself needs."""
 
     def load_data(filename: str) -> pd.DataFrame:
-        return pd.read_csv(CUAD_DATASET_DIR / filename)
+        return pd.read_csv(DATASET_DIR / filename)
 
     executor = LocalPythonExecutor(additional_authorized_imports=PLAN_AUTHORIZED_IMPORTS)
     executor.send_variables({
@@ -87,27 +85,20 @@ def _load_plan_code(final_answer_path: Path, plan_name: str, runcount: str | Non
 
 
 def _score(output_df: pd.DataFrame) -> None:
+    """Score against CUAD's real annotations with the same code path the agent uses.
+
+    `_evaluate` is quality_evaluator.score_plan's own body; score_plan is just avg_f1 off the
+    front of it, and this prints the full per-metric breakdown instead -- which is the whole
+    point of this script.
+    """
     normalized = normalize_eval_df(output_df, "cuad", 1)
-    records = _predicted_records(normalized)
-    if not records:
-        print("no predicted records -- normalize_eval_df found no name/filename + clauses "
+    metrics = _evaluate(normalized, cuad_ground_truth_csv())
+    if not metrics:
+        print("no predicted records -- normalize_eval_df found no filename + clauses "
               "shape (e.g. the plan projected away the identifier column); skipping scoring")
         return
 
-    cuad_eval = _load_cuad_eval_module()
-    original_json_path = _pick_population_json(output_df)
-    with tempfile.TemporaryDirectory() as tmp_dir_str:
-        tmp_dir = Path(tmp_dir_str)
-        results_path = tmp_dir / "results.json"
-        results_path.write_text(json.dumps(records, default=str))
-        metrics = cuad_eval.evaluate_results(
-            method_name="run_single_plan",
-            results_file=str(results_path),
-            ground_truth_file=str(CUAD_GROUND_TRUTH_CSV),
-            original_json_file=str(original_json_path),
-        )
-
-    print(f"=== per-metric precision/recall (population: {original_json_path.name}) ===")
+    print(f"=== per-metric precision/recall ({len(normalized)} documents) ===")
     for metric, pr in metrics["per_metric"].items():
         print(f"  {metric:38s} precision={pr['precision']!s:<8} recall={pr['recall']!s}")
     print()
@@ -136,7 +127,7 @@ def main() -> None:
         output_df = result_collection.to_df()
     else:
         _per_op_list, plan_context, _plan_dict = pipeline.run_subset(
-            subset_cache_path=str(CUAD_DATASUBSET_DIR / "cuad_small_optimize.csv")
+            subset_cache_path=str(DATASUBSET_DIR / "cuad_small_optimize.csv")
         )
         output_df = pd.DataFrame(plan_context.output_records)
 
