@@ -140,6 +140,7 @@ class RagFilter(Operator):
             "condition": condition,
             "embedding_query": embedding_query,
             "model": model.value,
+            "reasoning_effort": eff,
             "chunk_size": chunk_size,
             "num_chunks_per_field": num_chunks_per_field,
             "similarity_threshold": similarity_threshold,
@@ -147,4 +148,4 @@ class RagFilter(Operator):
             "similarity_method": similarity_method,
             "depends_on": depends_on,
         }
-        self.params_id = _compute_op_id(self.op_type, {"model": model.value})
+        self.params_id = _compute_op_id(self.op_type, self.attributes)

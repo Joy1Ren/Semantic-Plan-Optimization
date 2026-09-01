@@ -75,6 +75,54 @@ _QUALITY_METRIC_DOCS = {
 }
 
 
+# How each semantic operator's entry in `per_sem_op_quality` is computed, keyed by op_type. Shown
+# on every execute_plan result for the operator types that plan actually contains, so the agent can
+# read a per-op score correctly instead of guessing what "0.6 on a rag_map" means.
+#
+# Two distinctions these definitions have to carry, because acting on either one backwards sends the
+# search the wrong way:
+#   - RAG operators are scored on the input they ACTUALLY received (the retrieved chunks), not the
+#     full source field. A low rag_map/rag_filter score therefore blames the LLM step, and says
+#     nothing about whether retrieval surfaced the right chunks -- that shows up in plan `quality`.
+#   - For maps, an output schema the operator returned NO value for is scored incorrect, while a
+#     deliberate empty value is judged on its merits like any other answer (often correct, when the
+#     description says to return empty for absent information).
+_SEM_OP_QUALITY_DOCS = {
+    "sem_map": (
+        "fraction of output schemas that are correct under each schema's description, over the "
+        "sampled input records. An output schema the operator produced no value for counts as "
+        "incorrect; a deliberately empty value is judged like any other answer."
+    ),
+    "rag_map": (
+        "fraction of output schemas that are correct under each schema's description, given the "
+        "REDUCED input the operator actually saw (the retrieved chunks, not the full field). An "
+        "output schema the operator produced no value for counts as incorrect; a deliberately "
+        "empty value is judged like any other answer. Scores only the mapping step, so it does "
+        "not fall when retrieval misses a chunk -- that shows up in overall plan quality instead."
+    ),
+    "sem_filter": (
+        "fraction of input records whose keep/drop decision is correct under the filter condition."
+    ),
+    "rag_filter": (
+        "fraction of input records whose keep/drop decision is correct under the filter condition, "
+        "evaluated against the REDUCED input the operator actually saw (the retrieved chunks, not "
+        "the full field). Scores only the filtering step, not retrieval."
+    ),
+    "sem_join": (
+        "fraction of input pairs that were joined correctly under the join condition."
+    ),
+}
+
+
+def _sem_op_quality_docs(op_types) -> dict[str, str]:
+    """{op_type: how its per_sem_op_quality entry is computed}, for the scored semantic operator
+    types among `op_types`. Non-semantic operators have no per-op quality and are left out."""
+    # Filter before sorting: op_types comes from per-operator stat rows via .get("op_type"), so a
+    # row missing the key yields None and sorting a mixed str/None set raises.
+    present = {t for t in op_types if t in _SEM_OP_QUALITY_DOCS}
+    return {op_type: _SEM_OP_QUALITY_DOCS[op_type] for op_type in sorted(present)}
+
+
 def _quality_metric_reminder(eval_metric: str | None) -> str:
     """One-line reminder of what `quality` measures, shown on every execute_plan result so the agent
     keeps the metric in mind — and understands why overall quality can diverge from per_sem_op_quality."""

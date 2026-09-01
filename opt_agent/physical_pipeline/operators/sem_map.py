@@ -4,7 +4,7 @@ from __future__ import annotations
 from palimpzest.constants import Model, PromptStrategy
 from palimpzest.query.operators.convert import LLMConvertBonded
 
-from ..base import Operator, _compute_op_id, _has_image_field, _resolve_reasoning_effort
+from ..base import Operator, _cols_attribute, _compute_op_id, _has_image_field, _resolve_reasoning_effort
 
 
 class SemMap(Operator):
@@ -32,5 +32,5 @@ class SemMap(Operator):
         self._pz_op.model = model
         self.depends_on = depends_on
         self._cols_full = cols  # preserved for make_oracle_copy
-        self.attributes = {"model": model.value, "cols": sorted(col["name"] for col in cols), "depends_on": depends_on}
+        self.attributes = {"model": model.value, "reasoning_effort": eff, "cols": _cols_attribute(cols), "depends_on": depends_on}
         self.params_id = _compute_op_id(self.op_type, self.attributes)

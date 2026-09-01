@@ -48,6 +48,5 @@ class SemJoin(Operator):
         # in the optimizer memo, and its extracted physical plan runs the upstream twice.
         self.other = other
         self.self_join = self_join
-        self.attributes = {"condition": condition, "model": model.value, "join_parallelism": join_parallelism, "depends_on": depends_on}
-        self.params_id = _compute_op_id(self.op_type, {"model": model.value})
-        # self.params_id = _compute_op_id(self.op_type, self.attributes)
+        self.attributes = {"condition": condition, "model": model.value, "reasoning_effort": eff, "join_parallelism": join_parallelism, "depends_on": depends_on}
+        self.params_id = _compute_op_id(self.op_type, self.attributes)

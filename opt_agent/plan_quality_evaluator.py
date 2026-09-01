@@ -21,9 +21,15 @@ resolves to the right file for the configured mode, so no adapter branches on it
 Per-operator quality (identical regardless of use_oracle_ground_truth — only needs the plan's own
 execution samples, never a separately-run oracle-substituted pipeline):
   sem_filter / sem_join / rag_filter: the oracle directly judges each of the plan's own inputs
-    against the operator's condition (one batched call per operator); per-op quality is the
-    agreement rate between the oracle's decisions and the plan's own pass/fail decisions.
-  sem_map / rag_map: the oracle judges whether each output field is correct (batched LLM call).
+    against the operator's condition; per-op quality is the agreement rate between the oracle's
+    decisions and the plan's own pass/fail decisions.
+  sem_map / rag_map: the oracle judges each output field against the field's own description;
+    fields the operator MISSED entirely (absent/None, as opposed to a deliberate "") score 0
+    without being sent. Per-op quality is the mean over all (record, field) verdicts.
+  Every judge call carries exactly ONE record, and an operator is scored from at most
+    MAX_JUDGE_RECORDS records — so at most that many calls, issued concurrently.
+  RAG operators are judged on their POST-RETRIEVAL input (the retrieved chunks), not the full
+    source field, so these scores measure the LLM step and not the retrieval step.
   Any other op_type (rag_join doesn't exist; project, filter, groupby, join, map, ...) is
   non-semantic and never scored here — an empty per_sem_op_quality for a plan built only from
   those isn't a bug, just nothing semantic to score.
@@ -34,7 +40,9 @@ relative_error, spearman_correlation, accuracy). The ground truth is either:
     semantic operator replaced by the oracle model, run once and cached per plan_name in
     llm_judge_dir. Oracle LLM calls are also memoized per-operator across plans (see
     _MemoizingGenerator): a semantic operator shared by two plans is judged by the oracle only
-    once.
+    once. Only the run(s) up to and including the one that yields a non-empty ground truth are
+    billed to total_oracle_cost_usd; later plans still run the oracle (it is how oracle
+    consistency is checked) but their cost lands in oracle_consistency_cost_usd instead.
   - directly supplied (use_oracle_ground_truth=False, via ground_truth_loader): skips building
     the oracle-substituted plan entirely, avoiding the cost of running the whole plan through the
     oracle.
@@ -49,11 +57,36 @@ import mimetypes
 import os
 import random
 import re
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 
 import pandas as pd
+
+from agent_cost_model.opt_agent.physical_pipeline.operators.rag_common import retrieval_context_key
+
+# Seed for the sem_join candidate-pair subsampling RNG (see PlanQualityEvaluator.__init__).
+# Fixed here rather than plumbed in from the runner: it only has to be stable across runs.
+_OP_SAMPLE_SEED = 42
+
+# Max records one operator's per-op quality score is computed from, and so also the max number of
+# oracle judge calls it costs: every judge path sends exactly ONE record per call. Records are
+# large (a CUAD contract runs to tens of thousands of characters), so this bounds what scoring one
+# operator costs, at the price of a noisier score.
+#
+# It has to be applied per operator type, because what bounded each one before was incidental:
+# sem_join keeps every candidate pair (|left| x |right|) and was capped at the datasubset size --
+# 40 for CUAD -- while sem_filter/sem_map were bounded only by the pipeline's sample-collection
+# cap (_execute_core's max_samples, = NUM_SAMPLES), which is a sampling knob that has no reason
+# to double as a judging-cost knob.
+MAX_JUDGE_RECORDS = 10
+
+# Concurrency for per-record judge calls. They are independent HTTP requests, so at this default
+# an operator's whole MAX_JUDGE_RECORDS-call budget goes out in one wave and costs roughly the
+# wall time of a single call.
+_JUDGE_MAX_WORKERS = 10
 
 
 @dataclass
@@ -155,7 +188,6 @@ class PlanQualityEvaluator:
         ground_truth_loader: Callable[[], pd.DataFrame] | None = None,
         ground_truth_path: str | Path | None = None,
         run_dir: str | Path | None = None,
-        op_sample_seed: int | None = None,
     ) -> None:
         self._oracle_client = oracle_client
         self._oracle_model = oracle_model          # string, used for OpenRouterClient judge calls
@@ -164,7 +196,11 @@ class PlanQualityEvaluator:
         self._subset_path = Path(subset_path)
         self._normalize_df_fn = normalize_df
         self._llm_judge_dir = Path(llm_judge_dir)
+        # What scoring this run cost: the oracle run(s) that produced the ground truth, plus every
+        # per-operator judge call. Deliberately NOT the oracle runs of later plans -- those are
+        # consistency checks, kept separately below so the run's real spend is still recoverable.
         self.total_oracle_cost_usd = 0.0
+        self.oracle_consistency_cost_usd = 0.0
         self._canonical_oracle_df: "pd.DataFrame | None" = None
         # Set by evaluate() on each call, for per-plan debug dumps.
         self.last_oracle_df: "pd.DataFrame | None" = None
@@ -204,11 +240,17 @@ class PlanQualityEvaluator:
         self._oracle_call_cache: dict = {}
         self._oracle_cache_stats: dict = {"hits": 0, "misses": 0}
 
-        # Private RNG for subsampling a sem_join's candidate pairs down to max_pairs. Seeded
-        # (the runner passes RANDOM_OP_SAMPLER_SEED) so two runs of the same query judge the
-        # same pairs and their per-op quality numbers are comparable; an unseeded global
-        # `random` made that number drift run to run for reasons unrelated to the plan.
-        self._op_sample_rng = random.Random(op_sample_seed)
+        # Guards total_oracle_cost_usd: per-record judge calls run on a thread pool
+        # (_judge_in_parallel), and `+=` on a float is a read-modify-write that silently drops
+        # concurrent updates -- i.e. under-reports what scoring actually cost.
+        self._oracle_cost_lock = threading.Lock()
+
+        # Private RNG for subsampling what a judge call scores down to MAX_JUDGE_RECORDS (see
+        # _cap_judge_items). Fixed seed so two runs of the same query judge the same records and
+        # their per-op quality numbers are comparable; an unseeded global `random` made that
+        # number drift run to run for reasons unrelated to the plan. Not a knob — nothing
+        # benefits from varying it per run.
+        self._op_sample_rng = random.Random(_OP_SAMPLE_SEED)
 
         # Resolve oracle model string → pz.Model enum once at init so make_oracle_copy
         # receives the enum directly (avoids re-resolving on every execute_plan call and
@@ -235,15 +277,23 @@ class PlanQualityEvaluator:
         """Run oracle evaluation and return QualityResult."""
         oracle_df = None
         if self._use_oracle_ground_truth:
-            oracle_df = self._get_oracle_context(plan, plan_name)
             # The FIRST plan's oracle output becomes the canonical ground truth every later
             # plan in this run is scored against. Persist it once, and prefer the persisted
             # copy so a resumed/re-run plan scores against the same ground truth.
+            #
+            # Resolved BEFORE the oracle runs, because "do we already have a ground truth?" is
+            # also what decides whether this run is billed: producing the ground truth is a real
+            # cost of scoring the run, while every oracle run after that one is a consistency
+            # check kept for debugging (see _get_oracle_context).
             if self._canonical_oracle_df is None or self._canonical_oracle_df.empty:
                 self._canonical_oracle_df = self._read_persisted(self._oracle_ground_truth_path)
-            if (self._canonical_oracle_df is None or self._canonical_oracle_df.empty) and (
-                oracle_df is not None and not oracle_df.empty
-            ):
+            have_ground_truth = (
+                self._canonical_oracle_df is not None and not self._canonical_oracle_df.empty
+            )
+            oracle_df = self._get_oracle_context(
+                plan, plan_name, charge_cost=not have_ground_truth
+            )
+            if not have_ground_truth and oracle_df is not None and not oracle_df.empty:
                 self._canonical_oracle_df = oracle_df
                 self._persist(oracle_df, self._oracle_ground_truth_path)
             gt_df = self._canonical_oracle_df
@@ -260,8 +310,8 @@ class PlanQualityEvaluator:
 
         # Per-op quality: identical regardless of use_oracle_ground_truth. sem_map only ever
         # needed the plan's own input/output samples. sem_filter/sem_join ask the oracle to
-        # directly judge each of the plan's own inputs against the operator's condition (a
-        # single batched call), then score agreement with the plan's own pass/fail decisions —
+        # directly judge each of the plan's own inputs against the operator's condition (one call
+        # per record), then score agreement with the plan's own pass/fail decisions —
         # in oracle-ground-truth mode this piggybacks on judging done in the same run rather than
         # comparing against a separately-run oracle-substituted pipeline.
         per_sem_op_quality: dict[str, float] = {}
@@ -272,9 +322,9 @@ class PlanQualityEvaluator:
                 if op_type in ("sem_filter", "sem_join", "rag_filter"):
                     condition = info["attributes"].get("condition")
                     if condition:
-                        max_pairs = len(plan_context.sampled_records) if op_type == "sem_join" else None
                         q = self._oracle_judge_filter_join_op(
-                            op_type, condition, info["samples"], max_pairs=max_pairs, op_name=op_name,
+                            op_type, condition, info["samples"], op_name=op_name,
+                            retrieval_contexts=info.get("retrieval_contexts"),
                         )
                         if q is not None:
                             per_sem_op_quality[op_name] = q
@@ -421,7 +471,9 @@ class PlanQualityEvaluator:
                 gen, self._oracle_call_cache, model_value, reff, self._oracle_cache_stats
             )
 
-    def _get_oracle_context(self, plan, plan_name: str) -> "pd.DataFrame | None":
+    def _get_oracle_context(
+        self, plan, plan_name: str, charge_cost: bool = True
+    ) -> "pd.DataFrame | None":
         self._llm_judge_dir.mkdir(parents=True, exist_ok=True)
         csv_path = self._llm_judge_dir / f"Q{self._query_id}_{plan_name}_gt.csv"
 
@@ -448,11 +500,20 @@ class PlanQualityEvaluator:
             oracle_per_op_list, oracle_context, _ = oracle_pipeline.run_subset(
                 subset_cache_path=str(subset_cache_path)
             )
-            # Count the oracle's ACTUAL cost on every run (cache hits contribute ~0), so the
-            # per-operator cache's savings show up in total_oracle_cost_usd.
-            self.total_oracle_cost_usd += sum(
+            # The oracle's ACTUAL cost for this run (per-operator cache hits contribute ~0, so
+            # the cache's savings show up in the totals). It is billed to the query only while
+            # the run is still producing the ground truth -- usually just the first plan, but
+            # more when an early plan's oracle output came back empty. Once a ground truth
+            # exists, later plans' oracle runs are consistency checks nothing is scored against,
+            # and billing them grew the reported oracle cost linearly in the number of plans the
+            # agent happened to try.
+            run_cost_usd = sum(
                 float(row.get("cost_usd", 0.0) or 0.0) for row in oracle_per_op_list
             )
+            if charge_cost:
+                self.total_oracle_cost_usd += run_cost_usd
+            else:
+                self.oracle_consistency_cost_usd += run_cost_usd
             hits = self._oracle_cache_stats["hits"] - hits0
             misses = self._oracle_cache_stats["misses"] - misses0
             # print(f"[QualityEvaluator] oracle op-cache for {plan_name}: {hits} hits, {misses} misses "
@@ -548,9 +609,23 @@ class PlanQualityEvaluator:
         )
         if isinstance(result, tuple):
             if len(result) >= 3 and isinstance(result[2], dict):
-                self.total_oracle_cost_usd += float(result[2].get("cost_usd", 0.0) or 0.0)
+                with self._oracle_cost_lock:
+                    self.total_oracle_cost_usd += float(result[2].get("cost_usd", 0.0) or 0.0)
             return result[0]
         return result
+
+    def _judge_in_parallel(self, items: list, judge_one: Callable) -> list:
+        """Run one judge call per item concurrently, preserving input order.
+
+        Every judge path sends a single record per call, so an operator costs
+        len(items) <= MAX_JUDGE_RECORDS independent HTTP requests; running them serially would
+        make per-op scoring the slowest part of evaluating a plan. Exceptions are the caller's
+        to handle -- judge_one is expected to return None for a record it could not score.
+        """
+        if len(items) <= 1:
+            return [judge_one(item) for item in items]
+        with ThreadPoolExecutor(max_workers=min(_JUDGE_MAX_WORKERS, len(items))) as pool:
+            return list(pool.map(judge_one, items))
 
     _IMAGE_EXTS = frozenset({".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"})
 
@@ -583,36 +658,72 @@ class PlanQualityEvaluator:
         return {k: getattr(dr, k, None) for k in schema_cls.model_fields}
 
     @classmethod
-    def _record_content_parts(cls, record, index: int, trailer: str = "") -> list[dict]:
+    def _record_content_parts(
+        cls, record, index: int | None = None, trailer: str = "", input_view: dict | None = None,
+    ) -> list[dict]:
         """One record's OpenAI-style multimodal content parts, shared by both oracle judge calls:
         a text part with the record's INPUT fields (plus an optional `trailer` line), followed by
         an image_url part for every image-valued field.
+
+        `input_view` overrides field values with what the operator's LLM call actually received.
+        It is how a RAG operator gets judged on its retrieved chunks rather than the full source
+        field: retrieval runs on a COPY of the candidate (palimpzest RAGConvert.convert), so
+        `record` -- the input the pipeline sampled -- still holds the whole document. Judging
+        against that document turns every chunk the retrieval failed to surface into an apparent
+        extraction error, which is the opposite of what a per-operator score is for. Non-RAG ops
+        pass None and are unaffected.
 
         An image field is replaced in the JSON by a placeholder and sent as a real image part, so
         the oracle actually sees the pixels -- without this it scores vision-derived operators ~0.
         """
         image_urls: list[str] = []
         text_inp: dict = {}
-        for k, v in cls._dr_to_dict(record).items():
+        fields = cls._dr_to_dict(record)
+        if input_view:
+            fields.update(input_view)
+        for k, v in fields.items():
             url = cls._maybe_image_url(v)
             if url is not None:
                 text_inp[k] = "<image attached below>"
                 image_urls.append(url)
             else:
                 text_inp[k] = v
-        text = f"\nRecord {index}:\n  INPUT: {json.dumps(text_inp, default=str)}"
+        label = "\n  INPUT: " if index is None else f"\nRecord {index}:\n  INPUT: "
+        text = label + json.dumps(text_inp, default=str)
         return [
             {"type": "text", "text": text + trailer},
             *({"type": "image_url", "image_url": {"url": url}} for url in image_urls),
         ]
 
+    def _cap_judge_items(self, items: list) -> list:
+        """Subsample what one oracle judge call scores down to MAX_JUDGE_RECORDS.
+
+        Random rather than first-N: samples arrive in execution order, which follows the
+        datasubset's row order, so a prefix would judge the same handful of records for every
+        operator of every plan -- a biased sample, and one that never sees the rest of the
+        subset. Drawn from the run-stable _op_sample_rng so a re-run judges the same records.
+        """
+        if len(items) <= MAX_JUDGE_RECORDS:
+            return items
+        return self._op_sample_rng.sample(items, MAX_JUDGE_RECORDS)
+
     def _oracle_judge_filter_join_op(
-        self, op_type: str, condition: str, samples: list, max_pairs: int | None = None,
-        op_name: str = "?",
+        self, op_type: str, condition: str, samples: list, op_name: str = "?",
+        retrieval_contexts: dict | None = None,
     ) -> float | None:
         """Directly ask the oracle to judge each of the plan's own filter/join inputs against
-        `condition` (a single batched call — same technique as _score_map_op), then score
-        agreement between the oracle's decisions and the plan's own pass/fail decisions.
+        `condition` — one call per record, same as _score_map_op — then score agreement between
+        the oracle's decisions and the plan's own pass/fail decisions.
+
+        One record per call rather than one call for all of them: a single prompt holding every
+        record's full input and answering with a bare positional array gives the judge nowhere to
+        reason per record and no way to signal a partial answer, and a short array used to be
+        rejected outright, throwing away every verdict in it. Per record, a failure costs only
+        that record.
+
+        For rag_filter, `retrieval_contexts` supplies the post-retrieval input the operator's LLM
+        call actually saw, so the condition is judged against the retrieved chunks rather than the
+        full source field (see _record_content_parts).
 
         Used for per-operator quality regardless of use_oracle_ground_truth: it only needs the
         plan's own execution samples, never a separately-run oracle-substituted pipeline.
@@ -631,137 +742,223 @@ class PlanQualityEvaluator:
             print(f"[QualityEvaluator] per-op quality skipped for {op_name}: no samples with source_indices")
             return None
 
-        keys = list(candidates)
-        if max_pairs is not None and len(keys) > max_pairs:
-            keys = self._op_sample_rng.sample(keys, max_pairs)
-
+        keys = self._cap_judge_items(list(candidates))
+        contexts = retrieval_contexts or {}
         unit = "pair of records satisfies the join condition" if op_type == "sem_join" else "record satisfies the filter condition"
+
+        def judge_one(key):
+            try:
+                record, plan_passed = candidates[key]
+                content: list[dict] = [{
+                    "type": "text",
+                    "text": (
+                        f"You are evaluating whether the {unit} below.\n"
+                        f"Condition: {condition}\n"
+                        "Judge the condition ONLY against the INPUT shown -- it is exactly what "
+                        "the operator was given."
+                    ),
+                }]
+                content.extend(self._record_content_parts(
+                    record, input_view=contexts.get(retrieval_context_key(record)),
+                ))
+                content.append({
+                    "type": "text",
+                    "text": (
+                        "\n\nDecide true if this record satisfies the condition, false otherwise.\n"
+                        'Return ONLY valid JSON: {"decision": true_or_false}'
+                    ),
+                })
+                response = self._oracle_generate(content)
+                m = re.search(r"\{.*\}", response, re.DOTALL)
+                if not m:
+                    print(
+                        f"[QualityEvaluator] {op_name}: skipping one record -- oracle response "
+                        f"had no JSON object (len={len(response)}): {response[:300]!r}"
+                    )
+                    return None
+                decision = json.loads(m.group()).get("decision")
+                if decision is None:
+                    print(f"[QualityEvaluator] {op_name}: skipping one record -- no 'decision' in response")
+                    return None
+                return 1.0 if bool(decision) == plan_passed else 0.0
+            except Exception as e:
+                print(f"[QualityEvaluator] {op_name}: skipping one record -- judge call failed: {e}")
+                return None
+
+        agreements = [a for a in self._judge_in_parallel(keys, judge_one) if a is not None]
+        if not agreements:
+            print(f"[QualityEvaluator] per-op quality failed for {op_name} ({op_type}): no record could be judged")
+            return None
+        if len(agreements) < len(keys):
+            print(
+                f"[QualityEvaluator] {op_name}: scored {len(agreements)}/{len(keys)} records "
+                "(the rest could not be judged)"
+            )
+        return sum(agreements) / len(agreements)
+
+    @staticmethod
+    def _judge_cols(raw) -> list[tuple[str, str]]:
+        """(name, description) for each generated column, from `attributes["cols"]`.
+
+        Also accepts the older names-only form of that attribute, so per-op scoring still runs
+        against an execution context produced before descriptions were added there.
+        """
+        cols: list[tuple[str, str]] = []
+        for col in raw or []:
+            if isinstance(col, dict):
+                name = col.get("name")
+                if name:
+                    cols.append((str(name), str(col.get("description") or "")))
+            elif col:
+                cols.append((str(col), ""))
+        return cols
+
+    def _judge_map_record(self, op_name, cols, contexts, item) -> tuple[float, int] | None:
+        """Score one record's output fields with one oracle call.
+
+        Returns (sum of field scores, number of fields) or None if this record could not be
+        judged at all — the caller drops those, which keeps every field backed by the same set of
+        records and so keeps the flat mean equal to the per-field-then-across-fields mean.
+
+        Every failure is contained here rather than left to propagate: these run on a thread pool
+        whose map() re-raises, so one malformed record would otherwise cost the whole operator
+        its score instead of just its own verdict.
+        """
+        try:
+            return self._judge_map_record_inner(op_name, cols, contexts, item)
+        except Exception as e:
+            print(f"[QualityEvaluator] {op_name}: skipping one record -- judge call failed: {e}")
+            return None
+
+    def _judge_map_record_inner(self, op_name, cols, contexts, item) -> tuple[float, int] | None:
+        """Body of _judge_map_record; see there. Split out so one try/except covers all of it."""
+        inp, out = item
+        out_d = self._dr_to_dict(out)
+        # Split the columns into ones the operator actually answered and ones it MISSED. A miss is
+        # a field absent from the output record, or None/NaN -- how a generation that produced
+        # nothing for that field surfaces (see base._patch_convert_empty_field_answers). That is
+        # not the same as the operator deliberately returning "": an empty string is an answer,
+        # and on an extraction task it is usually the right one, so it goes to the judge like any
+        # other value. Misses score 0 outright and are never sent.
+        judged: list[tuple[str, str, object]] = []
+        for name, description in cols:
+            value = out_d.get(name)
+            if name not in out_d or value is None or (isinstance(value, float) and math.isnan(value)):
+                continue
+            judged.append((name, description, value))
+        if not judged:
+            return 0.0, len(cols)
+
+        field_list = "\n".join(
+            f"{i}. {name}: {description}" if description else f"{i}. {name}"
+            for i, (name, description, _) in enumerate(judged, start=1)
+        )
         content: list[dict] = [{
             "type": "text",
-            "text": f"You are evaluating whether each {unit} below.\nCondition: {condition}",
+            "text": (
+                "You are evaluating whether a semantic map operator produced correct outputs for "
+                "ONE input record.\n"
+                "Judge each field ONLY against the INPUT shown below -- it is exactly what the "
+                "operator was given. Do not mark a field wrong for information that is not in "
+                "this input.\n\n"
+                f"Fields to evaluate, with the instruction the operator was given for each:\n{field_list}"
+            ),
         }]
-        for i, key in enumerate(keys):
-            content.extend(self._record_content_parts(candidates[key][0], i))
-
+        content.extend(self._record_content_parts(
+            inp,
+            trailer="\n  OPERATOR output: " + json.dumps(
+                {name: value for name, _, value in judged}, default=str
+            ),
+            input_view=contexts.get(retrieval_context_key(inp)),
+        ))
         content.append({
             "type": "text",
             "text": (
-                f"\n\nFor each record, decide true if it satisfies the condition, false otherwise.\n"
-                f"Return ONLY valid JSON: {{\"decisions\": [true_or_false, ...]}} "
-                f"with {len(keys)} entries, in the same order as the records above."
+                f"\n\nScore each of the {len(judged)} fields above: 1 if the operator's value is "
+                "correct for this input, 0 if it is not. Where a field's instruction says to "
+                "return an empty string when the information is absent, an empty value is "
+                "CORRECT if this input genuinely does not contain it.\n"
+                f'Return ONLY valid JSON: {{"scores": [s1, ..., s{len(judged)}]}} -- one entry per '
+                "field, in the order listed above."
             ),
         })
 
-        try:
-            response = self._oracle_generate(content)
-            m = re.search(r"\{.*\}", response, re.DOTALL)
-            if not m:
-                print(
-                    f"[QualityEvaluator] per-op quality failed for {op_name}: oracle response "
-                    f"had no JSON object (len={len(response)}): {response[:300]!r}"
-                )
-                return None
-            decisions = json.loads(m.group()).get("decisions", [])
-            if len(decisions) < len(keys):
-                print(
-                    f"[QualityEvaluator] per-op quality failed for {op_name}: expected "
-                    f"{len(keys)} decisions, got {len(decisions)}"
-                )
-                return None
-            return sum(
-                1 for key, dec in zip(keys, decisions) if bool(dec) == candidates[key][1]
-            ) / len(keys)
-        except Exception as e:
-            print(f"[QualityEvaluator] per-op quality failed for {op_name} ({op_type}): {e}")
+        response = self._oracle_generate(content)
+        m = re.search(r"\{.*\}", response, re.DOTALL)
+        if not m:
+            print(
+                f"[QualityEvaluator] {op_name}: skipping one record -- oracle response had no "
+                f"JSON object (len={len(response)}): {response[:300]!r}"
+            )
             return None
+        scores = json.loads(m.group()).get("scores")
+        # Strict: a short or long list means the verdicts can't be lined up with the fields.
+        # Scoring the prefix anyway is how an operator whose output was 89% verbatim spans
+        # ended up recorded as 0.000.
+        if not isinstance(scores, list) or len(scores) != len(judged):
+            print(
+                f"[QualityEvaluator] {op_name}: skipping one record -- expected "
+                f"{len(judged)} scores, got {len(scores) if isinstance(scores, list) else scores!r}"
+            )
+            return None
+        # Missed fields contribute 0 to the numerator but still count in the denominator.
+        return sum(min(1.0, max(0.0, float(s))) for s in scores), len(cols)
 
     def _score_map_op(self, info: dict) -> float | None:
-        """Oracle judges whether plan's sem_map output fields are correct (batched call).
+        """Oracle judges whether a sem_map/rag_map's output fields are correct, one call per record.
 
-        Image-valued input fields are attached to the judge call as vision
-        inputs so the oracle can actually verify vision-derived output fields.
+        One record per call rather than one call for the whole operator: the batched form had to
+        hold every record's full input in a single prompt and answer with an
+        n_records x n_fields nested array (410 cells for CUAD's 41 clause types over 10 records)
+        with no room to reason per field, and the answers degenerated -- one plan scored 0.000 on
+        a BM25 rag_map whose output was 89% verbatim source spans, while the same plan's embedding
+        rag_map scored 0.951 in the same run.
+
+        What each call shows the judge:
+          - the operator's OWN input. For rag_map that is the retrieved chunks rather than the
+            source document (`retrieval_contexts`), so this scores the LLM step and not the
+            retrieval step -- a clause no chunk surfaced is not charged to the map.
+          - every field's NAME AND DESCRIPTION. The description is the operator's own instruction
+            for that field, and it is where conventions like "return an empty string if the
+            category is not present" are stated; with bare names the judge has to guess what ""
+            means on a task where most fields are legitimately empty.
+
+        Score is the flat mean over all (record, field) cells of the records that were judged.
+        That equals averaging per field across records and then across fields, because every
+        judged record contributes a verdict for every field.
+
+        Image-valued input fields are attached to the judge call as vision inputs so the oracle
+        can actually verify vision-derived output fields.
         """
         op_name = info.get("op_name", "?")
-        samples = info["samples"]
-        cols_names: list[str] = info["attributes"].get("cols", [])
-        if not cols_names:
+        cols = self._judge_cols(info["attributes"].get("cols", []))
+        if not cols:
             print(f"[QualityEvaluator] per-op quality skipped for {op_name}: no 'cols' in attributes")
             return None
 
         valid: list[tuple] = [
-            (inp, out) for inp, out in samples
+            (inp, out) for inp, out in info["samples"]
             if out is not None and hasattr(inp, "_source_indices")
         ]
         if not valid:
             print(f"[QualityEvaluator] per-op quality skipped for {op_name}: no samples with a non-None output")
             return None
+        valid = self._cap_judge_items(valid)
+        contexts = info.get("retrieval_contexts") or {}
 
-        n_fields = len(cols_names)
-        # Build an OpenAI-style multimodal content list: per-record text, with any
-        # image-valued input fields attached as image_url parts right after it.
-        content: list[dict] = [{
-            "type": "text",
-            "text": (
-                "You are evaluating whether a semantic map operator produced correct outputs.\n"
-                f"Output fields to evaluate: {cols_names}"
-            ),
-        }]
-        for i, (inp, out) in enumerate(valid):
-            out_d = self._dr_to_dict(out)
-            mapped = {}
-            for k in cols_names:
-                if k not in out_d:
-                    continue
-                value = out_d[k]
-                is_missing = value is None or (isinstance(value, float) and math.isnan(value))
-                mapped[k] = "" if is_missing else value
-            content.extend(self._record_content_parts(
-                inp, i,
-                trailer=f"\n  OPERATOR output fields {cols_names}: {json.dumps(mapped, default=str)}",
-            ))
-
-        content.append({
-            "type": "text",
-            "text": (
-                f"\n\nFor each record and each output field, score 1 if correct, 0 if incorrect.\n"
-                f"Return ONLY valid JSON: "
-                f'{{\"scores\": [[field0_rec0, field1_rec0, ...], [field0_rec1, ...], ...]}} '
-                f"with {len(valid)} inner lists each of length {n_fields}."
-            ),
-        })
-
-        try:
-            response = self._oracle_generate(content)
-            m = re.search(r"\{.*\}", response, re.DOTALL)
-            if not m:
-                print(
-                    f"[QualityEvaluator] per-op quality failed for {op_name}: oracle response "
-                    f"had no JSON object (len={len(response)}): {response[:300]!r}"
-                )
-                return None
-            data = json.loads(m.group())
-            scores_2d: list[list] = data.get("scores", [])
-            if not scores_2d:
-                print(f"[QualityEvaluator] per-op quality failed for {op_name}: 'scores' was empty/missing in {data!r}")
-                return None
-            n_records = len(valid)
-            # Average per field across records, then average across fields
-            field_avgs = []
-            for j in range(n_fields):
-                field_vals = [
-                    float(scores_2d[r][j])
-                    for r in range(min(len(scores_2d), n_records))
-                    if j < len(scores_2d[r])
-                ]
-                if field_vals:
-                    field_avgs.append(sum(field_vals) / len(field_vals))
-            if not field_avgs:
-                print(
-                    f"[QualityEvaluator] per-op quality failed for {op_name}: got {len(scores_2d)} score "
-                    f"row(s) for {n_records} record(s) x {n_fields} field(s), none usable"
-                )
-                return None
-            return sum(field_avgs) / len(field_avgs)
-        except Exception as e:
-            print(f"[QualityEvaluator] per-op quality failed for {op_name} (sem_map/rag_map): {e}")
+        scored = [
+            r for r in self._judge_in_parallel(
+                valid, lambda item: self._judge_map_record(op_name, cols, contexts, item)
+            )
+            if r is not None
+        ]
+        if not scored:
+            print(f"[QualityEvaluator] per-op quality failed for {op_name} (sem_map/rag_map): no record could be judged")
             return None
+        if len(scored) < len(valid):
+            print(
+                f"[QualityEvaluator] {op_name}: scored {len(scored)}/{len(valid)} records "
+                "(the rest could not be judged)"
+            )
+        total_cells = sum(n for _, n in scored)
+        return sum(s for s, _ in scored) / total_cells if total_cells else None

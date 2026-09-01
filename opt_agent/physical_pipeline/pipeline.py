@@ -1099,6 +1099,14 @@ class PhysicalPipeline:
                 "op_name": op_name,
                 "op_type": op.op_type,
                 "attributes": op.attributes,
+                # {source_indices -> {input_field: text}} for rag_map/rag_filter: the
+                # post-retrieval input view the op's LLM call actually received. Recorded by
+                # rag_common._record_retrieval_context on the chunked COPY of each candidate,
+                # which is why it can't be recovered from `samples` (those hold the untouched
+                # original). None for every non-RAG op. See _score_map_op.
+                "retrieval_contexts": getattr(
+                    getattr(op, "_pz_op", None), "_retrieval_contexts", None
+                ),
                 "samples": op_samples.get(id(op), []),
             }
 

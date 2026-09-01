@@ -184,7 +184,6 @@ class QualityEvaluator(PlanQualityEvaluator):
         run_dir: str | Path | None = None,
         oracle_reasoning_effort: str | None = None,
         use_oracle_ground_truth: bool = False,
-        op_sample_seed: int | None = None,
         **_ignored,
     ) -> None:
         # `**_ignored` absorbs the keywords the engine passes to every adapter's constructor
@@ -203,7 +202,6 @@ class QualityEvaluator(PlanQualityEvaluator):
             oracle_reasoning_effort=oracle_reasoning_effort,
             use_oracle_ground_truth=use_oracle_ground_truth,
             ground_truth_path=ground_truth_path,
-            op_sample_seed=op_sample_seed,
         )
 
     def has_ground_truth(self, ground_truth_df, ground_truth_path) -> bool:

@@ -29,4 +29,4 @@ class Map(Operator):
             fn_src = repr(udf)
         col_names = sorted(col["name"] for col in cols)
         self.attributes = {"cols": col_names, "udf": fn_src}
-        self.params_id = _compute_op_id(self.op_type, {"cols": col_names, "udf": fn_src})
+        self.params_id = _compute_op_id(self.op_type, self.attributes)

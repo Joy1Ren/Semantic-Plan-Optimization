@@ -177,6 +177,35 @@ def _compute_op_id(op_type: str, params: dict) -> str:
     return hashlib.sha256(payload.encode()).hexdigest()[:10]
 
 
+def _cols_attribute(cols: list[dict]) -> list[dict]:
+    """The `cols` entry of a sem_map/rag_map's `attributes`: name, type, and DESCRIPTION.
+
+    Carrying the description (not just the name) is what makes `attributes` a complete
+    identity for the operator, which two things depend on:
+
+      - `params_id` (= `_compute_op_id(op_type, attributes)`) is the `op_id` that
+        SampleBasedCostModel groups per-operator cost/latency/quality rows by. A column's
+        description IS the operator's prompt for that column, so two maps with the same
+        column names but different descriptions run different prompts at different token
+        counts -- pooling their stats under one id attributes one op's cost to the other.
+      - the oracle judge reads these descriptions to learn what each field was asked for
+        (see plan_quality_evaluator._score_map_op); with names alone it has to guess the
+        output convention, e.g. whether "" means "absent" or "the operator failed".
+
+    `type` is included for the same reason: it shapes the generated output schema. Rendered
+    as its name ("str") so `attributes` stays JSON-safe, and sorted by column name so two
+    ops that declare the same columns in a different order still hash alike.
+    """
+    return [
+        {
+            "name": col["name"],
+            "type": getattr(col.get("type"), "__name__", None) or str(col.get("type")),
+            "description": col.get("description") or "",
+        }
+        for col in sorted(cols, key=lambda c: c["name"])
+    ]
+
+
 def _make_schema(field_defs: dict):
     # Use palimpzest's pickleable/cached schema so all schemas live in the same
     # registry and work correctly with union_schemas, from_parent, etc.
@@ -203,12 +232,28 @@ class Operator:
     Each subclass sets class-level `stage_type` (execution dispatch key) and
     `op_type` (human-readable name used in stats), and populates instance
     attributes `attributes`, `params_id`, and `_pz_op` in its __init__.
+
+    Two invariants tie `attributes` and `params_id` together, and every subclass owes both:
+
+      1. `attributes` fully determines the operator's output. Everything that changes what it
+         produces belongs there -- a filter's condition, a map's per-column DESCRIPTIONS (that
+         is the prompt), the model, the resolved reasoning_effort, a UDF's source, RAG's
+         chunking and retrieval settings -- so that two operators agreeing on `attributes` are
+         interchangeable up to LLM sampling noise.
+      2. `params_id` is ALWAYS `_compute_op_id(self.op_type, self.attributes)` -- the whole
+         dict, never a hand-picked subset. Deriving it from a subset makes two operators that
+         behave differently share an id, and `params_id` is the `op_id` SampleBasedCostModel
+         groups measured cost/latency/selectivity rows by: a coarse id silently attributes one
+         operator's measurements to another. Note the consequence of an exact id -- an operator
+         the agent has not executed before finds no sampled stats and falls back to
+         SampleBasedCostModel's naive model-card estimate, rather than borrowing numbers from a
+         differently-configured operator.
     """
 
     stage_type: str  # filter | convert | project | limit | groupby | join
     op_type: str     # sem_filter | sem_map | sem_join | filter | project | limit | groupby
-    attributes: dict
-    params_id: str #10-char hex from op_type and attributes
+    attributes: dict  # complete behavioural identity; see invariant 1 above
+    params_id: str    # 10-char hex of op_type + ALL of attributes; see invariant 2 above
 
     def __init__(self):
         self.logical_op_id: str | None = None

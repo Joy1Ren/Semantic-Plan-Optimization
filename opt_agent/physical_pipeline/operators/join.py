@@ -151,4 +151,4 @@ class Join(Operator):
         self.self_join = self_join
         self.depends_on = depends_on
         self.attributes = {"condition": fn_src, "depends_on": depends_on}
-        self.params_id = _compute_op_id(self.op_type, {"condition": fn_src})
+        self.params_id = _compute_op_id(self.op_type, self.attributes)

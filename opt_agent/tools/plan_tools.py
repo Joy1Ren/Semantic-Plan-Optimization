@@ -6,7 +6,7 @@ import pathlib
 from typing import Any
 
 from agent_cost_model.opt_agent.cost_model_types import ResultsStore, _dump_opt_debug_artifacts, _normalize_plan_df
-from agent_cost_model.opt_agent.prompts import _quality_metric_reminder
+from agent_cost_model.opt_agent.prompts import _quality_metric_reminder, _sem_op_quality_docs
 
 from .base import Tool
 
@@ -282,7 +282,9 @@ Returns a compact summary dict with plan stats and per-operator stats. Key field
 - `quality`: 0–1 overall plan quality evaluated by an oracle. Higher is better.
   Treat oracle quality scores as ground truth.
 - `per_sem_op_quality`: per-semantic-operator quality (0–1). Use to diagnose
-  which operator is the bottleneck.
+  which operator is the bottleneck. `per_sem_op_quality_metric` states how that
+  score is computed for each operator type in this plan — read it before acting on
+  a low score, since the definition differs by operator type.
 - `cost_usd`, `latency_s`, `input_tokens`, `output_tokens`: aggregated over all ops.
 To inspect accumulated results use `plan_results.df` and `op_results.df`.
 To view sample input/output pairs use `get_op_samples(plan_name)`.
@@ -378,10 +380,25 @@ execute_plan("p1")
             except Exception as e:
                 print(f"[execute_plan] quality evaluation failed for {plan_name}: {type(e).__name__}: {e}")
 
+        total_cost = sum(e.get("cost_usd", 0) for e in per_op_list)
+        # latency_s: SUM of per-op per-record latencies (serial-equivalent). Kept as the plan's
+        # "actual latency" for the cost-model est-vs-act comparison, whose prediction (est.time)
+        # is also a per-op sum. wall_latency_s: real WALL-CLOCK time of this subset execution
+        # (from plan_dict), which reflects the join/convert parallelism.
+        total_latency = sum(e.get("latency_s", 0) for e in per_op_list)
+        wall_latency_s = float(plan_dict.get("latency_s", 0.0) or 0.0)
+        total_in_tok = sum(e.get("input_tokens", 0) for e in per_op_list)
+        total_out_tok = sum(e.get("output_tokens", 0) for e in per_op_list)
+
         try:
             _dump_opt_debug_artifacts(
                 self._results_prefix, self._query_id, plan_name,
                 raw_output_df, plan_output_df, plan_context, quality_result,
+                plan_metrics={
+                    "cost_usd": total_cost,
+                    "latency_s": total_latency,
+                    "wall_latency_s": wall_latency_s,
+                },
                 runcount=self._runcount,
                 # Set by PlanQualityEvaluator.evaluate on the call just above; absent when
                 # the plan has no evaluator or evaluation raised. The ground truth is not passed
@@ -412,16 +429,6 @@ execute_plan("p1")
                 ],
             }
 
-        total_cost = sum(e.get("cost_usd", 0) for e in per_op_list)
-        # latency_s: SUM of per-op per-record latencies (serial-equivalent). Kept as the plan's
-        # "actual latency" for the cost-model est-vs-act comparison, whose prediction (est.time)
-        # is also a per-op sum. wall_latency_s: real WALL-CLOCK time of this subset execution
-        # (from plan_dict), which reflects the join/convert parallelism.
-        total_latency = sum(e.get("latency_s", 0) for e in per_op_list)
-        wall_latency_s = float(plan_dict.get("latency_s", 0.0) or 0.0)
-        total_in_tok = sum(e.get("input_tokens", 0) for e in per_op_list)
-        total_out_tok = sum(e.get("output_tokens", 0) for e in per_op_list)
-
         plan_row = {
             "plan_name": plan_name,
             "description": entry.get("description", ""),
@@ -447,9 +454,15 @@ execute_plan("p1")
         if quality_result is not None and getattr(quality_result, "quality_note", None):
             plan_summary["quality_note"] = quality_result.quality_note
         # Remind the agent, on every execution, what `quality` means and how it differs from
-        # per_sem_op_quality (context for why the two can diverge).
-        return {
+        # per_sem_op_quality (context for why the two can diverge), plus how each per-op score in
+        # THIS plan is computed -- the definition differs by operator type, and a rag_* score in
+        # particular measures only the LLM step, not retrieval.
+        result = {
             "plan_summary": plan_summary,
             "op_summary": per_op_list,
             "quality_metric": _quality_metric_reminder(self._eval_metric),
         }
+        sem_op_docs = _sem_op_quality_docs(o.get("op_type") for o in per_op_list)
+        if sem_op_docs:
+            result["per_sem_op_quality_metric"] = sem_op_docs
+        return result

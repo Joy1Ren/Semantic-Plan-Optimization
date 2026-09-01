@@ -27,6 +27,5 @@ class SemFilter(Operator):
         )
         self._pz_op.model = model
         self.depends_on = depends_on
-        self.attributes = {"condition": condition, "model": model.value, "depends_on": depends_on}
-        self.params_id = _compute_op_id(self.op_type, {"model": model.value})
-        # self.params_id = _compute_op_id(self.op_type, self.attributes)
+        self.attributes = {"condition": condition, "model": model.value, "reasoning_effort": eff, "depends_on": depends_on}
+        self.params_id = _compute_op_id(self.op_type, self.attributes)

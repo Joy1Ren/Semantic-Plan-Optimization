@@ -8,7 +8,7 @@ from palimpzest.core.models import GenerationStats
 from palimpzest.query.operators.convert import LLMConvert
 from palimpzest.query.operators.rag import RAGConvert as _PZRAGConvert
 
-from ..base import DEFAULT_RAG_EMBEDDING_MODEL, Operator, _compute_op_id, _has_image_field, _resolve_reasoning_effort
+from ..base import DEFAULT_RAG_EMBEDDING_MODEL, Operator, _cols_attribute, _compute_op_id, _has_image_field, _resolve_reasoning_effort
 from .rag_common import _RAG_PLACEHOLDER_MODEL, _rag_embed, rag_get_chunked_candidate
 
 
@@ -142,7 +142,8 @@ class RagMap(Operator):
         self._cols_full = cols  # preserved for make_oracle_copy
         self.attributes = {
             "model": model.value,
-            "cols": sorted(col["name"] for col in cols),
+            "reasoning_effort": eff,
+            "cols": _cols_attribute(cols),
             "embedding_query": embedding_query,
             "chunk_size": chunk_size,
             "num_chunks_per_field": num_chunks_per_field,

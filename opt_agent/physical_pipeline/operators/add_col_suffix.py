@@ -76,4 +76,4 @@ class AddColSuffix(Operator):
         )
         self.suffix = suffix   # preserved for make_oracle_copy
         self.attributes = {"suffix": suffix}
-        self.params_id = _compute_op_id(self.op_type, {"suffix": suffix})
+        self.params_id = _compute_op_id(self.op_type, self.attributes)

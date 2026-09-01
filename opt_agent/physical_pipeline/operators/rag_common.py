@@ -202,6 +202,38 @@ def _format_ranked_chunks(chunks: list[str], keep_idx: list[int], sims: list[flo
     )
 
 
+def retrieval_context_key(record: DataRecord) -> str | None:
+    """Identity under which a record's post-retrieval input view is stored and looked up.
+
+    `_source_indices` survives `DataRecord.copy()` (see palimpzest's DataRecord.copy), which is
+    what makes this work at all: PZ's RAGConvert/RAGFilter chunk a COPY of the candidate, so the
+    record the pipeline captured as the operator's input sample is NOT the object retrieval
+    mutated. Keying on source indices is how the two are matched back up -- the same convention
+    _oracle_judge_filter_join_op already uses to dedupe filter/join samples.
+    """
+    indices = getattr(record, "_source_indices", None)
+    return None if indices is None else str(indices)
+
+
+def _record_retrieval_context(op: Any, candidate: DataRecord, input_view: dict[str, str]) -> None:
+    """Remember the post-retrieval input this op actually sent to the LLM, for the oracle judge.
+
+    Without this the judge scores a rag_map/rag_filter against the FULL source field while the
+    operator only ever saw the retrieved chunks, which silently turns every retrieval miss into
+    an apparent extraction error and makes the per-op score unable to tell the two apart.
+
+    Written from pipeline worker threads, one distinct key per record, and read only after
+    execution finishes.
+    """
+    key = retrieval_context_key(candidate)
+    if key is None or not input_view:
+        return
+    store = getattr(op, "_retrieval_contexts", None)
+    if store is None:
+        store = op._retrieval_contexts = {}
+    store[key] = input_view
+
+
 def rag_get_chunked_candidate(op: Any, candidate: DataRecord, input_fields: list[str]) -> tuple[DataRecord, GenerationStats]:
     """Shared chunk/score/select body for RAGFilter/RAGConvert.get_chunked_candidate."""
     embed_stats = GenerationStats()
@@ -238,5 +270,15 @@ def rag_get_chunked_candidate(op: Any, candidate: DataRecord, input_fields: list
 
         keep_idx = _rag_select_chunk_indices(sims, op.num_chunks_per_field, op.similarity_threshold)
         candidate[field_name] = _format_ranked_chunks(chunks, keep_idx, sims, similarity_method)
+
+    # Snapshot every input field as it now stands -- retrieved chunks for the fields that were
+    # long enough to chunk, and the untouched original for the ones that fell under chunk_size
+    # (the `continue` above) or aren't text. That whole view, not just the chunked fields, is
+    # what the LLM call below receives, so it is what the oracle judge has to score against.
+    _record_retrieval_context(
+        op,
+        candidate,
+        {f: candidate[f] for f in input_fields if candidate[f] is not None},
+    )
 
     return candidate, embed_stats
