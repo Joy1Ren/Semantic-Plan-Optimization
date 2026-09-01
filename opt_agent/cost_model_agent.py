@@ -886,13 +886,26 @@ class CostModelAgent:
             self.checker_checks = list(checker.checks)
 
     def _run_config(self) -> dict:
-        """The run's configuration, recorded identically in the final answer and in
-        metrics/final_eval.json so the two can never disagree about how a run was set up."""
+        """Per-LLM-actor settings and spend, grouped by WHO spent it.
+
+        One block per actor that runs a model during the search -- the core agent doing the
+        plan search, the exploration checker reviewing it, and the oracle scoring plan quality
+        -- each carrying that actor's model, how it was configured, and what it cost. Keeping
+        the dollars next to the model that spent them is what makes a run's cost readable
+        after the fact.
+
+        The one search cost that is NOT here is `subset_execution_cost`: executing candidate
+        plans on the subset is not an actor, it is the work being measured. `_total_opt_cost`
+        adds it back.
+
+        Recorded identically in the final answer and in metrics/final_eval.json, so the two
+        can never disagree about how a run was set up or what it spent.
+        """
         return {
-            "oracle": {
-                "oracle_ground_truth": self.use_oracle_ground_truth,
-                "oracle_model": self.oracle_model,
-                "oracle_reasoning_effort": self.oracle_reasoning_effort,
+            "core_agent": {
+                "model": getattr(self.llm, "model", None),
+                "reasoning_effort": getattr(self.llm, "reasoning_effort", None),
+                "cost": round(self.agent_cost_usd, 6),
             },
             "optimization_checker": {
                 "use_checker": self.use_checker,
@@ -903,7 +916,27 @@ class CostModelAgent:
                 "n_checks": len(self.checker_checks),
                 "n_vetoes": self.checker_vetoes,
             },
+            "oracle": {
+                "oracle_ground_truth": self.use_oracle_ground_truth,
+                "oracle_model": self.oracle_model,
+                "oracle_reasoning_effort": self.oracle_reasoning_effort,
+                "cost": round(self.oracle_cost_usd, 6),
+            },
         }
+
+    def _total_opt_cost(self) -> float:
+        """Every dollar the SEARCH spent: each actor's LLM spend (core agent, exploration
+        checker, oracle) plus executing candidate plans on the subset.
+
+        Excludes running the CHOSEN plan on the full dataset at the end -- that is the cost of
+        using the result, not of finding it, and is reported per run under runK."""
+        return round(
+            self.agent_cost_usd
+            + self.checker_cost_usd
+            + self.oracle_cost_usd
+            + self.execution_cost_usd,
+            6,
+        )
 
     # -- main loop ---------------------------------------------------------
     def run(
@@ -1008,7 +1041,7 @@ class CostModelAgent:
                     parsed.result["plan_codes"] = plan_codes
                     parsed.result["plan_descriptions"] = {name: entry.get("description", "") for name, entry in plans.items()}
                     parsed.result["plan_optimizations"] = {name: entry.get("optimizations") for name, entry in plans.items()}
-                    parsed.result["agent_model"] = getattr(self.llm, "model", None)
+                    # Model settings and spend for every actor, including the core agent's own.
                     parsed.result.update(self._run_config())
                 self._save_results_df(plan_results, query_info, final_answer=parsed.result)
                 helper_consumed = self._merge_sub_agent_trajectory(
@@ -1111,7 +1144,6 @@ class CostModelAgent:
             result["plan_codes"] = plan_codes
             result["plan_descriptions"] = {name: entry.get("description", "") for name, entry in plans.items()}
             result["plan_optimizations"] = {name: entry.get("optimizations") for name, entry in plans.items()}
-            result["agent_model"] = getattr(self.llm, "model", None)
             result.update(self._run_config())
         self._run_final_evaluation(result, plans, query_info, plan_codes, plan_results)
         return result
@@ -1420,13 +1452,17 @@ class CostModelAgent:
             # Only benchmarks that actually have a scale-factor axis record one (SemBench does,
             # CUAD does not) -- recording a placeholder would make it look like a real dimension.
             **({"scale_factor": scale_factor} if scale_factor is not None else {}),
-            "agent_model": getattr(self.llm, "model", None),
-            "agent_cost": round(self.agent_cost_usd, 6),
-            "agent_latency": round(self.opt_latency, 4),
-            "subset_execution_cost": round(self.execution_cost_usd, 6),
-            "oracle_cost": round(self.oracle_cost_usd, 6),
-            **self._run_config(),
             "metric_type": metric_type,
+            # Model settings and spend, grouped by the actor that spent it.
+            **self._run_config(),
+            # Executing candidate plans on the subset: the work the search was measuring,
+            # rather than any one actor's LLM spend.
+            "subset_execution_cost": round(self.execution_cost_usd, 6),
+            "total_opt_cost": self._total_opt_cost(),
+            # Wall-clock seconds from the start of the search to the accepted final answer --
+            # every LLM step, subset execution, oracle scoring and exploration check included.
+            # The full-dataset runs below are NOT in it; they happen after the plan is chosen.
+            "total_opt_latency": round(self.opt_latency, 4),
             "plans_written": plans_written,
             "plans_executed": plans_executed,
             "unique_plans_executed": unique_plans_executed,

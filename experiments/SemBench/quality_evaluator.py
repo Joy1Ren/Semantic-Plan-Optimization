@@ -300,7 +300,6 @@ class QualityEvaluator(PlanQualityEvaluator):
         run_dir: str | Path | None = None,
         oracle_reasoning_effort: str | None = None,
         use_oracle_ground_truth: bool = True,
-        op_sample_seed: int | None = None,
     ) -> None:
         # Both come from benchmark.yaml (`subset_path`, `ground_truth_path`) via the runner, so
         # this adapter never re-derives a path the config already declares.
@@ -332,7 +331,6 @@ class QualityEvaluator(PlanQualityEvaluator):
                 use_case, scale_factor, query_id, subset_path, ground_truth_path
             ),
             ground_truth_path=ground_truth_path,
-            op_sample_seed=op_sample_seed,
         )
 
 

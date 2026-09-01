@@ -194,6 +194,7 @@ def _dump_opt_debug_artifacts(
     normalized_output_df: Any,
     plan_context: Any,
     quality_result: Any,
+    plan_metrics: dict | None = None,
     runcount: Any = None,
     oracle_df: Any = None,
     evaluator: Any = None,
@@ -214,7 +215,10 @@ def _dump_opt_debug_artifacts(
                 normalized_output.json     exactly what the benchmark's scorer was handed
                                            (written by evaluator.write_scoring_input)
                 oracle_result.csv          THIS plan's own oracle-substituted output
-                quality_result.json        the resulting scores
+                plan_result.json           the plan's quality (overall and per semantic
+                                           operator), cost, and latency (both the wall-clock
+                                           time of the subset run and the sum of per-op
+                                           per-record latencies)
                 per_sem_op_info.json       per-semantic-operator input/output samples
             p2/ ...
 
@@ -244,14 +248,18 @@ def _dump_opt_debug_artifacts(
     if oracle_df is not None:
         oracle_df.to_csv(out_dir / "oracle_result.csv", index=False)
 
-    quality_summary = None
-    if quality_result is not None:
-        quality_summary = {
-            "quality": quality_result.quality,
-            "per_sem_op_quality": quality_result.per_sem_op_quality,
-            "quality_note": quality_result.quality_note,
-        }
-    (out_dir / "quality_result.json").write_text(_json.dumps(quality_summary, indent=2, default=str))
+    # One record per plan: what the plan scored AND what it cost/took, so a plan directory can be
+    # read on its own without cross-referencing the run's metrics CSVs.
+    plan_summary: dict[str, Any] = {"plan_name": str(plan_name)}
+    plan_summary.update(plan_metrics or {})
+    plan_summary.update({
+        "quality": quality_result.quality if quality_result is not None else None,
+        "per_sem_op_quality": (
+            quality_result.per_sem_op_quality if quality_result is not None else None
+        ),
+        "quality_note": quality_result.quality_note if quality_result is not None else None,
+    })
+    (out_dir / "plan_result.json").write_text(_json.dumps(plan_summary, indent=2, default=str))
 
     per_sem_op_info: dict[str, Any] = {}
     for stage_idx, info in (plan_context.per_sem_op_info if plan_context is not None else {}).items():
