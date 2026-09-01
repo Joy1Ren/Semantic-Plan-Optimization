@@ -10,24 +10,80 @@ from agent_cost_model.opt_agent.prompts import _quality_metric_reminder
 
 from .base import Tool
 
+# ---------------------------------------------------------------------------
+# Operator input/output samples
+#
+# A sample is stored per FIELD ({field_name: value}) rather than as one flat
+# `str(DataRecord)`, which went through palimpzest's DataRecord.__str__ and cut EVERY field to 15
+# characters (palimpzest/core/elements/records.py). Per-field storage is what lets the display
+# below truncate, budget, and de-duplicate values field by field.
+# ---------------------------------------------------------------------------
+SAMPLE_FIELD_CHARS = 100    # per-field cap applied when a sample is STORED
+OP_DISPLAY_BUDGET = 4000    # per-operator cap on value chars applied when samples are DISPLAYED
+_ELLIPSIS = "…"
+
+
+def _cap(s: str, limit: int) -> str:
+    return s if len(s) <= limit else s[:limit] + _ELLIPSIS
+
+
+def _record_fields(dr: Any, limit: int = SAMPLE_FIELD_CHARS) -> dict[str, str] | None:
+    """{field_name: value} for one DataRecord, each value stringified and capped at `limit` chars.
+
+    None (the record did not pass the operator) maps to None."""
+    if dr is None:
+        return None
+    try:
+        schema_cls = dr.schema if isinstance(dr.schema, type) else type(dr.schema)
+        field_names = list(schema_cls.model_fields)
+    except Exception:
+        return {"<record>": _cap(str(dr), limit)}
+    return {k: _cap(str(getattr(dr, k, None)), limit) for k in field_names}
+
+
+def _allocate(lengths: list[int], budget: int) -> list[int]:
+    """Max-min fair split of `budget` characters over values of the given lengths.
+
+    Every value that fits in its equal share (budget / #values) prints in full, and the share it
+    does not use is redistributed over the values that are still too long — repeatedly, shortest
+    first — so the budget is spent evenly without cutting short values needlessly."""
+    alloc = [0] * len(lengths)
+    remaining_budget, remaining_n = budget, len(lengths)
+    for i in sorted(range(len(lengths)), key=lambda i: lengths[i]):
+        share = remaining_budget // remaining_n if remaining_n > 0 else 0
+        alloc[i] = min(lengths[i], max(share, 0))
+        remaining_budget -= alloc[i]
+        remaining_n -= 1
+    return alloc
+
+
+def _unpack_op_samples(entry: Any) -> tuple[str, list]:
+    """(op_type, pairs) from a stored op_samples entry. Accepts the current
+    {"op_type", "samples"} shape and the older bare list of {"input", "output"} strings."""
+    if isinstance(entry, dict):
+        return str(entry.get("op_type") or ""), list(entry.get("samples") or [])
+    return "", list(entry or [])
+
 
 class GetOpSamplesTool(Tool):
     name = "get_op_samples"
     doc = """\
-### get_op_samples(plan_name, op_name=None, n=3)
+### get_op_samples(plan_name, op_name, n=3)
 Retrieve sample (input, output) pairs for an executed plan from `plan_results`.
-Optionally scope to a single operator with `op_name` (e.g. "p1_op1").
+You must scope to a single operator with `op_name`, which is `{plan}_op{idx}_{op_type}`
+(e.g. "p1_op1_rag_map") — the same names `plan_str` and `op_results` use.
 Returns at most `n` samples per operator.
 
 ```python
-get_op_samples("p1")                  # all operators, 3 samples each
-get_op_samples("p1", "p1_op2", n=5)  # just op2, up to 5 samples
+get_op_samples("p1", "p1_op2_sem_map", n=5)   # up to 5 samples from this operator
 ```"""
 
     def __init__(self, plan_results: ResultsStore) -> None:
         self._plan_results = plan_results
 
-    def __call__(self, plan_name: str, op_name: str | None = None, n: int = 3) -> str:
+    def __call__(self, plan_name: str, op_name: str, n: int = 3) -> str:
+        if not op_name:
+            return "You must specify an operator name (e.g. 'p1_op2_sem_map') to retrieve samples."
         row = next((r for r in self._plan_results.rows if r.get("plan_name") == plan_name), None)
         if row is None:
             available = [r.get("plan_name") for r in self._plan_results.rows]
@@ -39,19 +95,86 @@ get_op_samples("p1", "p1_op2", n=5)  # just op2, up to 5 samples
             if op_name not in samples:
                 return f"No operator {op_name!r} in plan {plan_name!r}. Available: {list(samples)}"
             samples = {op_name: samples[op_name]}
-        lines = []
-        for op, pairs in samples.items():
-            lines.append(f"{op} ({min(len(pairs), n)}/{len(pairs)} samples shown):")
-            for i, pair in enumerate(pairs[:n]):
-                lines.append(f"  [{i}] input:  {pair['input']}")
-                lines.append(f"       output: {pair['output']}")
+
+        # De-duplication is a whole-plan concern: it collapses values that a downstream operator
+        # merely carries through from an upstream one. Asking for a single operator prints it
+        # in full (subject to the char budget). Keyed by (sample index, field name) so that two
+        # different records of the same operator never collapse into each other.
+        dedup = op_name is None
+        seen: dict[tuple[int, str], str] = {}
+
+        lines = [
+            f"[fields capped at {SAMPLE_FIELD_CHARS} chars when sampled, "
+            f"{OP_DISPLAY_BUDGET} chars of values per operator when shown"
+            + ("; `field=…` = unchanged from where it was first shown above]" if dedup else "]")
+        ]
+        for op, entry in samples.items():
+            op_type, pairs = _unpack_op_samples(entry)
+            shown = pairs[:n]
+            # Filters and joins do not rewrite fields: the sampled output IS the input record when
+            # the record passes, and None when it does not (see PhysicalPipeline._execute_core).
+            # Printing the verdict says everything repeating every field would.
+            gate = "filter" if op_type.endswith("filter") else "join condition" if op_type.endswith("join") else None
+
+            # Pass 1: lay out every cell, marking the ones de-duplication collapses.
+            rendered: list[tuple[int, str, Any]] = []   # (sample idx, side, str | list[cell])
+            budgeted: list[dict] = []                   # cells that still need a char allowance
+            for i, pair in enumerate(shown):
+                for side in ("input", "output"):
+                    fields = pair.get(side) if isinstance(pair, dict) else None
+                    if side == "output" and gate is not None:
+                        rendered.append((i, side, f"passed {gate}" if fields is not None else f"did not pass {gate}"))
+                        continue
+                    if fields is None:
+                        rendered.append((i, side, "∅"))
+                        continue
+                    if not isinstance(fields, dict):    # legacy flat-string sample
+                        rendered.append((i, side, str(fields)))
+                        continue
+                    cells = []
+                    for k, v in fields.items():
+                        collapsed = dedup and seen.get((i, k)) == v
+                        cell = {"field": k, "value": v, "collapsed": collapsed, "alloc": 0}
+                        cells.append(cell)
+                        if not collapsed:
+                            seen[(i, k)] = v
+                            budgeted.append(cell)
+                    rendered.append((i, side, cells))
+
+            # Pass 2: spend this operator's char budget over the cells that are actually printed.
+            for cell, alloc in zip(budgeted, _allocate([len(c["value"]) for c in budgeted], OP_DISPLAY_BUDGET)):
+                cell["alloc"] = alloc
+
+            lines.append(f"{op} ({len(shown)}/{len(pairs)} samples shown):")
+            for i, side, payload in rendered:
+                label = f"  [{i}] input:  " if side == "input" else "       output: "
+                body = payload if isinstance(payload, str) else _render_cells(payload)
+                lines.append(f"{label}{body}")
         return "\n".join(lines)
+
+
+def _render_cells(cells: list[dict]) -> str:
+    # Very common once de-duplication is on (a filter's input, or any operator that only reads
+    # what an upstream operator produced): naming every carried-through field one by one is pure
+    # noise, so say it once.
+    if cells and all(c["collapsed"] for c in cells):
+        return f"{{{_ELLIPSIS} all {len(cells)} fields unchanged}}"
+    parts = []
+    for cell in cells:
+        value, alloc = cell["value"], cell["alloc"]
+        if cell["collapsed"] or alloc <= 0:
+            parts.append(f"{cell['field']}={_ELLIPSIS}")
+        elif alloc < len(value):
+            parts.append(f"{cell['field']}={value[:alloc]!r}{_ELLIPSIS}")
+        else:
+            parts.append(f"{cell['field']}={value!r}")
+    return "{" + ", ".join(parts) + "}"
 
 
 class WritePlanTool(Tool):
     name = "write_plan"
     doc = """\
-### write_plan(code, name, description="")
+### write_plan(code, name, description="", optimizations=None)
 Build and store a physical query plan WITHOUT executing it. `code` is a Python
 string that constructs a PhysicalPipeline and returns it as its last expression —
 do NOT call `.run()` in the plan code; `execute_plan` handles execution.
@@ -60,8 +183,27 @@ high-level label of the plan and the optimizations it embodies
 (e.g. "cheap sem_filter on truncated text, then sem_filter on image") — it is
 shown back to you in cost/estimate tables and helps you compare optimization ideas.
 
-After this call, `plans[name]["plan"]` holds the built pipeline and
-`plans[name]["description"]` holds your label.
+`optimizations` records WHICH optimizations this plan uses and HOW FAR each one is
+pushed. Pass a dict with the top-level keys "improve quality" and/or "reduce cost",
+each mapping an optimization name you choose to the extent you took it:
+
+```python
+optimizations={
+    "improve quality": {"model": "medium",
+                        "logical structure": "divide single sem_map into four separate sem_map"},
+    "reduce cost": {"input truncation": "embedding-based RAG before map"},
+}
+```
+
+The structure is free-form — name the optimizations in your own words, and include
+only the ones this plan ACTUALLY uses (not every plan reduces cost, not every plan
+improves quality). The *extent* is the part that matters: write "medium" / "top-3
+chunks" / "4-way split", not just "model" / "truncation", so that how far a knob has
+been turned is readable from the record.
+
+After this call, `plans[name]["plan"]` holds the built pipeline,
+`plans[name]["description"]` holds your label, and `plans[name]["optimizations"]`
+holds what you recorded here.
 
 Use `load_data(filename)` to read the relavent CSV and seed the pipeline's source table.
 Use `add_image_data(pipeline: PhysicalPipeline, image_col: str)` to attach images: it adds a NEW
@@ -78,7 +220,8 @@ email.sem_filter("this email quotes someone outside of the the sender's company"
 email.project(["emailId"])
 email.limit(5)
 email
-\"\"\", "p1", description="baseline: single cheap sem_filter on full text")
+\"\"\", "p1", description="baseline: single cheap sem_filter on full text",
+   optimizations={"reduce cost": {"model": "weak"}})
 # `plan_name` is automatically set to the name you pass (here "p1")
 # plans["p1"]["plan"] now holds the built `email`pipeline instance.
 ```"""
@@ -88,7 +231,9 @@ email
         self._plans = plans
         self._executor = executor
 
-    def __call__(self, code: str, plan_name: str, description: str = "") -> dict:
+    def __call__(
+        self, code: str, plan_name: str, description: str = "", optimizations: Any = None
+    ) -> dict:
         try:
             from agent_cost_model.opt_agent.physical_pipeline import PhysicalPipeline
         except ImportError:
@@ -104,8 +249,25 @@ email
             )
 
         self._plan_codes[plan_name] = code
-        self._plans[plan_name] = {"plan": pipeline, "description": description}
-        return {"plan_name": plan_name, "description": description, "total_plans": len(self._plan_codes)}
+        # `optimizations` is stored EXACTLY as given and never validated: its structure is a
+        # contract between the plan-writing agent and the exploration checker, both LLMs. No
+        # code here (or anywhere else) reads its keys.
+        self._plans[plan_name] = {
+            "plan": pipeline, "description": description, "optimizations": optimizations,
+        }
+        result = {
+            "plan_name": plan_name,
+            "description": description,
+            "optimizations": optimizations,
+            "total_plans": len(self._plan_codes),
+        }
+        if not optimizations:
+            result["warning"] = (
+                "No `optimizations` recorded for this plan. Pass optimizations={...} naming which "
+                "optimizations it uses and how far each is pushed, so the optimizations you have "
+                "and haven't tried stay legible across plans."
+            )
+        return result
 
 
 class ExecutePlanTool(Tool):
@@ -235,15 +397,20 @@ execute_plan("p1")
                 f"Plan {plan_name!r} execution failed: {type(plan_exec_error).__name__}: {plan_exec_error}"
             )
 
-        # Build op_samples for GetOpSamplesTool compatibility
-        op_samples: dict[str, list] = {}
+        # Build op_samples for GetOpSamplesTool. Records are stored field by field (each value
+        # capped at SAMPLE_FIELD_CHARS) so the display can budget and de-duplicate them; op_type
+        # rides along so the display knows e.g. that a filter's output is just a verdict.
+        op_samples: dict[str, dict] = {}
         for _stage_idx, info in plan_context.per_sem_op_info.items():
             op_n = info["op_name"]
             raw_samples = info.get("samples", [])
-            op_samples[op_n] = [
-                {"input": str(inp), "output": str(out) if out is not None else None}
-                for inp, out in raw_samples[:5]
-            ]
+            op_samples[op_n] = {
+                "op_type": info.get("op_type", ""),
+                "samples": [
+                    {"input": _record_fields(inp), "output": _record_fields(out)}
+                    for inp, out in raw_samples[:5]
+                ],
+            }
 
         total_cost = sum(e.get("cost_usd", 0) for e in per_op_list)
         # latency_s: SUM of per-op per-record latencies (serial-equivalent). Kept as the plan's
@@ -258,6 +425,7 @@ execute_plan("p1")
         plan_row = {
             "plan_name": plan_name,
             "description": entry.get("description", ""),
+            "optimizations": entry.get("optimizations"),
             "plan_str": str(pipeline),
             "cost_usd": total_cost,
             "latency_s": total_latency,

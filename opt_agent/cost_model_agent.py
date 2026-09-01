@@ -65,6 +65,7 @@ from agent_cost_model.opt_agent.prompts import (
     _quality_metric_section,
 )
 from agent_cost_model.opt_agent.cost_helper_agent import CostHelperAgent
+from agent_cost_model.opt_agent.exploration_checker_agent import ExplorationCheckerAgent
 from agent_cost_model.opt_agent.tools import (
     ComparePlanCostsTool,
     EstimatePlanCostTool,
@@ -88,6 +89,7 @@ class _RunContext:
     system: str
     registry: CostModelRegistry
     cost_helper: "CostHelperAgent | None"
+    checker: "ExplorationCheckerAgent | None"
     quality_evaluator: Any
     plan_codes: dict
 
@@ -107,32 +109,31 @@ class CostModelAgent:
         1. Explore the data: call `list_files()` to see available CSVs and folders,
            `explore_schema(filename)` and `explore_sample(filename)` to understand each table's
            columns and format. You ALSO have direct access to the full CSVs via `explore_data(filename)`,
-           which returns the whole table as a DataFrame. Use it to compute AGGREGATE statistics —
-           e.g. how many rows contain a keyword/keyphrase, or `value_counts()` on a column — to gauge
-           how common an item or attribute is (if "plastic" appears in 60% of rows but "marble" in
-           2%, plastic items are far more common). This informs the selectivity of your filters, the
-           size of the tables feeding a join, and the class distribution of a classification/search
-           task (a rare target vs. common groups) — let it GUIDE how you design plans. Keep
-           exploration lightweight: do NOT run excessive regex/brute-force scans, and never use the
-           data to solve the query and reverse-engineer a plan; the plan must remain a general solution.
-           If the dataset has an `images/` folder, you can SEE a few product images with
+           which returns the whole table as a DataFrame. Use it to understand the structure of the file(s)
+           and compute AGGREGATE statistics — e.g. how many rows contain a keyword/keyphrase, or
+           `value_counts()` on a column to gauge how common an item or attribute is. This informs the
+           selectivity of your filters, the size of the tables feeding a join, and the class distribution of
+           a classification/search task (a rare target vs. common groups). Let it GUIDE how you design plans --
+           do not rely on exploration to solve the query and do not hardcode row IDs.
+           If the dataset has an `images/` folder, you can inspect a few product images with
            `explore_images(ids)` (up to 5, selected by the dataset's image id column) — useful to judge what a vision
            operator would work with. Images are shown once and are costly, so inspect just a couple.
-        2. Write a plan with `write_plan(code, name)`.
+        2. Write a plan with `write_plan(code, name, description, optimizations)`.
            - `code` builds a PhysicalPipeline instance and returns it as the last expression.
            - `name` is a string identifier you choose, e.g. "p1", "p2", "p3", ...
              Use a NEW unique name for each new plan — never reuse a name for a different plan.
-           - NEVER hardcode row IDs, indexes, or values copied from `explore_sample`/`explore_data`
-             output to identify specific records (e.g. `filter(lambda row: row["id"] in [3, 17, 42])`
+           - ALWAYS pass `optimizations`, recording which optimizations this plan uses and how far
+             each one is pushed (see the write_plan tool description). This is how the record of
+             what you have and have not tried stays legible across plans.
+           - NEVER hardcode row IDs to identify specific records (e.g. `filter(lambda row: row["id"] in [3, 17, 42])`
              is cheating and invalid). What you learn from exploration may only shape HOW you build a
              general plan, not which records it targets.
-           - DO use `sem_filter` / `sem_map` for conditions that need semantic judgment, and prefer
+           - DO use semantic operators for conditions that need semantic judgment, and prefer
              deterministic, free Python/regex functions in plain `filter` / `map` when a condition
              can be expressed that way — e.g. `filter(lambda row: row["score"] >= 4)`,
              `filter(lambda row: row["description"].isin(["settee", "sofa", "couch"]))`, or
              `map(lambda row: {"red_freq_count": row["description"].str.count("red")}, ...)`.
-             These are general (they don't depend on which specific rows exist) and cost nothing to
-             run, unlike a semantic op.
+             These are general and save on cost and latency.
            - `plans[name]["plan"]` is populated immediately with the newly written PhysicalPipeline instance.
         3. Execute with `execute_plan(name)`:
            - Runs on a reproducible sample of records (same records across all plans).
@@ -140,23 +141,19 @@ class CostModelAgent:
            - Appends per-operator stats to `op_results` (cost_usd, latency_s, tokens, num_records per op).
            - After execution, `plans[name]["plan"]` is updated with the executed PhysicalPipeline.
         4. Evaluate with `plan_results.df` and `op_results.df`:
-           - `quality`: 0–1 overall plan quality evaluated by an oracle. Higher is better.
-             Treat oracle quality scores as ground truth — do not try to replicate or
-             reverse-engineer the oracle; simply observe and optimize.
+           - `quality`: 0–1 overall plan quality.
            - `per_sem_op_quality`: per-semantic-operator quality (0–1). Use to diagnose
              which operator is the bottleneck. Use `get_op_samples(plan_name)` to inspect
              input/output pairs for an operator.
         5. Based on `plan_results.df` and `op_results.df`, write ONE new plan and execute it,
-           then repeat from step 2. Each new plan should embody a DIFFERENT optimization idea
-           (or a COMBINATION of ideas that worked). Levers for lowering cost and latency include:
+           then repeat from step 2. Each new plan should embody a NEW optimization idea
+           or a COMBINATION of ideas that worked. Levers for lowering cost and latency include:
            swapping to a cheaper/faster model, narrowing `depends_on` to fewer columns, truncating long text with a `map`
            before a semantic op, reordering to push selective filters earlier, removing images,
            or changing the logical structure. Levers for increasing quality include: swapping to a more capable model,
            being less aggressive with pre-filtering or truncation, or changing logical structure.
            - Don't just hunt for cost cuts that hold quality steady — also spend some plans actively
-             trying to raise quality, then weigh whether the resulting cost/latency is worth it. Some
-             queries are hard and won't get close to 1.0; that's fine, but you should still have
-             pushed on quality before settling.
+             trying to raise quality, then weigh whether the resulting cost/latency is worth it.
            - Do NOT rabbit-hole on fine-tuning a single knob (e.g. the exact truncation length):
              we run on a small subsample and micro-tuning is inefficient and prone to overfitting.
            - To prevent falling in a local minimum, make sure to also explore a wider range of the
@@ -192,10 +189,13 @@ class CostModelAgent:
            If the dataset has an `images/` folder, you can SEE a few product images with
            `explore_images(ids)` (up to 5, selected by the dataset's image id column) — useful to judge what a vision
            operator would work with. Images are shown once and are costly, so inspect just a couple.
-        2. Write a plan with `write_plan(code, name)`.
+        2. Write a plan with `write_plan(code, name, description, optimizations)`.
            - `code` builds a PhysicalPipeline instance and returns it as the last expression.
            - `name` is a string identifier you choose, e.g. "p1", "p2", "p3", ...
              Use a NEW unique name for each new plan — never reuse a name for a different plan.
+           - ALWAYS pass `optimizations`, recording which optimizations this plan uses and how far
+             each one is pushed (see the write_plan tool description). This is how the record of
+             what you have and have not tried stays legible across plans.
            - NEVER hardcode row IDs, indexes, or values copied from `explore_sample`/`explore_data`
              output to identify specific records (e.g. `filter(lambda row: row["id"] in [3, 17, 42])`
              is cheating and invalid). What you learn from exploration may only shape HOW you build a
@@ -260,12 +260,15 @@ class CostModelAgent:
            If the dataset has an `images/` folder, you can SEE a few product images with
            `explore_images(ids)` (up to 5, selected by the dataset's image id column) — useful to judge what a vision
            operator would work with. Images are shown once and are costly, so inspect just a couple.
-        2. Write 1–2 baseline plans with `write_plan(code, name, description)` that capture
-           meaningfully different design approaches (e.g., one with a strong early filter, one
+        2. Write 1–2 baseline plans with `write_plan(code, name, description, optimizations)` that
+           capture meaningfully different design approaches (e.g., one with a strong early filter, one
            without; one using a capable model, one using a cheaper model). Give each a short
            `description` of its approach/optimizations — it appears in the estimate tables.
            - `code` builds a PhysicalPipeline instance and returns it as the last expression.
            - `name` is a NEW unique string identifier (e.g. "p1", "p2", ...) — never reuse a name.
+           - ALWAYS pass `optimizations`, recording which optimizations this plan uses and how far
+             each one is pushed (see the write_plan tool description). This is how the record of
+             what you have and have not tried stays legible across plans.
            - NEVER hardcode row IDs, indexes, or values copied from `explore_sample`/`explore_data`
              output to identify specific records (e.g. `filter(lambda row: row["id"] in [3, 17, 42])`
              is cheating and invalid). What you learn from exploration may only shape HOW you build a
@@ -351,19 +354,17 @@ class CostModelAgent:
         use_oracle_ground_truth: bool = True,
         helper_model: str | None = None,
         helper_reasoning_effort: str | None = "medium",
+        use_checker: bool = True,
+        checker_model: str | None = None,
+        checker_reasoning_effort: str | None = "high",
+        checker_every: int = 3,
+        max_checker_vetoes: int = 2,
     ) -> None:
         self.llm = llm
         self.agent_dir = agent_dir
         self.use_case = use_case
         self.data_dir = data_dir
-        # Every artifact this run writes goes under here. The benchmark's `results_prefix`
-        # template (see its benchmark.yaml) fixes the segments above it -- SemBench keys on
-        # use_case/scale factor, CUAD on neither -- and this agent owns the layout below it.
-        # Falls back to a runner-named directory so a bare CostModelAgent() still writes
-        # somewhere sane inside this repo.
-        self.results_prefix = pathlib.Path(
-            results_prefix if results_prefix is not None else RESULTS_DIR / agent_dir
-        )
+        self.results_prefix = pathlib.Path(results_prefix)
         self.oracle_model = oracle_model
         self.oracle_reasoning_effort = oracle_reasoning_effort
         # When False, quality is scored against the benchmark's real ground truth instead of
@@ -375,6 +376,15 @@ class CostModelAgent:
         # the main model id if none is given; run() errors if neither is resolvable.
         self.helper_model = helper_model
         self.helper_reasoning_effort = helper_reasoning_effort
+        # The exploration checker reviews how well the optimization space has been explored:
+        # after every `checker_every` executions, and once when the agent tries to finish. Its
+        # model defaults to the main agent's. `max_checker_vetoes` bounds how many times it may
+        # send a final answer back, so a checker and an agent that disagree cannot deadlock.
+        self.use_checker = use_checker
+        self.checker_model = checker_model
+        self.checker_reasoning_effort = checker_reasoning_effort
+        self.checker_every = checker_every
+        self.max_checker_vetoes = max_checker_vetoes
         self.max_steps = max_steps
         self.max_recover_retries = max_recover_retries
         self.context_budget_chars = context_budget_chars
@@ -393,6 +403,9 @@ class CostModelAgent:
         self.execution_cost_usd: float = 0.0
         self.oracle_cost_usd: float = 0.0
         self.helper_cost_usd: float = 0.0
+        self.checker_cost_usd: float = 0.0
+        self.checker_checks: list[dict] = []
+        self.checker_vetoes: int = 0
 
     # -- logging -----------------------------------------------------------
     def _log(self, msg: str) -> None:
@@ -412,21 +425,35 @@ class CostModelAgent:
         pd.DataFrame(self.trajectory_steps).to_csv(out, index=False)
         self._log(f"[run] trajectory → {out}")
 
-    def _merge_helper_trajectory(
-        self, cost_helper: "CostHelperAgent | None", step: int, consumed: int
+    def _merge_sub_agent_trajectory(
+        self, agent: Any, label: str, step: int, consumed: int
     ) -> int:
-        """Interleave the cost helper's new trajectory rows into the MAIN trajectory so both
-        agents are saved together in one file. Rows produced while handling main step `step`
-        are labeled `"{step}[cost_helper]-{k}"` (k = 1..N) so the ordering reads naturally.
-        Returns the updated `consumed` index into `cost_helper.trajectory_steps`."""
-        if cost_helper is None:
+        """Interleave a sub-agent's new trajectory rows into the MAIN trajectory so every agent
+        in a run is saved together in one file. Rows produced while handling main step `step`
+        are labeled `"{step}[{label}]-{k}"` (k = 1..N) so the ordering reads naturally.
+        Returns the updated `consumed` index into `agent.trajectory_steps`."""
+        if agent is None:
             return consumed
-        new_rows = cost_helper.trajectory_steps[consumed:]
+        new_rows = agent.trajectory_steps[consumed:]
         for k, row in enumerate(new_rows, 1):
             merged = dict(row)
-            merged["step"] = f"{step}[cost_helper]-{k}"
+            merged["step"] = f"{step}[{label}]-{k}"
             self.trajectory_steps.append(merged)
-        return len(cost_helper.trajectory_steps)
+        return len(agent.trajectory_steps)
+
+    def _save_exploration_checks(self, query_info: dict) -> None:
+        """Dump every exploration-checker verdict of this run to
+        {results_prefix}/exploration_check/Q{id}_{rc}.json, so what the checker saw and what
+        it asked for can be read back without parsing the trajectory."""
+        if not self.checker_checks:
+            return
+        out_dir = self.results_prefix / "exploration_check"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        rc = query_info.get("runcount")
+        qkey = f"Q{query_info['query_id']}_{rc}" if rc is not None else f"Q{query_info['query_id']}"
+        out = out_dir / f"{qkey}.json"
+        out.write_text(json.dumps(self.checker_checks, indent=2, default=str))
+        self._log(f"[run] exploration checks → {out}")
 
     def _save_cost_model_codes(self, codes: dict, query_info: dict) -> None:
         """Save all versioned cost model code strings to
@@ -618,14 +645,15 @@ class CostModelAgent:
                     oracle_model=self.oracle_model,
                     query_id=query_info["query_id"],
                     use_case=query_info["use_case"],
-                    scale_factor=query_info["scale_factor"],
+                    # A benchmark without a scale-factor axis passes None; its adapter absorbs
+                    # the keyword it has no use for (see CUAD's QualityEvaluator.__init__).
+                    scale_factor=query_info.get("scale_factor"),
                     llm_judge_dir=llm_judge_dir,
                     subset_path=query_info["subset_path"],
                     ground_truth_path=query_info["gt_path"],
                     run_dir=opt_run_dir,
                     oracle_reasoning_effort=self.oracle_reasoning_effort,
                     use_oracle_ground_truth=self.use_oracle_ground_truth,
-                    op_sample_seed=query_info.get("op_sample_seed"),
                 )
             except Exception as e:
                 print(f"[run] QualityEvaluator init failed: {e}")
@@ -717,7 +745,7 @@ class CostModelAgent:
                 data_dir=data_dir,
                 agent_dir=self.agent_dir,
                 quality_evaluator=quality_evaluator,
-                scale_factor=query_info["scale_factor"],
+                scale_factor=query_info.get("scale_factor"),
                 results_prefix=self.results_prefix,
                 runcount=query_info.get("runcount"),
                 eval_metric=query_info.get("eval_metric"),
@@ -791,6 +819,25 @@ class CostModelAgent:
         # has_ground_truth) instead of the engine reassembling the steps itself.
         self._quality_evaluator = quality_evaluator
 
+        # The exploration checker is orthogonal to cost modelling — it reviews the SEARCH, not
+        # the plans' estimated cost — so it is wired up the same way in every mode.
+        checker: ExplorationCheckerAgent | None = None
+        if self.use_checker:
+            checker_model = self.checker_model or getattr(self.llm, "model", None)
+            if not checker_model:
+                raise ValueError(
+                    "use_checker=True requires a checker LLM model id: pass checker_model=... to "
+                    "CostModelAgent, or use an OpenRouterClient main llm exposing `.model`."
+                )
+            checker = ExplorationCheckerAgent(
+                OpenRouterClient(checker_model, reasoning_effort=self.checker_reasoning_effort),
+                plans=plans,
+                plan_results=plan_results,
+                task=task,
+                eval_metric=query_info.get("eval_metric"),
+                verbose=self.verbose,
+            )
+
         tools = base_tools + [write_plan_tool]
         executor.send_tools({t.name: t for t in tools})
 
@@ -806,18 +853,27 @@ class CostModelAgent:
         self.execution_cost_usd = 0.0
         self.oracle_cost_usd = 0.0
         self.helper_cost_usd = 0.0
+        self.checker_cost_usd = 0.0
+        self.checker_checks = []
+        self.checker_vetoes = 0
         self._log(f"\n=== system prompt ({len(system)} chars) ===\n{system}\n")
         self._log(f"=== task ===\n{opening}\n")
 
         return _RunContext(
             executor=executor, system=system, registry=registry,
-            cost_helper=cost_helper, quality_evaluator=quality_evaluator, plan_codes=plan_codes,
+            cost_helper=cost_helper, checker=checker,
+            quality_evaluator=quality_evaluator, plan_codes=plan_codes,
         )
 
     def _account_costs(
-        self, plan_results: ResultsStore, quality_evaluator: Any, cost_helper: "CostHelperAgent | None"
+        self,
+        plan_results: ResultsStore,
+        quality_evaluator: Any,
+        cost_helper: "CostHelperAgent | None",
+        checker: "ExplorationCheckerAgent | None" = None,
     ) -> None:
-        """Roll up the per-run cost totals (subset execution, oracle, helper) onto the instance."""
+        """Roll up the per-run cost totals (subset execution, oracle, helper, checker) onto the
+        instance."""
         self.execution_cost_usd = sum(float(r.get("cost_usd", 0.0) or 0.0) for r in plan_results.rows)
         self.oracle_cost_usd = (
             float(getattr(quality_evaluator, "total_oracle_cost_usd", 0.0) or 0.0)
@@ -825,6 +881,29 @@ class CostModelAgent:
         )
         if cost_helper is not None:
             self.helper_cost_usd = cost_helper.cost_usd
+        if checker is not None:
+            self.checker_cost_usd = checker.cost_usd
+            self.checker_checks = list(checker.checks)
+
+    def _run_config(self) -> dict:
+        """The run's configuration, recorded identically in the final answer and in
+        metrics/final_eval.json so the two can never disagree about how a run was set up."""
+        return {
+            "oracle": {
+                "oracle_ground_truth": self.use_oracle_ground_truth,
+                "oracle_model": self.oracle_model,
+                "oracle_reasoning_effort": self.oracle_reasoning_effort,
+            },
+            "optimization_checker": {
+                "use_checker": self.use_checker,
+                "model": self.checker_model or getattr(self.llm, "model", None),
+                "reasoning_effort": self.checker_reasoning_effort,
+                "check_every": self.checker_every,
+                "cost": round(self.checker_cost_usd, 6),
+                "n_checks": len(self.checker_checks),
+                "n_vetoes": self.checker_vetoes,
+            },
+        }
 
     # -- main loop ---------------------------------------------------------
     def run(
@@ -840,6 +919,7 @@ class CostModelAgent:
             "scale_factor": 0,
             "query_id": 0,
             "eval_metric": None,  # e.g. "f1-score" / "adjusted-rand-index"; explains the quality metric in the briefing
+            "run_final_eval": True,  # execute the chosen plan on the FULL dataset at the end; False = search only
             "num_final_eval_runs": 1,  # times to re-run the chosen plan on the full dataset (fresh pipeline each)
             "data_dir": "experiments/dataset/use_case",
             "gt_path": "files/use_case/raw_results/ground_truth/sf_0/Q0.csv",
@@ -853,9 +933,12 @@ class CostModelAgent:
         ctx = self._setup_run(task, plans, plan_results, op_results, mode, query_info)
         executor, system, registry = ctx.executor, ctx.system, ctx.registry
         cost_helper, quality_evaluator, plan_codes = ctx.cost_helper, ctx.quality_evaluator, ctx.plan_codes
+        checker = ctx.checker
 
         prev_plan_rows = len(plan_results.rows)  # detect execution batches to trigger the helper
         helper_consumed = 0  # cost-helper trajectory rows already merged into the main trajectory
+        checker_consumed = 0  # same, for the exploration checker
+        checked_plan_rows = len(plan_results.rows)  # executions as of the last exploration check
         step = 0
         while step < self.max_steps:
             step += 1
@@ -884,21 +967,60 @@ class CostModelAgent:
                 continue
 
             if parsed.code is None:  # final answer
+                # Before accepting it, let the exploration checker look at what was actually
+                # tried. A veto sends the agent back to keep searching -- but only while there
+                # are steps left to act on the suggestion, and only up to `max_checker_vetoes`
+                # times, so a checker and an agent that disagree can never deadlock.
+                steps_left = self.max_steps - step
+                if (
+                    checker is not None
+                    and self.checker_vetoes < self.max_checker_vetoes
+                    and steps_left >= 3
+                ):
+                    check = checker.check(reason="final-answer")
+                    self.checker_checks = list(checker.checks)
+                    if check.underexplored:
+                        self.checker_vetoes += 1
+                        veto = (
+                            "Hold off on finalizing — a review of the optimizations you have "
+                            f"explored so far found gaps:\n\n{check.suggestion}\n\n"
+                            "Write and execute at least one more plan addressing this, then "
+                            f"re-emit your final answer. ({steps_left} steps remain.)"
+                        )
+                        self.messages.append({"role": "user", "content": veto})
+                        self.trajectory_steps[-1]["observation"] = (
+                            f"[final answer withheld — exploration check {self.checker_vetoes}/"
+                            f"{self.max_checker_vetoes}]\n{veto}"
+                        )
+                        self._log(veto)
+                        # Merge only AFTER this step's own row has been written: merging appends
+                        # the checker's rows, which would otherwise occupy the [-1] slot.
+                        checker_consumed = self._merge_sub_agent_trajectory(
+                            checker, "exploration_checker", step, checker_consumed
+                        )
+                        continue
+
                 self.opt_latency = time.time()-optimization_start
                 self._log(f"[final answer] {parsed.result}")
                 self.trajectory_steps[-1]["observation"] = f"[final answer] {parsed.result}"
+                self._account_costs(plan_results, quality_evaluator, cost_helper, checker)
                 if isinstance(parsed.result, dict):
                     parsed.result["plan_codes"] = plan_codes
                     parsed.result["plan_descriptions"] = {name: entry.get("description", "") for name, entry in plans.items()}
+                    parsed.result["plan_optimizations"] = {name: entry.get("optimizations") for name, entry in plans.items()}
                     parsed.result["agent_model"] = getattr(self.llm, "model", None)
-                    parsed.result["oracle_model"] = self.oracle_model
-                    parsed.result["helper_model"] = self.helper_model or getattr(self.llm, "model", None)
+                    parsed.result.update(self._run_config())
                 self._save_results_df(plan_results, query_info, final_answer=parsed.result)
-                helper_consumed = self._merge_helper_trajectory(cost_helper, step, helper_consumed)
+                helper_consumed = self._merge_sub_agent_trajectory(
+                    cost_helper, "cost_helper", step, helper_consumed
+                )
+                checker_consumed = self._merge_sub_agent_trajectory(
+                    checker, "exploration_checker", step, checker_consumed
+                )
                 self._save_trajectory_df(query_info)
+                self._save_exploration_checks(query_info)
                 if cost_helper is not None:
                     self._save_cost_model_codes(cost_helper.model_versions, query_info)
-                self._account_costs(plan_results, quality_evaluator, cost_helper)
                 self._run_final_evaluation(parsed.result, plans, query_info, plan_codes, plan_results)
                 return parsed.result
 
@@ -942,24 +1064,55 @@ class CostModelAgent:
                 )
                 self._log(helper_obs)
 
-            # interleave any cost-helper rows generated during this step (via review_plans or
-            # the post-execution auto-invoke) into the shared trajectory, labeled per this step
-            helper_consumed = self._merge_helper_trajectory(cost_helper, step, helper_consumed)
+            # Every `checker_every` executions, review how well the optimization space has been
+            # explored and pass any gap back to the agent as ordinary feedback. Counted in
+            # EXECUTIONS, not steps: exploring the space means running plans, not writing them.
+            if checker is not None and len(plan_results.rows) - checked_plan_rows >= self.checker_every:
+                checked_plan_rows = len(plan_results.rows)
+                check = checker.check(reason="periodic")
+                self.checker_checks = list(checker.checks)
+                if check.underexplored:
+                    check_obs = (
+                        "[review of the optimizations explored so far]\n"
+                        f"{check.suggestion}"
+                    )
+                    self.messages.append({"role": "user", "content": check_obs})
+                    self.trajectory_steps[-1]["observation"] = (
+                        (self.trajectory_steps[-1]["observation"] or "") + "\n\n" + check_obs
+                    )
+                    self._log(check_obs)
 
-        # out of steps — one forced terminal turn
+            # interleave any sub-agent rows generated during this step (via review_plans, the
+            # post-execution auto-invoke, or the exploration check) into the shared trajectory
+            helper_consumed = self._merge_sub_agent_trajectory(
+                cost_helper, "cost_helper", step, helper_consumed
+            )
+            checker_consumed = self._merge_sub_agent_trajectory(
+                checker, "exploration_checker", step, checker_consumed
+            )
+
+        # out of steps — one forced terminal turn. The exploration checker is deliberately NOT
+        # consulted here: there are no steps left to act on anything it might ask for.
         result = self._terminal_turn(system)
         self.opt_latency = time.time() - optimization_start
+        self._account_costs(plan_results, quality_evaluator, cost_helper, checker)
         self._save_results_df(plan_results, query_info)
-        helper_consumed = self._merge_helper_trajectory(cost_helper, step, helper_consumed)
+        helper_consumed = self._merge_sub_agent_trajectory(
+            cost_helper, "cost_helper", step, helper_consumed
+        )
+        checker_consumed = self._merge_sub_agent_trajectory(
+            checker, "exploration_checker", step, checker_consumed
+        )
         self._save_trajectory_df(query_info)
+        self._save_exploration_checks(query_info)
         if cost_helper is not None:
             self._save_cost_model_codes(cost_helper.model_versions, query_info)
         if isinstance(result, dict):
             result["plan_codes"] = plan_codes
+            result["plan_descriptions"] = {name: entry.get("description", "") for name, entry in plans.items()}
+            result["plan_optimizations"] = {name: entry.get("optimizations") for name, entry in plans.items()}
             result["agent_model"] = getattr(self.llm, "model", None)
-            result["oracle_model"] = self.oracle_model
-            result["helper_model"] = self.helper_model or getattr(self.llm, "model", None)
-        self._account_costs(plan_results, quality_evaluator, cost_helper)
+            result.update(self._run_config())
         self._run_final_evaluation(result, plans, query_info, plan_codes, plan_results)
         return result
 
@@ -1087,7 +1240,11 @@ class CostModelAgent:
         The chosen plan is re-run `num_final_eval_runs` times (each a fresh pipeline) to average out LLM
         stochasticity. The metrics entry keeps the agent-search-level fields once, with per-run
         full-dataset execution metrics nested under run1/run2/…; raw output of run k is saved as
-        Q{query_id}_{runcount}_{k}.csv."""
+        Q{query_id}_{runcount}_{k}.csv.
+
+        `query_info["run_final_eval"]` (default True) gates only the full-dataset EXECUTION — the
+        expensive half. With it False the search still records its metrics entry (agent cost/latency,
+        plans written/executed, run config), just with no runK blocks."""
         if not isinstance(final_answer, dict):
             return
         best_name = final_answer.get("best_plan", {}).get("name")
@@ -1096,16 +1253,46 @@ class CostModelAgent:
             return
 
         query_id = query_info["query_id"]
-        use_case = query_info["use_case"]
-        scale_factor = query_info["scale_factor"]
+        scale_factor = query_info.get("scale_factor")
         runcount = query_info.get("runcount")
         run_suffix = f"Q{query_id}_{runcount}" if runcount is not None else f"Q{query_id}"
+
+        if query_info.get("run_final_eval", True):
+            outcome = self._full_dataset_runs(best_name, plans, query_info, plan_codes, run_suffix)
+            if outcome is None:  # could not be set up at all — write nothing
+                return
+            runs, metric_type, n_runs = outcome
+        else:
+            self._log("[final_eval] run_final_eval=False — skipping the full-dataset evaluation")
+            runs, metric_type, n_runs = {}, "unknown", 0
+
+        self._write_final_eval_metrics(
+            query_id=query_id, runcount=runcount, scale_factor=scale_factor,
+            runs=runs, n_runs=n_runs, metric_type=metric_type,
+            plan_codes=plan_codes, plan_results=plan_results,
+        )
+
+    def _full_dataset_runs(
+        self,
+        best_name: str,
+        plans: dict,
+        query_info: dict,
+        plan_codes: dict | None,
+        run_suffix: str,
+    ) -> "tuple[dict[str, dict], str, int] | None":
+        """Execute the chosen plan on the FULL dataset `num_final_eval_runs` times (fresh pipeline
+        each), scored against the benchmark's real ground truth.
+
+        Returns (per-run metrics keyed run1/run2/…, metric type, number of runs attempted), or None
+        when the evaluation cannot be set up at all (no gt_path, no ground-truth file, no quality
+        evaluator) — the caller then writes no metrics entry."""
+        query_id = query_info["query_id"]
+        use_case = query_info["use_case"]
         gt_path_str = query_info.get("gt_path")
         if not gt_path_str:
             self._log("[final_eval] no gt_path in query_info — skipping")
             return
 
-        import dataclasses
         import pathlib
 
         import pandas as pd
@@ -1197,6 +1384,23 @@ class CostModelAgent:
                 "quality": quality,
             }
 
+        return runs, metric_type, n_runs
+
+    def _write_final_eval_metrics(
+        self,
+        *,
+        query_id: Any,
+        runcount: Any,
+        scale_factor: Any,
+        runs: dict,
+        n_runs: int,
+        metric_type: str,
+        plan_codes: dict | None,
+        plan_results: "ResultsStore | None",
+    ) -> None:
+        """Append this run's entry to metrics/final_eval.json: the agent-search-level fields once,
+        then whatever full-dataset runs were performed nested under run1/run2/… (none when the
+        full-dataset evaluation was turned off)."""
         metrics_path = self.results_prefix / "metrics" / "final_eval.json"
         metrics_path.parent.mkdir(parents=True, exist_ok=True)
         entry: dict = {}
@@ -1213,15 +1417,15 @@ class CostModelAgent:
         # Agent-search-level fields once, then per-run full-dataset execution metrics nested under runK.
         entry[metrics_key] = {
             "query_id": str(query_id),
-            "scale_factor": scale_factor,
+            # Only benchmarks that actually have a scale-factor axis record one (SemBench does,
+            # CUAD does not) -- recording a placeholder would make it look like a real dimension.
+            **({"scale_factor": scale_factor} if scale_factor is not None else {}),
             "agent_model": getattr(self.llm, "model", None),
-            "oracle_model": self.oracle_model,
-            "helper_model": self.helper_model or getattr(self.llm, "model", None),
             "agent_cost": round(self.agent_cost_usd, 6),
             "agent_latency": round(self.opt_latency, 4),
-            "helper_cost": round(self.helper_cost_usd, 6),
             "subset_execution_cost": round(self.execution_cost_usd, 6),
             "oracle_cost": round(self.oracle_cost_usd, 6),
+            **self._run_config(),
             "metric_type": metric_type,
             "plans_written": plans_written,
             "plans_executed": plans_executed,
@@ -1246,7 +1450,11 @@ class CostModelAgent:
 
         entry = {k: entry[k] for k in sorted(entry, key=_entry_sort_key)}
         metrics_path.write_text(json.dumps(entry, indent=2))
-        self._log(f"[final_eval] metrics ({len(runs)}/{n_runs} run(s) succeeded) → {metrics_path}")
+        detail = (
+            f"({len(runs)}/{n_runs} full-dataset run(s) succeeded)" if n_runs
+            else "(search only — no full-dataset run)"
+        )
+        self._log(f"[final_eval] metrics {detail} → {metrics_path}")
 
     _TERMINAL_PROMPT = (
         "You are out of steps. Do NOT call any tool — emit exactly ONE ```json``` block: "

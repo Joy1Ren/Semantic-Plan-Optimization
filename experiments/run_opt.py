@@ -30,13 +30,17 @@ from agent_cost_model.paths import RESULTS_DIR
 # Optimization policy: intentionally kept in code rather than benchmark YAML.
 # MODEL = "openai/gpt-5.4"
 MODEL = "openai/gpt-5" # for matching docetl
-HELPER_MODEL = "openai/gpt-5.4"
 MAX_STEPS = 40
+# How many times the chosen plan is executed on the FULL dataset once the search ends.
+# Whether that happens at all is per-invocation: --final-eval/--no-final-eval.
 NUM_FINAL_EVAL_RUNS = 2
-AGENT_TYPE = "execute_oracle_sampler"
+AGENT_TYPE = "execute_optimizer"
+USE_CHECKER = True
+CHECKER_MODEL = None
+CHECKER_REASONING_EFFORT = "high"
+CHECKER_EVERY = 3
 RANDOM_SUBSET_SIZE = 10
 RANDOM_SUBSET_SEED = 42
-RANDOM_OP_SAMPLER_SEED = 42
 
 
 def _load_query(config: dict[str, Any], context: dict[str, Any]) -> tuple[str, str, list[str]]:
@@ -79,7 +83,9 @@ def main() -> None:
     parser.add_argument("--config", type=Path, required=True, help="benchmark YAML file")
     parser.add_argument("--use-case", required=True)
     parser.add_argument("--query-id", type=int, required=True)
-    parser.add_argument("--scale-factor", type=int, required=True)
+    # Only benchmarks with a scale-factor axis need this: SemBench keys its dataset, subset,
+    # ground-truth, and results paths on it, while CUAD's benchmark.yaml references it nowhere.
+    parser.add_argument("--scale-factor", type=int, default=None)
     parser.add_argument("--runcount", type=int, default=1)
     parser.add_argument(
         "--opt-subsample",
@@ -100,6 +106,17 @@ def main() -> None:
     parser.add_argument("--keyword", action="store_true")
     parser.add_argument("--no-image-emb", action="store_true")
     parser.add_argument(
+        "--final-eval",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "after the search, execute the selected plan on the full dataset and score it "
+            "against the benchmark's real ground truth (default). Pass "
+            "--no-final-eval to stop after the search — the metrics entry is still written, "
+            "with no run1/run2 full-dataset numbers."
+        ),
+    )
+    parser.add_argument(
         "--use-oracle-ground-truth",
         action=argparse.BooleanOptionalAction,
         default=True,
@@ -118,6 +135,11 @@ def main() -> None:
     # Resolve the benchmark's external checkout and make its own modules importable. Read-only:
     # nothing this run produces is written there.
     repo_root = activate(benchmark.get("external_repo"))
+    # --scale-factor is optional because only some benchmarks have that axis. A benchmark whose
+    # path templates DO reference it still needs one -- without this its paths would silently
+    # resolve to a literal "sf_None" directory instead of failing here.
+    if args.scale_factor is None and "{scale_factor}" in json.dumps(benchmark):
+        parser.error(f"{config_path.name} keys its paths on a scale factor — pass --scale-factor.")
     context = build_context(
         benchmark, runner=AGENT_TYPE, use_case=args.use_case,
         scale_factor=args.scale_factor, query_id=args.query_id,
@@ -174,8 +196,10 @@ def main() -> None:
     agent = CostModelAgent(
         llm, max_steps=MAX_STEPS, verbose=True,
         agent_dir=AGENT_TYPE, results_prefix=results_prefix,
-        use_case=args.use_case, helper_model=HELPER_MODEL,
+        use_case=args.use_case,
         use_oracle_ground_truth=args.use_oracle_ground_truth,
+        use_checker=USE_CHECKER, checker_model=CHECKER_MODEL,
+        checker_reasoning_effort=CHECKER_REASONING_EFFORT, checker_every=CHECKER_EVERY,
     )
     answer = agent.run(
         task, plans={}, plan_results=ResultsStore([]), op_results=ResultsStore([]), mode=AGENT_TYPE,
@@ -184,6 +208,7 @@ def main() -> None:
             "scale_factor": args.scale_factor,
             "query_id": args.query_id,
             "eval_metric": eval_metric,
+            "run_final_eval": args.final_eval,
             "num_final_eval_runs": NUM_FINAL_EVAL_RUNS,
             "data_dir": str(dataset_dir),
             "gt_path": str(ground_truth_path),
@@ -191,7 +216,6 @@ def main() -> None:
             "dataset_path": str(source_csv),
             "quality_evaluator_cls": quality_evaluator_cls,
             "normalize_eval_df": normalize_eval_df,
-            "op_sample_seed": RANDOM_OP_SAMPLER_SEED,
             "image_subdir": dataset_config.get("image_subdir", "images"),
             "runcount": args.runcount,
         },

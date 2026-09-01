@@ -164,7 +164,7 @@ separate minimal sandbox — see the write_plan tool description).
     (a few probes, NOT exhaustive regex/brute-force scans) and use what you learn to GUIDE plan
     design — never to solve the query or reverse-engineer a plan.
     df = explore_data("items.csv")
-- `plans`           : dict[str, dict] — {{name: {{"plan": PhysicalPipeline, "description": str}}}}; populated by write_plan (updated by execute_plan)
+- `plans`           : dict[str, dict] — {{name: {{"plan": PhysicalPipeline, "description": str, "optimizations": ...}}}}; populated by write_plan (updated by execute_plan)
 - `plan_codes`      : dict[str, str] — code strings stored by write_plan (keys = plan names)
 - `plan_results`    : the observed-execution store (`plan_results.rows`, `plan_results.df`)
 - `op_results`      : the observed-execution store (`op_results.rows`, `op_results.df`, `op_results.summary()`)
