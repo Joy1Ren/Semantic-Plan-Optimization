@@ -6,10 +6,16 @@ that plan uses and how far each is pushed (see `WritePlanTool`). This reviewer r
 records next to the plans' MEASURED cost/quality/latency and answers one question: is any
 optimization the agent itself opened still underexplored, and what should it try next?
 
-Deliberately kept ignorant of our own catalog of optimizations: the system prompt below names
-NO specific optimization (no models, no truncation, no reordering). It must infer the
-dimensions from what the agent actually reported, so its verdict is not just an echo of the
-levers we already listed in the main agent's briefing.
+The reviewer IS shown the space that exists -- the operator/knob catalog and the model catalog
+the main agent already has in its own briefing. It is shown no catalog of OPTIMIZATIONS (no
+"try truncation", no "try reordering"): those it must still infer from what the agent reported,
+so its verdict is not an echo of a lever list. The distinction matters, and the failure mode it
+fixes is real: a reviewer that knows only what the agent reported cannot tell an untried model
+family from a nonexistent one, so it re-suggests the axis already in play (observed on CUAD Q1
+run 2, where the agent sampled only the 4o family and the reviewer kept proposing moves within
+it) and it cannot see a knob that every plan pinned to the same value. Since the main agent
+already holds both catalogs, showing them here adds no information to the system -- it only
+stops the reviewer from being the one actor that cannot distinguish "untried" from "impossible".
 """
 
 from __future__ import annotations
@@ -22,7 +28,12 @@ from typing import Any
 from agent_cost_model.opt_agent.cost_model_types import ResultsStore, get_op_type, iter_operators
 from agent_cost_model.opt_agent.errors import ParseError
 from agent_cost_model.opt_agent.llm_client import LLMClient
-from agent_cost_model.opt_agent.prompts import _quality_metric_section
+from agent_cost_model.opt_agent.prompts import (
+    _AVAILABLE_MODELS_TEXT,
+    _OPERATOR_CATALOG_BRIEF,
+    _quality_metric_section,
+    _sem_op_quality_docs,
+)
 from agent_cost_model.opt_agent.step_parsing import _parse_step
 
 
@@ -62,11 +73,40 @@ class ExplorationCheckerAgent:
         optimization the plan uses and HOW FAR that optimization is pushed. There is no fixed
         catalog of optimizations — read the ones it reported and reason about those.
 
-        YOUR JOB. Looking at all executed plans together, decide whether any optimization the
-        agent has opened is still UNDEREXPLORED, and if so say — in natural language — what to
-        try next. You are judging coverage of the search, not the correctness of any one plan.
+        THE SPACE THAT EXISTS. Below are the operators and models the agent is allowed to use.
+        This is NOT a list of optimizations to recommend, and the agent has it already — it is
+        here so you can tell an UNTRIED choice from an IMPOSSIBLE one. Read the plans against it:
+        a whole operator, knob, or model tier that no executed plan has ever touched is the most
+        underexplored thing in the search, and it will never appear in the agent's own
+        `optimizations` records, because those describe only what it did do.
+
+        {operator_catalog}
+        {model_catalog}
+
+        YOUR JOB. Looking at all executed plans together, decide whether any optimization is still
+        UNDEREXPLORED, and if so say — in natural language — what to try next. You are judging coverage
+        of the search, not the correctness of any one plan. Prioritize exploring the full range of optimizations
+        and understanding the quality ceiling before focusing on optimizing one specific choice. We want to
+        improve quality and lower cost.
+
+        HOW TO READ THE EVIDENCE:
+        - A CONSTANT IS A DIMENSION. Scan for settings that are identical in every plan — one
+          model family, one retrieval method, one context budget, one logical shape. A knob
+          nobody has ever moved has zero evidence behind it, however many plans there are. It
+          counts as underexplored even though no `optimizations` record mentions varying it.
+        - AN UNSCORED PLAN EXPLORED NOTHING. A plan whose quality is n/a produced no measurement,
+          whatever it cost. Never treat it as evidence for or against a direction, and do not ask
+          for a more elaborate version of it. If that direction still looks worth testing, ask
+          for the SIMPLEST plan that would actually score.
+        - PER-OPERATOR QUALITY IS NOT PLAN QUALITY. It measures one operator against the input it
+          actually received, so it can be high while the plan scores badly (and the reverse).
+          Plan `quality` is the objective. Never recommend a direction on per-operator scores
+          alone when plan quality points the other way.
 
         HOW TO JUDGE (guidance, not rules — weigh the whole picture):
+        - Make sure to also execute BASELINE plans to understand the range of possible quality/cost.
+          For example, run a plan with no cost optimizations to see what quality is achievable.
+          Similarly, run a plan with more significant cost optimizations to find the lower bound of quality.
         - Follow the gradient. If pushing an optimization further kept paying off — quality
           rising, or cost falling with quality intact — it is underexplored. Name the concrete
           next setting along that same dimension.
@@ -74,23 +114,33 @@ class ExplorationCheckerAgent:
           further gain, or pushing it started costing quality, it is done. Do not ask for more.
         - One setting is not exploration. An optimization tried at exactly a single extent is
           untested: one more point, in the direction the evidence favors, settles it.
+        - Make sure to try different optimization strategies instead of chasing one lever. For example,
+          consider different logical structures, different model choices, and different context reduction strategies.
         - Check both directions. If every plan has been chasing cost and none has genuinely
           tried to raise quality (or the reverse), say so — the trade-off has only been mapped
           from one side.
         - Do not ask for micro-tuning. Plans are measured on a small subsample, so nudging a
           numeric knob by a little overfits and teaches nothing. Suggest moves that are big
           enough to change the answer.
+        - Prefer the cheapest plan that would answer the open question. A dimension can usually
+          be tested on a cheap model; do not ask for an expensive plan when a cheap one settles
+          the same thing.
         - Be concrete and be brief: at most 2-3 suggestions, most valuable first. Point at the
-          specific optimization and the specific next extent to take it to.
+          specific optimization and the specific next extent to take it to. Each suggestion must
+          describe ONE plan the agent could write next, in a couple of sentences — not a program
+          of work, and never a long enumeration of per-field or per-record specifics.
 
         Concluding the search is a real and useful verdict. If the optimizations the agent has
         reported have each been pushed to the point of diminishing returns, say so rather than
         inventing work.
 
         RESPOND with EXACTLY ONE fenced ```json``` block and nothing else:
-          {"underexplored": true,  "suggestion": "<what to try next, and why the evidence supports it>"}
-          {"underexplored": false, "suggestion": ""}
-        """)
+          {{"underexplored": true,  "suggestion": "<what to try next, and why the evidence supports it>"}}
+          {{"underexplored": false, "suggestion": ""}}
+        """).format(
+        operator_catalog=_OPERATOR_CATALOG_BRIEF.rstrip(),
+        model_catalog=_AVAILABLE_MODELS_TEXT.strip(),
+    )
 
     def __init__(
         self,
@@ -256,12 +306,41 @@ class ExplorationCheckerAgent:
             f"wall_latency_s (wall-clock time of the run): {self._fmt_num(row.get('wall_latency_s'), '.3f')}",
         ])
 
+    def _per_op_quality_legend(self, rows: list[dict]) -> str:
+        """What the `per-operator quality` numbers in each plan block actually mean, for the
+        operator types that appear in these plans.
+
+        The main agent gets this on every execute_plan result (see plan_tools); without it the
+        reviewer is reading bare numbers whose definition it can only guess at -- and guessing
+        wrong is consequential, because a rag_* per-op score deliberately excludes retrieval
+        misses, so a high one is not evidence that the plan's retrieval is working."""
+        op_types: list[str] = []
+        for row in rows:
+            entry = self.plans.get(row.get("plan_name"))
+            if entry is None:
+                continue
+            try:
+                op_types.extend(get_op_type(op) for op in iter_operators(entry["plan"]))
+            except Exception:
+                continue
+        docs = _sem_op_quality_docs(op_types)
+        if not docs:
+            return ""
+        lines = "\n".join(f"- {op_type}: {doc}" for op_type, doc in docs.items())
+        return (
+            "How each `per-operator quality` score below is computed (it is a per-operator "
+            f"diagnostic, NOT the plan's objective):\n{lines}"
+        )
+
     def _build_context(self, reason: str) -> str:
         rows = self._executed_rows()
         parts = [
             f"=== Exploration review (trigger: {reason}) ===",
             f"The query being answered:\n{self.task}",
-            _quality_metric_section(self.eval_metric),
+            "\n\n".join(
+                s for s in (_quality_metric_section(self.eval_metric),
+                            self._per_op_quality_legend(rows)) if s
+            ),
             f"Executed plans so far ({len(rows)}), in execution order:",
             "\n\n".join(self._plan_block(r) for r in rows),
             "Judge whether any optimization these plans have opened is still underexplored. "

@@ -3,6 +3,7 @@ catalog, the available-models catalog, and the plan-quality-metric documentation
 
 from __future__ import annotations
 
+import os
 import pathlib
 
 _PHYSICAL_SEMANTIC_OPERATORS = {
@@ -39,7 +40,47 @@ _PHYSICAL_NONSEMANTIC_OPERATORS = {
     "limit": "pipeline.limit(n: int) — Keep at most n rows.",
     "groupby": "pipeline.groupby(group_by_fields: list[str], agg_funcs: list[str], agg_fields: list[str]) — Group and aggregate. Produces schema name 'agg_func(agg_field)', e.g. 'count(reviewId)' or 'average(score)'.",
 }
-_AVAILABLE_MODELS_TEXT = (pathlib.Path(__file__).parent / "available_models.txt").read_text()
+# The model catalog offered to every agent (plan writer, cost helper, exploration checker).
+# OpenAI-only by default: those models reach litellm, which patch_litellm_for_openrouter() routes
+# through OpenRouter, so OPENROUTER_API_KEY is the only key a run needs. The Gemini models in the
+# full catalog do NOT work that way -- palimpzest gives them a direct google-genai client that
+# bypasses litellm (query/generators/gemini_client.py), so picking one raises "No API key was
+# provided" at PLAN-CONSTRUCTION time unless GEMINI_API_KEY is also set. Set
+# AGENT_MODEL_CATALOG=available_models.txt (with that key exported) to offer them again.
+_MODEL_CATALOG_FILE = os.environ.get("AGENT_MODEL_CATALOG", "available_models_openai.txt")
+_AVAILABLE_MODELS_TEXT = (pathlib.Path(__file__).parent / _MODEL_CATALOG_FILE).read_text()
+
+# A compact restatement of the two catalogs above: operator names and the knobs each one exposes,
+# with none of the call-signature detail the plan-WRITING agent needs. Written for a reader that
+# only has to judge COVERAGE -- "has anything ever varied this?" -- not write code against the API.
+# Kept here, next to the full catalogs, so adding an operator or a knob updates both in one place.
+# Consumed by ExplorationCheckerAgent; see its module docstring for why the reviewer is shown the
+# space that exists rather than only the parts the plan-writing agent happened to report using.
+_OPERATOR_CATALOG_BRIEF = """\
+LLM-executed operators (these are what cost dollars and seconds):
+  sem_filter  — LLM filter over the whole field.
+  sem_map     — LLM-derived columns over the whole field.
+  sem_join    — LLM join over row pairs.
+  rag_filter  — chunk a long field, retrieve the top chunks, LLM-filter only those.
+  rag_map     — chunk a long field, retrieve the top chunks, LLM-map only those.
+Every LLM operator chooses: `model` (see the model catalog), and `depends_on` (which columns
+  the operator is actually shown).
+The rag_* operators additionally choose HOW MUCH TEXT REACHES THE LLM:
+  chunk_size            — chars per chunk; a fixed int, or an expression over the field's own
+                          length (e.g. "max(10000, input_length / 5)").
+  num_chunks_per_field  — top-k chunks kept (works with either similarity_method), OR
+  similarity_threshold  — keep every chunk above a cosine score ('embedding' method only).
+  similarity_method     — 'embedding' (paraphrase/meaning) or 'bm25' (keyword/terminology, no
+                          embedding cost).
+  embedding_query       — the retrieval string, separate from the condition/column descriptions.
+  embedding_model       — used only when similarity_method='embedding'.
+  NOTE: chunk_size x num_chunks_per_field is the operator's total context budget. Two plans can
+  move both knobs and leave that product unchanged -- that is a change of GRANULARITY, not of
+  how much the LLM gets to see.
+Free operators (ordinary code, no LLM cost): filter, map, join, project, limit, groupby,
+  add_col_suffix. Logical structure -- how many LLM operators there are, what each one is
+  responsible for, and what order they run in -- is itself a dimension.
+"""
 
 # Human-readable explanation of the overall plan-quality metric, keyed by a query's `accuracy_metric`
 # (see files/<use_case>/queries/q<id>.toml and QualityEvaluator.evaluate). Rendered into the briefing
