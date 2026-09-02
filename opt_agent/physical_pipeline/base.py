@@ -55,6 +55,7 @@ def _patch_convert_empty_field_answers() -> None:
     quality_evaluator.py's _evaluate), which is a much bigger and less honest failure
     than "this op's own few clauses are absent". Idempotent.
     """
+    from palimpzest.core.elements.records import DataRecord
     from palimpzest.query.operators.convert import ConvertOp
 
     if getattr(ConvertOp, "_agent_cost_model_empty_field_answers_patched", False):
@@ -62,6 +63,19 @@ def _patch_convert_empty_field_answers() -> None:
     _orig = ConvertOp._create_data_records_from_field_answers
 
     def _guarded(self, field_answers, candidate):
+        if not field_answers and not self.generated_fields:
+            # A DIFFERENT cause with the same crash: the operator generates no fields at all,
+            # because every column it declares was already in its input schema (converts only ADD
+            # columns). Rebuilding field_answers below would leave it empty and still hit max([]).
+            # PhysicalPipeline._check_new_cols rejects this when the plan is built, so reaching
+            # here means the operator was constructed some other way. Pass the record through
+            # unchanged -- which is all the op could have done anyway.
+            print(
+                f"[physical_pipeline] {type(self).__name__} generates NO fields: every column it "
+                "declares already exists in its input schema, and a convert can only add columns, "
+                "never overwrite one. Passing the record through unchanged; the op is a no-op."
+            )
+            return [DataRecord.from_parent(self.output_schema, {}, parent_record=candidate, cardinality_idx=0)], True
         if not field_answers:
             print(
                 f"[physical_pipeline] {type(self).__name__} got an EMPTY field_answers dict for "
@@ -80,12 +94,54 @@ def _patch_convert_empty_field_answers() -> None:
 _patch_convert_empty_field_answers()
 
 
+def _flatten_dict_answer(answer: dict) -> str:
+    """Render a JSON object answer as 'key: value; key: value'.
+
+    Models answering a multi-part CUAD field (e.g. 'Termination For Convenience') often key the
+    spans by the party or sub-clause they came from -- {'Company': "60 days' prior written
+    notice", 'Supplier': ...} -- rather than emitting the requested single string. The keys carry
+    real information, so keep them as labels instead of dropping to just the values. Pairs are
+    joined with '; ' because the values themselves routinely contain commas, and values are run
+    back through `_coerce_str_answer` so nested lists/objects/numbers flatten too. Empty and None
+    values are skipped, so an empty object flattens to '' (a valid `str`, unlike None).
+    """
+    parts = []
+    for key, value in answer.items():
+        rendered = _coerce_str_answer(value)
+        rendered = "" if rendered is None else str(rendered).strip()
+        if rendered:
+            parts.append(f"{key}: {rendered}")
+    return "; ".join(parts)
+
+
+def _coerce_str_answer(answer):
+    """Render one LLM answer as the `str` its output_schema field is annotated with.
+
+    Lists become the comma-separated string CUAD's task prompt asks for; dicts are flattened by
+    `_flatten_dict_answer`; JSON booleans become lowercase 'true'/'false' (the literal spelling
+    the model emitted, and the spelling column descriptions asking for a true/false flag use,
+    rather than Python's 'True'/'False'); ints and floats become their str(). Anything else (str,
+    None, ...) is returned untouched -- None is valid for the `str | None` annotations
+    _make_schema produces.
+    """
+    if isinstance(answer, list):
+        return ", ".join(str(_coerce_str_answer(v)) for v in answer)
+    if isinstance(answer, dict):
+        return _flatten_dict_answer(answer)
+    # bool before int: bool IS an int subclass, and str(True) would give 'True'.
+    if isinstance(answer, bool):
+        return "true" if answer else "false"
+    if isinstance(answer, (int, float)):
+        return str(answer)
+    return answer
+
+
 def _patch_convert_coerce_str_field_answers() -> None:
     """Guard installed palimpzest 1.5.3's `ConvertOp._create_data_records_from_field_answers`
-    against a pydantic ValidationError when an LLM returns a JSON array for a field whose
-    output_schema annotation is `str` (or `str | None`), instead of the single string the
-    schema -- and CUAD's task prompt, which asks for "a comma-separated list of text spans" --
-    expects.
+    against a pydantic ValidationError when an LLM returns a JSON array, object, boolean, or
+    number for a field whose output_schema annotation is `str` (or `str | None`), instead of the
+    single string the schema -- and CUAD's task prompt, which asks for "a comma-separated list of
+    text spans" -- expects.
 
     Observed on rag_map calls (e.g. gpt-5-mini) for fields like 'Revenue/Profit Sharing' and
     'Affiliate IP License-Licensor': the model emits `["span one", "span two"]` for a field
@@ -93,8 +149,25 @@ def _patch_convert_coerce_str_field_answers() -> None:
     list outright (`Input should be a valid string [type=string_type]`) inside
     `DataRecord.from_parent`, which currently propagates all the way up to a record-level
     "skipping record" error and drops the whole record's other 40 CUAD fields along with it.
-    Join list values into the same comma-separated-string form the model was already asked to
-    produce for multi-span answers, rather than losing the record over one mis-typed field.
+    Coerce to the string form the model was already asked to produce, rather than losing the
+    record over one mis-typed field.
+
+    The same ValidationError arrives via booleans whenever a plan adds a `str`-typed presence
+    flag whose description asks for 'true'/'false' (a two-stage "classify presence, then extract
+    spans" plan, which the agent writes on its own): the model answers with a JSON `true`, and
+    pydantic v2 does NOT coerce bool -> str even in lax mode, so that one flag would again take
+    the whole record's other 40 fields down with it. Numbers are folded in for the same reason --
+    a 'Warranty Duration' or 'Minimum Commitment' answered as `12` rather than `"12"` is a
+    correct answer in the wrong JSON type, not a reason to drop the document.
+
+    JSON objects arrive the same way on multi-part fields -- 'Termination For Convenience' as
+    {'Company': "60 days' prior written notice", ...} or 'License Grant' as {'Initial Term':
+    '10 years', ...} -- where the model breaks its answer out by party or sub-clause. Those are
+    flattened to 'key: value; key: value' rather than dropped, so the labels survive alongside
+    the spans.
+
+    Note this only rescues fields the plan declared as `str`; declaring a flag column as `bool`
+    remains the better plan-side choice, since pydantic coerces both `true` and `'true'` into it.
     """
     from palimpzest.query.operators.convert import ConvertOp
 
@@ -110,10 +183,7 @@ def _patch_convert_coerce_str_field_answers() -> None:
             field_info = model_fields.get(field)
             if field_info is None or field_info.annotation not in (str, str | None):
                 continue
-            field_answers[field] = [
-                ", ".join(str(v) for v in answer) if isinstance(answer, list) else answer
-                for answer in answers
-            ]
+            field_answers[field] = [_coerce_str_answer(answer) for answer in answers]
         return _orig(self, field_answers, candidate)
 
     ConvertOp._create_data_records_from_field_answers = _coerced

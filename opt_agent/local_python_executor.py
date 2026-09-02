@@ -47,6 +47,62 @@ def truncate_content(content: str, max_length: int = 20000) -> str:
     )
 
 
+# Error messages interpolate offending values; a big string/DataFrame would otherwise be pasted into
+# the agent's context in full. Keep just enough to identify what the value was.
+MAX_ERROR_VALUE_CHARS = 300
+
+
+def summarize_value(value: Any, max_length: int = MAX_ERROR_VALUE_CHARS) -> str:
+    """Render `value` for an error message, clipped to `max_length` characters."""
+    try:
+        text = str(value)
+    except Exception:
+        text = f"<unprintable {type(value).__name__}>"
+    if len(text) <= max_length:
+        return text
+    return f"{text[:max_length]}... [{type(value).__name__}, {len(text)} chars total, truncated]"
+
+
+# The statement that failed is quoted back in the error, and it can be arbitrarily long --
+# `write_plan("""<the entire plan>""", "p1", ...)` is the common case. Pasting the whole plan ahead
+# of the error costs far more tokens than the error itself and pushes the actual message toward the
+# observation's truncation limit. Identify the call instead: its name plus the short literal
+# arguments (the plan name) that say WHICH call failed.
+MAX_ERROR_SOURCE_CHARS = 300
+MAX_ERROR_ARG_CHARS = 60
+
+
+def _abbrev_arg(arg: ast.AST) -> str:
+    """One argument of a failing call, rendered short: small literals verbatim, everything else
+    (long strings such as plan code, expressions, comprehensions) as a placeholder."""
+    if isinstance(arg, ast.Constant):
+        text = repr(arg.value)
+        if len(text) <= MAX_ERROR_ARG_CHARS:
+            return text
+        return f"<{type(arg.value).__name__}, {len(text)} chars>"
+    return "..."
+
+
+def describe_node(code: str, node: ast.AST, max_length: int = MAX_ERROR_SOURCE_CHARS) -> str:
+    """Identify the statement `node` in one short line, for an error message."""
+    source = ast.get_source_segment(code, node) or ""
+    if len(source) <= max_length and "\n" not in source:
+        return source
+    try:
+        call = node.value if isinstance(node, (ast.Expr, ast.Assign, ast.AugAssign)) else node
+        if isinstance(call, ast.Call):
+            parts = [_abbrev_arg(a) for a in call.args]
+            parts += [
+                f"{kw.arg}={_abbrev_arg(kw.value)}" if kw.arg else f"**{_abbrev_arg(kw.value)}"
+                for kw in call.keywords
+            ]
+            return f"{ast.unparse(call.func)}({', '.join(parts)})"
+    except Exception:
+        pass
+    first_line = source.split("\n", 1)[0]
+    return f"{first_line[:max_length]}... [statement abbreviated, {len(source)} chars total]"
+
+
 logger = logging.getLogger(__name__)
 
 
@@ -617,7 +673,7 @@ def evaluate_augassign(
     if isinstance(expression.op, ast.Add):
         if isinstance(current_value, list):
             if not isinstance(value_to_add, list):
-                raise InterpreterError(f"Cannot add non-list value {value_to_add} to a list.")
+                raise InterpreterError(f"Cannot add non-list value {summarize_value(value_to_add)} to a list.")
             current_value += value_to_add
         else:
             current_value += value_to_add
@@ -794,7 +850,10 @@ def evaluate_call(
         obj = evaluate_ast(call.func.value, state, static_tools, custom_tools, authorized_imports)
         func_name = call.func.attr
         if not hasattr(obj, func_name):
-            raise InterpreterError(f"Object {obj} has no attribute {func_name}")
+            raise InterpreterError(
+                f"Object of type {type(obj).__name__} has no attribute {func_name}. "
+                f"Value was: {summarize_value(obj)}"
+            )
         func = getattr(obj, func_name)
     elif isinstance(call.func, ast.Name):
         func_name = call.func.id
@@ -882,7 +941,7 @@ def evaluate_subscript(
     try:
         return value[index]
     except (KeyError, IndexError, TypeError) as e:
-        error_message = f"Could not index {value} with '{index}': {type(e).__name__}: {e}"
+        error_message = f"Could not index {summarize_value(value)} with '{index}': {type(e).__name__}: {e}"
         if isinstance(index, str) and isinstance(value, Mapping):
             close_matches = difflib.get_close_matches(index, list(value.keys()))
             if len(close_matches) > 0:
@@ -1624,7 +1683,7 @@ def evaluate_python_code(
             str(state["_print_outputs"]), max_length=max_print_outputs_length
         )
         raise InterpreterError(
-            f"Code execution failed at line '{ast.get_source_segment(code, node)}' due to: {type(e).__name__}: {e}"
+            f"Code execution failed at line '{describe_node(code, node)}' due to: {type(e).__name__}: {e}"
         )
 
 

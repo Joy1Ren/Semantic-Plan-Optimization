@@ -53,9 +53,17 @@ explore_schema("Reviews.csv")
 
 class ExploreSampleTool(Tool):
     name = "explore_sample"
+
+    # Free-text columns (contracts, reviews, articles) can hold tens of thousands of characters per
+    # cell, so a raw `to_string` dump would flood the agent's context with a single row. Cap both the
+    # per-cell width and the whole block; `explore_data` is the way to get untruncated values.
+    MAX_CELL_CHARS = 300
+    MAX_OUTPUT_CHARS = 4000
+
     doc = """\
 ### explore_sample(filename, n=5)
-Show the first `n` rows of a CSV file in the data directory.
+Show the first `n` rows of a CSV file in the data directory. Returns a formatted STRING (not a
+DataFrame); long cells are truncated — use `explore_data(filename)` when you need full values.
 
 ```python
 explore_sample("Reviews.csv", n=3)
@@ -68,7 +76,14 @@ explore_sample("Reviews.csv", n=3)
     def __call__(self, filename: str, n: int = 5) -> str:
         import pandas as pd
         df = pd.read_csv(self._data_dir / filename, nrows=n)
-        return f"{filename} sample ({n} rows):\n{df.to_string(index=False)}"
+        body = df.to_string(index=False, max_colwidth=self.MAX_CELL_CHARS)
+        if len(body) > self.MAX_OUTPUT_CHARS:
+            omitted = len(body) - self.MAX_OUTPUT_CHARS
+            body = body[: self.MAX_OUTPUT_CHARS] + f"\n... [{omitted} chars omitted]"
+        return (
+            f"{filename} sample ({n} rows; cells truncated to {self.MAX_CELL_CHARS} chars, "
+            f"block to {self.MAX_OUTPUT_CHARS}):\n{body}"
+        )
 
 
 class ExploreImagesTool(Tool):

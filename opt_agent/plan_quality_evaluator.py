@@ -27,7 +27,9 @@ execution samples, never a separately-run oracle-substituted pipeline):
     fields the operator MISSED entirely (absent/None, as opposed to a deliberate "") score 0
     without being sent. Per-op quality is the mean over all (record, field) verdicts.
   Every judge call carries exactly ONE record, and an operator is scored from at most
-    MAX_JUDGE_RECORDS records — so at most that many calls, issued concurrently.
+    MAX_JUDGE_RECORDS records, issued concurrently. When a response leaves some fields unscored,
+    only those fields are re-asked (the verdicts already returned are kept); a record still
+    missing verdicts after _JUDGE_ATTEMPTS is dropped rather than scored on a partial field set.
   RAG operators are judged on their POST-RETRIEVAL input (the retrieved chunks), not the full
     source field, so these scores measure the LLM step and not the retrieval step.
   Any other op_type (rag_join doesn't exist; project, filter, groupby, join, map, ...) is
@@ -87,6 +89,19 @@ MAX_JUDGE_RECORDS = 10
 # an operator's whole MAX_JUDGE_RECORDS-call budget goes out in one wave and costs roughly the
 # wall time of a single call.
 _JUDGE_MAX_WORKERS = 10
+
+# Attempts per record before it is dropped from the score. Attempts accumulate: each one re-asks
+# only the fields still unscored, so a 41-field response that drops a single entry is completed by
+# a 1-field follow-up rather than a full re-judge.
+_JUDGE_ATTEMPTS = 2
+
+
+class _JudgeResponseError(Exception):
+    """A judge call came back unusable: unparseable, or not aligned with what was asked.
+
+    Raised rather than returned so a malformed response is retried exactly like a failed HTTP
+    call, and so the reason reaches the log in one place.
+    """
 
 
 @dataclass
@@ -614,6 +629,110 @@ class PlanQualityEvaluator:
             return result[0]
         return result
 
+    @staticmethod
+    def _balanced_json_objects(text: str):
+        """Yield each top-level ``{...}`` span in `text`, brace-matched and string-aware.
+
+        Needed because the judge's payload is NESTED (`{"scores": {...}}`), which neither a greedy
+        nor a lazy regex handles safely: `\\{.*\\}` spans from the first brace in the response to
+        the last -- so any prose containing a brace ("field 1 {matches}") swallows the real object
+        and fails to parse -- while `\\{.*?\\}` stops at the inner object's closing brace and cuts
+        the outer one in half. Quoted strings are skipped so a brace inside an extracted contract
+        span cannot unbalance the scan.
+        """
+        depth, start, in_string, escaped = 0, None, False, False
+        for i, ch in enumerate(text):
+            if in_string:
+                if escaped:
+                    escaped = False
+                elif ch == "\\":
+                    escaped = True
+                elif ch == '"':
+                    in_string = False
+                continue
+            if ch == '"':
+                in_string = True
+            elif ch == "{":
+                if depth == 0:
+                    start = i
+                depth += 1
+            elif ch == "}" and depth:
+                depth -= 1
+                if depth == 0 and start is not None:
+                    yield text[start: i + 1]
+                    start = None
+
+    @classmethod
+    def _parse_judge_json(cls, response: str, required_key: str) -> dict:
+        """The judge's JSON object, as a dict carrying `required_key`.
+
+        Tried in order of how the response is most likely shaped: the bare object (what the prompt
+        asks for, and what a compliant model returns), then the contents of a ``` fence, then any
+        brace-balanced object found in the text. Raises _JudgeResponseError if none parses.
+        """
+        candidates: list[str] = [response.strip()]
+        candidates += [m.strip() for m in re.findall(r"```(?:json)?\s*(.*?)```", response, re.DOTALL)]
+        candidates += list(cls._balanced_json_objects(response))
+
+        first_dict: dict | None = None
+        for candidate in candidates:
+            try:
+                parsed = json.loads(candidate)
+            except Exception:
+                continue
+            if isinstance(parsed, dict):
+                if required_key in parsed:
+                    return parsed
+                if first_dict is None:
+                    first_dict = parsed
+        if first_dict is not None:
+            # Parsed, but not the shape asked for -- report what did come back.
+            raise _JudgeResponseError(
+                f"response JSON has no {required_key!r} key (got keys {sorted(first_dict)[:10]})"
+            )
+        raise _JudgeResponseError(
+            f"response contained no parseable JSON object (len={len(response)}): {response[:200]!r}"
+        )
+
+    @staticmethod
+    def _verdict(value) -> float:
+        """One judge verdict as 0.0 or 1.0.
+
+        Accepts the JSON spellings a model actually produces for a binary answer -- `true`/`false`,
+        `1`/`0`, and those same values quoted -- and raises on anything else rather than letting
+        e.g. a `null` or a prose answer silently read as 0.
+        """
+        if isinstance(value, bool):
+            return 1.0 if value else 0.0
+        if isinstance(value, (int, float)):
+            return min(1.0, max(0.0, float(value)))
+        if isinstance(value, str):
+            text = value.strip().lower()
+            if text in ("true", "false"):
+                return 1.0 if text == "true" else 0.0
+            return min(1.0, max(0.0, float(text)))  # "1" / "0"; ValueError otherwise
+        raise TypeError(f"cannot read {value!r} as a 0/1 verdict")
+
+    def _judge_with_retry(self, op_name: str, judge_once: Callable):
+        """Run one record's judge call, retrying up to _JUDGE_ATTEMPTS times.
+
+        Returns judge_once()'s value, or None if every attempt failed -- the caller drops those
+        records rather than scoring them partially.
+        """
+        last_error = None
+        for attempt in range(1, _JUDGE_ATTEMPTS + 1):
+            try:
+                return judge_once()
+            except Exception as e:
+                last_error = e
+                if attempt < _JUDGE_ATTEMPTS:
+                    print(f"[QualityEvaluator] {op_name}: retrying one record -- {e}")
+        print(
+            f"[QualityEvaluator] {op_name}: skipping one record after {_JUDGE_ATTEMPTS} "
+            f"attempts -- {last_error}"
+        )
+        return None
+
     def _judge_in_parallel(self, items: list, judge_one: Callable) -> list:
         """Run one judge call per item concurrently, preserving input order.
 
@@ -746,46 +865,40 @@ class PlanQualityEvaluator:
         contexts = retrieval_contexts or {}
         unit = "pair of records satisfies the join condition" if op_type == "sem_join" else "record satisfies the filter condition"
 
-        def judge_one(key):
+        def judge_once(key):
+            record, plan_passed = candidates[key]
+            content: list[dict] = [{
+                "type": "text",
+                "text": (
+                    f"You are evaluating whether the {unit} below.\n"
+                    f"Condition: {condition}\n"
+                    "Judge the condition ONLY against the INPUT shown -- it is exactly what "
+                    "the operator was given."
+                ),
+            }]
+            content.extend(self._record_content_parts(
+                record, input_view=contexts.get(retrieval_context_key(record)),
+            ))
+            content.append({
+                "type": "text",
+                "text": (
+                    "\n\nDecide true if this record satisfies the condition, false otherwise.\n"
+                    'Return ONLY valid JSON: {"decision": true or false}'
+                ),
+            })
+            decision = self._parse_judge_json(self._oracle_generate(content), "decision")["decision"]
             try:
-                record, plan_passed = candidates[key]
-                content: list[dict] = [{
-                    "type": "text",
-                    "text": (
-                        f"You are evaluating whether the {unit} below.\n"
-                        f"Condition: {condition}\n"
-                        "Judge the condition ONLY against the INPUT shown -- it is exactly what "
-                        "the operator was given."
-                    ),
-                }]
-                content.extend(self._record_content_parts(
-                    record, input_view=contexts.get(retrieval_context_key(record)),
-                ))
-                content.append({
-                    "type": "text",
-                    "text": (
-                        "\n\nDecide true if this record satisfies the condition, false otherwise.\n"
-                        'Return ONLY valid JSON: {"decision": true_or_false}'
-                    ),
-                })
-                response = self._oracle_generate(content)
-                m = re.search(r"\{.*\}", response, re.DOTALL)
-                if not m:
-                    print(
-                        f"[QualityEvaluator] {op_name}: skipping one record -- oracle response "
-                        f"had no JSON object (len={len(response)}): {response[:300]!r}"
-                    )
-                    return None
-                decision = json.loads(m.group()).get("decision")
-                if decision is None:
-                    print(f"[QualityEvaluator] {op_name}: skipping one record -- no 'decision' in response")
-                    return None
-                return 1.0 if bool(decision) == plan_passed else 0.0
-            except Exception as e:
-                print(f"[QualityEvaluator] {op_name}: skipping one record -- judge call failed: {e}")
-                return None
+                oracle_passed = self._verdict(decision) == 1.0
+            except (TypeError, ValueError) as e:
+                raise _JudgeResponseError(f"'decision' is {decision!r}, expected true or false: {e}") from e
+            return 1.0 if oracle_passed == plan_passed else 0.0
 
-        agreements = [a for a in self._judge_in_parallel(keys, judge_one) if a is not None]
+        agreements = [
+            a for a in self._judge_in_parallel(
+                keys, lambda key: self._judge_with_retry(op_name, lambda: judge_once(key))
+            )
+            if a is not None
+        ]
         if not agreements:
             print(f"[QualityEvaluator] per-op quality failed for {op_name} ({op_type}): no record could be judged")
             return None
@@ -814,26 +927,29 @@ class PlanQualityEvaluator:
         return cols
 
     def _judge_map_record(self, op_name, cols, contexts, item) -> tuple[float, int] | None:
-        """Score one record's output fields with one oracle call.
+        """Score one record's output fields, re-asking only what is still unscored.
 
-        Returns (sum of field scores, number of fields) or None if this record could not be
-        judged at all — the caller drops those, which keeps every field backed by the same set of
-        records and so keeps the flat mean equal to the per-field-then-across-fields mean.
+        Returns (sum of field verdicts, number of fields) or None if the record could not be fully
+        judged — the caller drops those. All-or-nothing per record is what keeps every field backed
+        by the same set of records, and so keeps the flat mean equal to the
+        per-field-then-across-fields mean.
+
+        Attempts accumulate rather than restart: each call's readable verdicts are kept and only
+        the fields still missing are re-asked. A 41-field response that drops one entry then costs
+        a 1-field follow-up instead of a full re-judge, and a second response that drops a
+        different field still completes the record.
 
         Every failure is contained here rather than left to propagate: these run on a thread pool
-        whose map() re-raises, so one malformed record would otherwise cost the whole operator
-        its score instead of just its own verdict.
+        whose map() re-raises, so one malformed record would otherwise cost the whole operator its
+        score instead of just its own verdict.
         """
+        inp, out = item
         try:
-            return self._judge_map_record_inner(op_name, cols, contexts, item)
+            out_d = self._dr_to_dict(out)
         except Exception as e:
-            print(f"[QualityEvaluator] {op_name}: skipping one record -- judge call failed: {e}")
+            print(f"[QualityEvaluator] {op_name}: skipping one record -- unreadable output: {e}")
             return None
 
-    def _judge_map_record_inner(self, op_name, cols, contexts, item) -> tuple[float, int] | None:
-        """Body of _judge_map_record; see there. Split out so one try/except covers all of it."""
-        inp, out = item
-        out_d = self._dr_to_dict(out)
         # Split the columns into ones the operator actually answered and ones it MISSED. A miss is
         # a field absent from the output record, or None/NaN -- how a generation that produced
         # nothing for that field surfaces (see base._patch_convert_empty_field_answers). That is
@@ -849,9 +965,45 @@ class PlanQualityEvaluator:
         if not judged:
             return 0.0, len(cols)
 
+        verdicts: dict[str, float] = {}
+        outstanding = judged
+        for attempt in range(1, _JUDGE_ATTEMPTS + 1):
+            reason = None
+            try:
+                verdicts.update(self._judge_map_fields(inp, contexts, outstanding))
+            except Exception as e:
+                reason = e
+            outstanding = [f for f in judged if f[0] not in verdicts]
+            if not outstanding:
+                # Missed fields contribute 0 to the numerator but still count in the denominator.
+                return sum(verdicts.values()), len(cols)
+            if reason is None:
+                missing = [name for name, _, _ in outstanding]
+                reason = _JudgeResponseError(
+                    f"no usable verdict for {len(missing)} of {len(judged)} field(s): {missing[:5]}"
+                )
+            if attempt < _JUDGE_ATTEMPTS:
+                print(
+                    f"[QualityEvaluator] {op_name}: re-asking {len(outstanding)} unscored "
+                    f"field(s) of {len(judged)} -- {reason}"
+                )
+        print(
+            f"[QualityEvaluator] {op_name}: skipping one record after {_JUDGE_ATTEMPTS} "
+            f"attempts -- {reason}"
+        )
+        return None
+
+    def _judge_map_fields(self, inp, contexts, fields) -> dict[str, float]:
+        """One judge call covering `fields` of one record → {field name: 0.0/1.0}.
+
+        Returns only the verdicts that came back readable AND were actually asked for; the caller
+        re-asks whatever is missing, so a dropped or unreadable entry costs that field rather than
+        the whole record. Raises _JudgeResponseError when the response yields nothing usable, so
+        the reason reaches the log instead of being flattened into "no verdict".
+        """
         field_list = "\n".join(
-            f"{i}. {name}: {description}" if description else f"{i}. {name}"
-            for i, (name, description, _) in enumerate(judged, start=1)
+            f'- "{name}": {description}' if description else f'- "{name}"'
+            for name, description, _ in fields
         )
         content: list[dict] = [{
             "type": "text",
@@ -867,42 +1019,52 @@ class PlanQualityEvaluator:
         content.extend(self._record_content_parts(
             inp,
             trailer="\n  OPERATOR output: " + json.dumps(
-                {name: value for name, _, value in judged}, default=str
+                {name: value for name, _, value in fields}, default=str
             ),
             input_view=contexts.get(retrieval_context_key(inp)),
         ))
         content.append({
             "type": "text",
             "text": (
-                f"\n\nScore each of the {len(judged)} fields above: 1 if the operator's value is "
-                "correct for this input, 0 if it is not. Where a field's instruction says to "
-                "return an empty string when the information is absent, an empty value is "
-                "CORRECT if this input genuinely does not contain it.\n"
-                f'Return ONLY valid JSON: {{"scores": [s1, ..., s{len(judged)}]}} -- one entry per '
-                "field, in the order listed above."
+                "\n\nScore each field above: 1 if the operator's value is correct for this input, "
+                "0 if it is not. Where a field's instruction says to return an empty string when "
+                "the information is absent, an empty value is CORRECT if this input genuinely "
+                "does not contain it.\n"
+                'Return ONLY valid JSON of the form {"scores": {"<field name>": 0 or 1, ...}}, '
+                "keyed by the EXACT field names listed above, copied verbatim -- including "
+                "spaces, slashes and capitalisation.\n"
+                f'The "scores" object must have exactly {len(fields)} '
+                f"{'entry' if len(fields) == 1 else 'entries'}, one per field listed above: "
+                "no field omitted, none added."
             ),
         })
 
-        response = self._oracle_generate(content)
-        m = re.search(r"\{.*\}", response, re.DOTALL)
-        if not m:
-            print(
-                f"[QualityEvaluator] {op_name}: skipping one record -- oracle response had no "
-                f"JSON object (len={len(response)}): {response[:300]!r}"
+        # Keyed by field name rather than positional: a 41-entry array only has to lose or gain one
+        # element for every later verdict to be attributed to the wrong field, and the mismatch is
+        # only visible as a length that is off by one, with no way to tell WHICH field went
+        # missing. Names make each verdict self-identifying, so a partial response is both safe to
+        # use and precise about what still needs asking.
+        scores = self._parse_judge_json(self._oracle_generate(content), "scores").get("scores")
+        if not isinstance(scores, dict):
+            raise _JudgeResponseError(
+                f"'scores' is {type(scores).__name__}, expected an object keyed by field name"
             )
-            return None
-        scores = json.loads(m.group()).get("scores")
-        # Strict: a short or long list means the verdicts can't be lined up with the fields.
-        # Scoring the prefix anyway is how an operator whose output was 89% verbatim spans
-        # ended up recorded as 0.000.
-        if not isinstance(scores, list) or len(scores) != len(judged):
-            print(
-                f"[QualityEvaluator] {op_name}: skipping one record -- expected "
-                f"{len(judged)} scores, got {len(scores) if isinstance(scores, list) else scores!r}"
+        asked = {name for name, _, _ in fields}
+        usable: dict[str, float] = {}
+        unreadable: list[str] = []
+        for name in asked:
+            if name not in scores:
+                continue
+            try:
+                usable[name] = self._verdict(scores[name])
+            except (TypeError, ValueError):
+                unreadable.append(name)
+        if not usable:
+            raise _JudgeResponseError(
+                f"no readable verdict among the {len(asked)} field(s) asked about "
+                f"(returned keys {sorted(scores)[:5]}, unreadable {unreadable[:5]})"
             )
-            return None
-        # Missed fields contribute 0 to the numerator but still count in the denominator.
-        return sum(min(1.0, max(0.0, float(s))) for s in scores), len(cols)
+        return usable
 
     def _score_map_op(self, info: dict) -> float | None:
         """Oracle judges whether a sem_map/rag_map's output fields are correct, one call per record.
@@ -913,6 +1075,10 @@ class PlanQualityEvaluator:
         with no room to reason per field, and the answers degenerated -- one plan scored 0.000 on
         a BM25 rag_map whose output was 89% verbatim source spans, while the same plan's embedding
         rag_map scored 0.951 in the same run.
+
+        Verdicts come back keyed by field NAME, not as a positional array, so a response that
+        omits or adds a field is caught by name instead of surviving as a silent off-by-one that
+        shifts every later verdict onto the wrong field.
 
         What each call shows the judge:
           - the operator's OWN input. For rag_map that is the retrieved chunks rather than the
