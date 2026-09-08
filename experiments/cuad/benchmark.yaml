@@ -8,9 +8,6 @@ external_repo:
   env_var: DOCETL_ROOT
   default: ../docetl
   python_path: .
-
-# CUAD has neither a use-case nor a scale-factor axis, so its prefix is just {runner} --
-# no artificial sf_15 segment. The runner owns the layout below it.
 results_prefix: "{results_dir}/CUAD/{runner}"
 
 use_cases:
@@ -71,11 +68,7 @@ use_cases:
       "1": f1_jaccard  # matches avg_f1 in docetl/experiments/reasoning/evaluation/cuad.py (jaccard > 0.15 gate)
     dataset:
       directory: "{benchmark_dir}/dataset"
-      source_csv: "cuad_small.csv"  # full 15-document dataset
-    # Pre-made 5-document optimization subset -- already exists, so run_opt.py must be invoked
-    # WITHOUT --opt-subsample (that flag overwrites subset_path with a fresh random sample).
-    subset_path: "{benchmark_dir}/datasubset_opt/cuad_small_optimize.csv"
-    # CUAD's real, human-annotated ground truth, read in place from the docetl checkout. One
-    # file covers every clause category (there is no per-query split), so unlike SemBench this
-    # path carries no {query_id}.
+      source_csv: "cuad.csv"
+      id_col: idx
+    subset_path: "{benchmark_dir}/datasubset_opt/cuad_optimize.csv"
     ground_truth_path: "{repo_root}/experiments/reasoning/data/CUAD-master_clauses.csv"
