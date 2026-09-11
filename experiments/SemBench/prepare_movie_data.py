@@ -8,6 +8,15 @@ import pandas as pd
 from agent_cost_model.experiments.SemBench.paths import DATASET_DIR, sembench_files_dir
 
 
+# The only columns a plan may read. `idx` is the source table's `id` -- the MOVIE a review is
+# about, not the row identifier; rows are identified by `reviewId` (see benchmark.yaml's
+# movie `id_col`). The dropped columns -- scoreSentiment, originalScore, reviewState,
+# isTopCritic -- are pre-computed answers to what the semantic operators must derive.
+OUTPUT_COLUMNS = [
+    "idx", "reviewId", "creationDate", "criticName", "publicationName", "reviewText", "reviewUrl",
+]
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--scale-factor", type=int, required=True)
@@ -15,21 +24,15 @@ def main() -> None:
 
     source_dir = sembench_files_dir() / "movie" / "data" / f"sf_{args.scale_factor}"
     output_dir = DATASET_DIR / "movie" / f"sf_{args.scale_factor}"
-    # movies_path = source_dir / "Movies.csv"
     reviews_path = source_dir / "Reviews.csv"
-    # if not movies_path.exists() or not reviews_path.exists():
-    #     raise FileNotFoundError(f"SemBench movie data not found under {source_dir}")
+    if not reviews_path.exists():
+        raise FileNotFoundError(f"SemBench movie data not found: {reviews_path}")
 
     output_dir.mkdir(parents=True, exist_ok=True)
-    # movies = pd.read_csv(movies_path).rename(columns={"id": "idx"})
     reviews = pd.read_csv(reviews_path).rename(columns={"id": "idx"})
-    # movies.drop(columns=["audienceScore", "tomatoMeter", "rating"], errors="ignore").to_csv(
-    #     output_dir / f"Movies_{args.scale_factor}.csv", index=False
-    # )
-    reviews[["idx", "reviewId", "creationDate", "criticName", "publicationName", "reviewText", "reviewUrl"]].to_csv(
-        output_dir / f"Reviews_{args.scale_factor}.csv", index=False
-    )
-    print(f"Wrote movie datasets to {output_dir}")
+    output_path = output_dir / f"Reviews_{args.scale_factor}.csv"
+    reviews[OUTPUT_COLUMNS].to_csv(output_path, index=False)
+    print(f"Wrote {len(reviews)} rows to {output_path}")
 
 
 if __name__ == "__main__":
