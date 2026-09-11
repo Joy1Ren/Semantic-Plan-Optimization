@@ -92,16 +92,20 @@ class ExploreImagesTool(Tool):
 
     # Rendered per-instance in __init__ so the prompt names this dataset's actual id column/folder.
     _DOC_TEMPLATE = """\
-### explore_images(ids)
+### explore_images(ids, question=None)
 Inspect up to {max_images} images (found in the data directory's `{subdir}/` folder, named by
 `{id_col}`) during data exploration. Pass a list of ids taken from the `{id_col}` column of a CSV.
 THIS step's observation returns an auto-generated TEXTUAL description of each image (a cheap vision
 model reads the pixels for you); the images themselves are not attached to your context. Use this a
 couple of times at most — images are expensive; do not stream the whole dataset through it.
 
+`question` is an optional natural-language question the describer must address for every image, on
+top of its default description — ask whatever would inform your plan (e.g. whether the attribute
+your query filters on is visible at all, or how cluttered/ambiguous the pictures are).
+
 ```python
 ids = explore_data("items.csv")["{id_col}"].head(3).tolist()
-explore_images(ids)
+explore_images(ids, question="Is the garment's sleeve length clearly visible?")
 ```"""
 
     def __init__(
@@ -110,10 +114,11 @@ explore_images(ids)
         pending_images: list,
         *,
         subdir: str = "images",
+        id_col: str = "idx",
     ) -> None:
         import pathlib
         self._images_dir = pathlib.Path(data_dir) / subdir
-        self._id_col = "idx"
+        self._id_col = id_col
         self._exts = (".jpg",)
         self._pending = pending_images  # shared buffer drained by the run loop
         self.doc = self._DOC_TEMPLATE.format(max_images=self.MAX_IMAGES, subdir=subdir, id_col=self._id_col)
@@ -125,7 +130,7 @@ explore_images(ids)
                 return p
         return None
 
-    def __call__(self, ids: Any) -> str:
+    def __call__(self, ids: Any, question: str | None = None) -> str:
         import base64
         import mimetypes
 
@@ -147,12 +152,18 @@ explore_images(ids)
             data = path.read_bytes()
             mime = mimetypes.guess_type(str(path))[0] or "image/jpeg"
             b64 = base64.b64encode(data).decode("ascii")
-            self._pending.append({"id": str(image_id), "url": f"data:{mime};base64,{b64}"})
+            self._pending.append({
+                "id": str(image_id),
+                "url": f"data:{mime};base64,{b64}",
+                "question": question,
+            })
             attached.append(str(image_id))
 
         lines = [f"Attaching {len(attached)} image(s){note}; they appear below as vision inputs in your next step."]
         if attached:
             lines.append(f"  shown {self._id_col}s: {attached}")
+        if question:
+            lines.append(f"  describer asked: {question}")
         if missing:
             lines.append(f"  no image file found for {self._id_col}s: {missing}")
         return "\n".join(lines)
