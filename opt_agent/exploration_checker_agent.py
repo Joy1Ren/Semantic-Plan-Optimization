@@ -64,7 +64,7 @@ class ExplorationCheckerAgent:
         THE SETTING. A *semantic plan* answers a natural-language query over a table of records.
         It is a chain of operators — filters, maps, joins, aggregations, projections — applied in
         order. Some operators are executed by an LLM, so they cost real dollars and real seconds;
-        the rest are ordinary code and are free. Plan quality is scored 0-1 against ground truth.
+        the rest are ordinary code and are free. Plan quality is scored 0-1, higher is better.
 
         Another agent is searching for the plan with the best cost/quality trade-off for one
         query. It writes many plans, each embodying different optimizations, executes them, and
@@ -73,27 +73,48 @@ class ExplorationCheckerAgent:
         optimization the plan uses and HOW FAR that optimization is pushed. There is no fixed
         catalog of optimizations — read the ones it reported and reason about those.
 
+        YOUR JOB. Looking at all executed plans together, decide whether the search should keep
+        going, and if it should, name the 1-2 optimizations the agent should try next. You are
+        judging coverage of the search, not the correctness of any one plan.
+
+
+        "MEANINGFULLY" IS RELATIVE TO THIS RUN. There is no fixed threshold and you must not
+        invent one — the right size of an improvement depends entirely on this query and this
+        subsample. Use the scale the run itself gives you: you are shown the quality spread over
+        the executed plans and the gaps between neighbouring frontier points. A move whose
+        plausible effect is smaller than the differences already visible between plans is inside
+        the noise of a small subsample, and would teach the agent nothing. Do not continue pushing
+        for improved quality or reduced cost if the expected improvement is low (not meaningful
+        compared to noise from the subsample performance).
+
+        THE BAR RISES AS THE SEARCH MATURES. Early on — few plans, and the cheap and expensive
+        extremes not yet measured — breadth is genuinely valuable and a coarse gap is worth
+        naming. Once the frontier has several points and recent plans have stopped advancing it,
+        the search is near done, and only a clearly promising move justifies another plan.
+        "Exhausted" is the EXPECTED verdict for a mature search, not a failure to find something.
+        The burden of proof is on continuing, not on stopping.
+
         THE SPACE THAT EXISTS. Below are the operators and models the agent is allowed to use.
         This is NOT a list of optimizations to recommend, and the agent has it already — it is
-        here so you can tell an UNTRIED choice from an IMPOSSIBLE one. Read the plans against it:
-        a whole operator, knob, or model tier that no executed plan has ever touched is the most
-        underexplored thing in the search, and it will never appear in the agent's own
-        `optimizations` records, because those describe only what it did do.
+        here only so you can tell which choices are POSSIBLE, so that you never propose something
+        that does not exist, and never dismiss something that was in fact available. An option no
+        plan has touched is a CANDIDATE worth weighing, not automatically a gap: it still has to
+        clear THE BAR above.
 
         {operator_catalog}
         {model_catalog}
 
-        YOUR JOB. Looking at all executed plans together, decide whether any optimization is still
-        UNDEREXPLORED, and if so say — in natural language — what to try next. You are judging coverage
-        of the search, not the correctness of any one plan. Prioritize exploring the full range of optimizations
-        and understanding the quality ceiling before focusing on optimizing one specific choice. We want to
-        improve quality and lower cost.
-
         HOW TO READ THE EVIDENCE:
-        - A CONSTANT IS A DIMENSION. Scan for settings that are identical in every plan — one
-          model family, one retrieval method, one context budget, one logical shape. A knob
-          nobody has ever moved has zero evidence behind it, however many plans there are. It
-          counts as underexplored even though no `optimizations` record mentions varying it.
+        - HAS THE FRONTIER MOVED LATELY? This is the strongest signal about whether the search is
+          done. Several plans in a row that landed inside the frontier means the agent has
+          stopped learning; unless there exists an optimization choice that has potential to improve
+          the frontier, stop.
+        - A CONSTANT MAY BE A DIMENSION. Settings identical in every plan — one model family, one
+          retrieval method, one context budget, one logical shape — have no evidence behind them,
+          however many plans there are, and will never show up in the agent's `optimizations`
+          records, which describe only what it did do. That makes them the best CANDIDATES, but
+          they still have to clear the bar: say what you expect moving one to do, and to whose
+          number.
         - AN UNSCORED PLAN EXPLORED NOTHING. A plan whose quality is n/a produced no measurement,
           whatever it cost. Never treat it as evidence for or against a direction, and do not ask
           for a more elaborate version of it. If that direction still looks worth testing, ask
@@ -106,7 +127,8 @@ class ExplorationCheckerAgent:
         HOW TO JUDGE (guidance, not rules — weigh the whole picture):
         - Make sure to also execute BASELINE plans to understand the range of possible quality/cost.
           For example, run a plan with no cost optimizations to see what quality is achievable.
-          Similarly, run a plan with more significant cost optimizations to find the lower bound of quality.
+          Similarly, run a plan with more significant cost optimizations to see what quality a cheap
+          plan can get.
         - Follow the gradient. If pushing an optimization further kept paying off — quality
           rising, or cost falling with quality intact — it is underexplored. Name the concrete
           next setting along that same dimension.
@@ -125,14 +147,15 @@ class ExplorationCheckerAgent:
         - Prefer the cheapest plan that would answer the open question. A dimension can usually
           be tested on a cheap model; do not ask for an expensive plan when a cheap one settles
           the same thing.
-        - Be concrete and be brief: at most 2-3 suggestions, most valuable first. Point at the
+        - Be concrete and be brief: at most 1-2 suggestions, most valuable first. Point at the
           specific optimization and the specific next extent to take it to. Each suggestion must
           describe ONE plan the agent could write next, in a couple of sentences — not a program
           of work, and never a long enumeration of per-field or per-record specifics.
 
         Concluding the search is a real and useful verdict. If the optimizations the agent has
         reported have each been pushed to the point of diminishing returns, say so rather than
-        inventing work.
+        inventing work. Do not suggest plans that have a low likelihood of improving the current
+        cost-quality frontier.
 
         RESPOND with EXACTLY ONE fenced ```json``` block and nothing else:
           {{"underexplored": true,  "suggestion": "<what to try next, and why the evidence supports it>"}}
