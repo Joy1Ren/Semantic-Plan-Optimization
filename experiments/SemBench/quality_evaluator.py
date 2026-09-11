@@ -118,14 +118,15 @@ def _regenerate_movie_ground_truth(
 # [definition].ground_truth, and references its one domain table via
 # read_parquet('styles_details.parquet') resolved against DuckDB's file_search_path (see
 # EcommScenario.get_ground_truth). Each datasubset row is a sampled product, uniquely identified
-# by prod_id (that table's own `id` column) — restrict it to the datasubset's products and point
-# file_search_path at a temp copy, reusing the exact same gold SQL text without rewriting it.
+# by idx (that table's own `id` column, renamed by prepare_ecomm_data.py) — restrict it to the
+# datasubset's products and point file_search_path at a temp copy, reusing the exact same gold SQL
+# text without rewriting it.
 def _regenerate_ecomm_ground_truth(
     scale_factor: int, query_id: int, subset_df: pd.DataFrame
 ) -> "pd.DataFrame | None":
     toml_path = sembench_files_dir() / "ecomm" / "queries" / f"q{query_id}.toml"
     parquet_path = sembench_files_dir() / "ecomm" / "data" / f"sf_{scale_factor}" / "styles_details.parquet"
-    if not toml_path.exists() or not parquet_path.exists() or "prod_id" not in subset_df.columns:
+    if not toml_path.exists() or not parquet_path.exists() or "idx" not in subset_df.columns:
         return None
 
     import tempfile
@@ -142,7 +143,7 @@ def _regenerate_ecomm_ground_truth(
     with tempfile.TemporaryDirectory() as tmp_dir:
         tmp_parquet_path = Path(tmp_dir) / "styles_details.parquet"
         conn = duckdb.connect()
-        conn.register("_subset_ids", pd.DataFrame({"id": subset_df["prod_id"].drop_duplicates()}))
+        conn.register("_subset_ids", pd.DataFrame({"id": subset_df["idx"].drop_duplicates()}))
         conn.execute(
             f"COPY (SELECT s.* FROM read_parquet('{parquet_path}') AS s "
             f"SEMI JOIN _subset_ids USING (id)) TO '{tmp_parquet_path}' (FORMAT PARQUET)"
@@ -180,23 +181,13 @@ def _load_ground_truth(
     SQL over the datasubset (accurate — includes columns the datasubset strips out, e.g. movie's
     scoreSentiment); fall back to the precomputed full-dataset ground truth CSV otherwise.
 
-    A regenerated result is cached as Q{id}_gt.csv next to the datasubset CSV (same directory,
-    keyed by the same subset — regenerating is a real DuckDB run, not free) and reused across
-    plans and runs for as long as it is still newer than that subset.
-
-    The cache is invalidated by mtime rather than by whoever rewrites the subset deleting it:
-    a subset can be replaced from several places (run_opt.py --opt-subsample with either
-    sampling method, LLM_Sampler's own CLI, demo.py), and any one of them forgetting to clear
-    the cache would silently score a NEW subset against the OLD subset's ground truth. Ties
-    count as stale, since a subset and its ground truth written in the same second are not
-    ordered reliably — that only costs one extra DuckDB run.
+    Regenerated once per run (this is reached through `_get_direct_ground_truth`, which loads
+    once and reuses the frame for every plan) and written as {subset stem}_gt.csv next to the
+    datasubset CSV. The name carries the subset's own stem, so the four --sample-method subsets
+    of one query keep four separate ground truths instead of colliding on one filename; the
+    file is an artifact to eyeball, never read back as a cache.
     """
-    subset_gt_path = subset_path.with_name(f"Q{query_id}_gt.csv")
-    if subset_gt_path.exists() and (
-        not subset_path.exists()
-        or subset_gt_path.stat().st_mtime > subset_path.stat().st_mtime
-    ):
-        return pd.read_csv(subset_gt_path)
+    subset_gt_path = subset_path.with_name(f"{subset_path.stem}_gt.csv")
     if subset_path.exists():
         subset_df = pd.read_csv(subset_path)
         regenerated = _regenerate_ground_truth_from_subset(use_case, scale_factor, query_id, subset_df)

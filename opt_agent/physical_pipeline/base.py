@@ -13,13 +13,14 @@ from pydantic.fields import FieldInfo
 from palimpzest.constants import Model
 from palimpzest.core.lib.schemas import ImageFilepath, _create_pickleable_model
 
-NUM_SAMPLES = 10
-SUBSET_SEED = 42
-
-# Embedding model + endpoint used by rag_filter/rag_map for chunk retrieval, via OpenRouter's
-# /embeddings endpoint (not a palimpzest Model enum value -- see operators/rag_common.py).
-DEFAULT_RAG_EMBEDDING_MODEL = "qwen/qwen3-embedding-8b"
-_RAG_EMBEDDING_BASE_URL = "https://openrouter.ai/api/v1"
+# Re-exported from the palimpzest-free leaf module so `agent_cost_model.sampling` and the
+# analysis scripts can import these without pulling in palimpzest via this module.
+from .constants import (  # noqa: F401
+    DEFAULT_RAG_EMBEDDING_MODEL,
+    NUM_SAMPLES,
+    SUBSET_SEED,
+    _RAG_EMBEDDING_BASE_URL,
+)
 
 
 def _patch_convert_empty_field_answers() -> None:

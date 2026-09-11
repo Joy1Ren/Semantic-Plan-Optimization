@@ -95,7 +95,7 @@ class _RunContext:
 
 
 class CostModelAgent:
-    """A bounded tool-loop agent that authors, applies, and refines cost models."""
+    """A bounded tool-loop agent that authors, applies, and refines semantic plans."""
     execute_briefing = textwrap.dedent("""\
         You are a query plan engineer optimizing physical plans for an optimized deep-research query system.
         Physical query plans are trees of operators (semantic filters, maps, joins,
@@ -116,8 +116,10 @@ class CostModelAgent:
            a classification/search task (a rare target vs. common groups). Let it GUIDE how you design plans --
            do not rely on exploration to solve the query and do not hardcode row IDs.
            If the dataset has an `images/` folder, you can inspect a few product images with
-           `explore_images(ids)` (up to 5, selected by the dataset's image id column) — useful to judge what a vision
-           operator would work with. Images are shown once and are costly, so inspect just a couple.
+           `explore_images(ids, question=None)` (up to 5, selected by the dataset's image id column) — useful to
+           judge what a vision operator would work with. Pass `question` to ask the describer a natural-language
+           question it must address for every image, on top of its default description. Images are shown once
+           and are costly, so inspect just a couple.
         2. Write a plan with `write_plan(code, name, description, optimizations)`.
            - `code` builds a PhysicalPipeline instance and returns it as the last expression.
            - `name` is a string identifier you choose, e.g. "p1", "p2", "p3", ...
@@ -134,6 +136,8 @@ class CostModelAgent:
              `filter(lambda row: row["description"].isin(["settee", "sofa", "couch"]))`, or
              `map(lambda row: {"red_freq_count": row["description"].str.count("red")}, ...)`.
              These are general and save on cost and latency.
+           - DO start with baseline plans that have no or minimal cost/quality optimizations to understand
+             the range of achievable quality/cost.
            - `plans[name]["plan"]` is populated immediately with the newly written PhysicalPipeline instance.
         3. Execute with `execute_plan(name)`:
            - Runs on a reproducible sample of records (same records across all plans).
@@ -147,7 +151,8 @@ class CostModelAgent:
              input/output pairs for an operator.
         5. Based on `plan_results.df` and `op_results.df`, write ONE new plan and execute it,
            then repeat from step 2. Each new plan should embody a NEW optimization idea
-           or a COMBINATION of ideas that worked. Levers for lowering cost and latency include:
+           or a COMBINATION of ideas that worked. Make sure to write baseline plans and explore different
+           optimization strategies. Levers for lowering cost and latency include:
            swapping to a cheaper/faster model, narrowing `depends_on` to fewer columns, truncating long text with a `map`
            before a semantic op, reordering to push selective filters earlier, removing images,
            or changing the logical structure. Levers for increasing quality include: swapping to a more capable model,
@@ -187,8 +192,10 @@ class CostModelAgent:
            exploration lightweight: do NOT run excessive regex/brute-force scans, and never use the
            data to solve the query and reverse-engineer a plan; the plan must remain a general solution.
            If the dataset has an `images/` folder, you can SEE a few product images with
-           `explore_images(ids)` (up to 5, selected by the dataset's image id column) — useful to judge what a vision
-           operator would work with. Images are shown once and are costly, so inspect just a couple.
+           `explore_images(ids, question=None)` (up to 5, selected by the dataset's image id column) — useful to
+           judge what a vision operator would work with. Pass `question` to ask the describer a natural-language
+           question it must address for every image, on top of its default description. Images are shown once
+           and are costly, so inspect just a couple.
         2. Write a plan with `write_plan(code, name, description, optimizations)`.
            - `code` builds a PhysicalPipeline instance and returns it as the last expression.
            - `name` is a string identifier you choose, e.g. "p1", "p2", "p3", ...
@@ -258,8 +265,10 @@ class CostModelAgent:
            exploration lightweight: do NOT run excessive regex/brute-force scans, and never use the
            data to solve the query and reverse-engineer a plan; the plan must remain a general solution.
            If the dataset has an `images/` folder, you can SEE a few product images with
-           `explore_images(ids)` (up to 5, selected by the dataset's image id column) — useful to judge what a vision
-           operator would work with. Images are shown once and are costly, so inspect just a couple.
+           `explore_images(ids, question=None)` (up to 5, selected by the dataset's image id column) — useful to
+           judge what a vision operator would work with. Pass `question` to ask the describer a natural-language
+           question it must address for every image, on top of its default description. Images are shown once
+           and are costly, so inspect just a couple.
         2. Write 1–2 baseline plans with `write_plan(code, name, description, optimizations)` that
            capture meaningfully different design approaches (e.g., one with a strong early filter, one
            without; one using a capable model, one using a cheaper model). Give each a short
@@ -600,7 +609,9 @@ class CostModelAgent:
         registry = CostModelRegistry()
         plan_codes: dict = {}  # populated by WritePlanTool; shared with ExecutePlanTool
         data_dir = query_info["data_dir"]
-        # Image files always follow <data_dir>/<image_subdir>/<idx>.jpg.
+        # The dataset's row-identifier column, declared by the benchmark (see run_opt.py).
+        # Image files always follow <data_dir>/<image_subdir>/<id_col>.jpg.
+        id_col = query_info.get("id_col", "idx")
         image_subdir = query_info.get("image_subdir", "images")
 
         # Build oracle client and quality evaluator (oracle runs inside QualityEvaluator)
@@ -613,15 +624,15 @@ class CostModelAgent:
             shutil.rmtree(llm_judge_dir)
         llm_judge_dir.mkdir(parents=True, exist_ok=True)
 
-        # PlanQualityEvaluator writes this cache next to the datasubset it ran on
-        # (subset_cache_path.with_name(...)), so derive the stale-cache path the same way
-        # rather than rebuilding it from a benchmark-specific layout -- rebuilding it is how
-        # this silently missed CUAD's copy and reused a previous run's oracle output.
+        # Both subset-adjacent ground-truth artifacts, named after the subset they came from:
+        # _oracle_result.csv in oracle mode, _gt.csv when the benchmark regenerates its gold
+        # query over the subset. Each run rewrites the one it uses; clearing both here keeps a
+        # previous run's file from sitting next to the subset looking like this run's.
         _subset_path = query_info.get("subset_path")
         if _subset_path:
-            pathlib.Path(_subset_path).with_name(
-                f"Q{query_info['query_id']}_oracle_result.csv"
-            ).unlink(missing_ok=True)
+            _subset_path = pathlib.Path(_subset_path)
+            for _suffix in ("_oracle_result.csv", "_gt.csv"):
+                _subset_path.with_name(f"{_subset_path.stem}{_suffix}").unlink(missing_ok=True)
 
         # This run's opt_results directory. The evaluator writes the run's single shared ground
         # truth here; ExecutePlanTool writes one subdirectory of debug artifacts per plan.
@@ -670,12 +681,12 @@ class CostModelAgent:
 
         def add_image_data(pipeline: PhysicalPipeline, col_name: str = "image_file_path"):
             # `col_name` is the NEW image column being added; the on-disk path is built from the
-            # fixed naming convention (<image_subdir>/<row["idx"]>.jpg).
+            # fixed naming convention (<image_subdir>/<row[id_col]>.jpg).
             # `col_name` MUST NOT collide with an existing column (e.g. the id column). PZ's convert
             # only generates fields not already present on the record, so a colliding name produces
             # an empty field_answers and raises `max() iterable argument is empty` on every row.
             pipeline.map(
-                udf=lambda row: {col_name: os.path.join(data_dir, image_subdir, str(row["idx"]) + ".jpg")},
+                udf=lambda row: {col_name: os.path.join(data_dir, image_subdir, str(row[id_col]) + ".jpg")},
                 cols=[{"name": col_name, "type": pz.ImageFilepath, "description": ""}],
             )
             return pipeline
@@ -732,7 +743,7 @@ class CostModelAgent:
             ExploreSampleTool(data_dir),
             ExploreImagesTool(
                 data_dir, self._pending_images,
-                subdir=image_subdir,
+                subdir=image_subdir, id_col=id_col,
             ),
             GetOpSamplesTool(plan_results),
             ExecutePlanTool(
@@ -993,7 +1004,7 @@ class CostModelAgent:
             try:
                 parsed = self._parse_with_retries(system, raw)
             except ParseError as e:
-                obs = f"Observation (step {step}): {e.detail}"
+                obs = self._clip_observation(f"Observation (step {step}): {e.detail}")
                 self.messages.append({"role": "user", "content": obs})
                 self.trajectory_steps[-1]["observation"] = obs
                 self._log(f"[parse error] {obs}")
@@ -1061,7 +1072,9 @@ class CostModelAgent:
             try:
                 out = executor(parsed.code)
             except Exception as e:
-                obs = f"Observation (step {step}): exec failed — {type(e).__name__}: {e}"
+                obs = self._clip_observation(
+                    f"Observation (step {step}): exec failed — {type(e).__name__}: {e}"
+                )
                 self.messages.append({"role": "user", "content": obs})
                 self.trajectory_steps[-1]["observation"] = obs
                 self._log(obs)
@@ -1149,12 +1162,13 @@ class CostModelAgent:
         return result
 
     # -- helpers -----------------------------------------------------------
-    _IMAGE_DESCRIBE_SYSTEM = (
+    IMAGE_DESCRIBE_SYSTEM = (
         "You are a vision assistant helping a query-planning agent explore a dataset's images. "
         "For each attached image, write ONE concise, factual line describing what it shows — main "
-        "object/subject, dominant colors, and any attributes useful for filtering (product type, "
-        "style, visible text). Prefix each line with the image's id. No preamble, no summary."
+        "object/subject, dominant colors, and any attributes useful for filtering (item type, "
+        "composition, visible text). Prefix each line with the image's id. No preamble, no summary."
     )
+
 
     def _describe_images(self, images: list[dict]) -> str:
         """Generate a textual description of the staged explore_images pictures.
@@ -1170,8 +1184,15 @@ class CostModelAgent:
         for img in images:
             content.append({"type": "text", "text": f"id {img['id']}:"})
             content.append({"type": "image_url", "image_url": {"url": img["url"]}})
+        system = self._IMAGE_DESCRIBE_SYSTEM
+        question = next((img.get("question") for img in images if img.get("question")), None)
+        if question:
+            system += (
+                " In addition, make sure to address the following in every line: "
+                f"{question}"
+            )
         try:
-            result = self._image_describer.generate(self._IMAGE_DESCRIBE_SYSTEM, [{"role": "user", "content": content}])
+            result = self._image_describer.generate(system, [{"role": "user", "content": content}])
         except Exception as e:
             return f"[image description unavailable: {type(e).__name__}: {e}]"
         text, meta = result, {}
@@ -1234,14 +1255,19 @@ class CostModelAgent:
             parts.append(f"[result]\n{result_s}")
         if len(parts) == 1:
             parts.append("[no output]")
-        obs = "\n\n".join(parts)
+        return CostModelAgent._clip_observation("\n\n".join(parts))
+
+    @staticmethod
+    def _clip_observation(obs: str) -> str:
+        """Cap any observation — successful output OR an error message — at the context budget.
+        Error text interpolates offending values, so it can be just as large as a result."""
         limit = CostModelAgent._OBS_CHAR_LIMIT
-        if len(obs) > limit:
-            obs = obs[:limit] + (
-                f"\n\n[output truncated — {len(obs) - limit} chars omitted. "
-                "Use get_op_samples(plan_name, op_name) to inspect specific input/output pairs.]"
-            )
-        return obs
+        if len(obs) <= limit:
+            return obs
+        return obs[:limit] + (
+            f"\n\n[output truncated — {len(obs) - limit} chars omitted. "
+            "Use get_op_samples(plan_name, op_name) to inspect specific input/output pairs.]"
+        )
 
     def _fresh_pipeline(self, plan_name: str, plan_codes: dict | None):
         """Re-instantiate a FRESH PhysicalPipeline from a plan's source code via the plan-construction
@@ -1453,6 +1479,13 @@ class CostModelAgent:
             # CUAD does not) -- recording a placeholder would make it look like a real dimension.
             **({"scale_factor": scale_factor} if scale_factor is not None else {}),
             "metric_type": metric_type,
+            # Which ground truth search-time plan quality was scored against -- "oracle" (an
+            # oracle-substituted pipeline run, the default) or "ground_truth" (the benchmark's
+            # real ground truth via `ground_truth_loader`). Doesn't describe the full-dataset
+            # runK entries below, which always score against real ground truth regardless of
+            # this setting -- it's specifically so a reader (or another runner being compared
+            # against this one, e.g. docetl MOAR) can filter to runs comparable on that axis.
+            "ground_truth_mode": "oracle" if self.use_oracle_ground_truth else "ground_truth",
             # Model settings and spend, grouped by the actor that spent it.
             **self._run_config(),
             # Executing candidate plans on the subset: the work the search was measuring,

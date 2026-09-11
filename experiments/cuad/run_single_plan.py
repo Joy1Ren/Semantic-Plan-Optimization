@@ -4,9 +4,10 @@ search loop -- for fast, cheap debugging of why a plan's quality score looks the
 DataRecord.__repr__).
 
 Usage:
-    python3 -m agent_cost_model.experiments.cuad.run_single_plan --plan-name p1
-    python3 -m agent_cost_model.experiments.cuad.run_single_plan --plan-name p1 --full
     python3 -m agent_cost_model.experiments.cuad.run_single_plan --plan-name p1 \\
+        --dataset agent_cost_model/experiments/cuad/datasubset_opt/cuad_optimize.csv
+    python3 -m agent_cost_model.experiments.cuad.run_single_plan --plan-name p1 \\
+        --dataset agent_cost_model/experiments/cuad/dataset/cuad.csv \\
         --final-answer path/to/other/Q1.json --runcount 1 --save-csv /tmp/p1_output.csv
 
 Reads plan code from a CostModelAgent final_answer JSON's plan_codes (see
@@ -31,7 +32,7 @@ from agent_cost_model.experiments.cuad.quality_evaluator import (
     normalize_eval_df,
 )
 from agent_cost_model.opt_agent.local_python_executor import LocalPythonExecutor
-from agent_cost_model.experiments.cuad.paths import DATASET_DIR, DATASUBSET_DIR, cuad_ground_truth_csv
+from agent_cost_model.experiments.cuad.paths import DATASET_DIR, cuad_ground_truth_csv
 from agent_cost_model.paths import RESULTS_DIR
 from agent_cost_model.opt_agent.physical_pipeline import PhysicalPipeline
 
@@ -84,15 +85,19 @@ def _load_plan_code(final_answer_path: Path, plan_name: str, runcount: str | Non
     )
 
 
-def _score(output_df: pd.DataFrame) -> None:
+def _score(output_df: pd.DataFrame, dataset_path: Path) -> None:
     """Score against CUAD's real annotations with the same code path the agent uses.
 
     `_evaluate` is quality_evaluator.score_plan's own body; score_plan is just avg_f1 off the
     front of it, and this prints the full per-metric breakdown instead -- which is the whole
     point of this script.
+
+    `dataset_path` is the document POPULATION the metrics are computed over: the CSV the plan
+    just ran on, not its output, so a document the plan dropped is charged as an empty
+    prediction rather than vanishing from the measurement (see _evaluate's own note).
     """
     normalized = normalize_eval_df(output_df, "cuad", 1)
-    metrics = _evaluate(normalized, cuad_ground_truth_csv())
+    metrics = _evaluate(normalized, cuad_ground_truth_csv(), dataset_path)
     if not metrics:
         print("no predicted records -- normalize_eval_df found no filename + clauses "
               "shape (e.g. the plan projected away the identifier column); skipping scoring")
@@ -113,23 +118,26 @@ def main() -> None:
     parser.add_argument("--plan-name", required=True, help='e.g. "p1" -- a key in the final-answer JSON\'s plan_codes')
     parser.add_argument("--final-answer", type=Path, default=DEFAULT_FINAL_ANSWER_PATH, help="final_answer JSON to read plan_codes from")
     parser.add_argument("--runcount", default=None, help="which top-level run key to read plan_codes from (default: search every run, most recent first)")
-    parser.add_argument("--full", action="store_true", help="run on the full 15-document dataset (pipeline.run()) instead of the 5-document optimize subset (pipeline.run_subset()) -- costs more, makes real LLM calls either way")
+    parser.add_argument("--dataset", type=Path, required=True, help="CSV of documents to run the plan on -- e.g. the prepared dataset or optimize-set CSV written by prepare_cuad_data.py. Also the population scoring is computed over. Makes real LLM calls, so cost scales with its row count")
     parser.add_argument("--save-csv", type=Path, default=None, help="also save the full (untruncated) output DataFrame here")
     args = parser.parse_args()
+
+    # run_subset() writes a fresh random sample to this path when it does not exist, which would
+    # silently run something other than what was asked for -- so require the file up front.
+    if not args.dataset.exists():
+        parser.error(f"--dataset not found: {args.dataset}. Run prepare_cuad_data.py first.")
 
     patch_litellm_for_openrouter()
 
     code = _load_plan_code(args.final_answer, args.plan_name, args.runcount)
     pipeline = _build_pipeline(code, args.plan_name)
 
-    if args.full:
-        result_collection, _op_results, _plan_dict = pipeline.run()
-        output_df = result_collection.to_df()
-    else:
-        _per_op_list, plan_context, _plan_dict = pipeline.run_subset(
-            subset_cache_path=str(DATASUBSET_DIR / "cuad_small_optimize.csv")
-        )
-        output_df = pd.DataFrame(plan_context.output_records)
+    # run_subset() with an existing cache path just executes that file's rows verbatim -- no
+    # sampling -- so it runs whichever dataset was passed, of any size.
+    _per_op_list, plan_context, _plan_dict = pipeline.run_subset(
+        subset_cache_path=str(args.dataset)
+    )
+    output_df = pd.DataFrame(plan_context.output_records)
 
     pd.set_option("display.max_colwidth", None)
     pd.set_option("display.max_columns", None)
@@ -143,7 +151,7 @@ def main() -> None:
         print(f"saved -> {args.save_csv}")
         print()
 
-    _score(output_df)
+    _score(output_df, args.dataset)
 
 
 if __name__ == "__main__":

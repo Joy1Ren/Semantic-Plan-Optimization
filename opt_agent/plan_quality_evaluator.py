@@ -550,7 +550,7 @@ class PlanQualityEvaluator:
         # cache, so CostModelAgent._setup_run deletes it at the start of every run to keep a
         # previous run's oracle output from being mistaken for this one's.
         oracle_result_path = subset_cache_path.with_name(
-            f"Q{self._query_id}_oracle_result.csv"
+            f"{subset_cache_path.stem}_oracle_result.csv"
         )
         if not oracle_result_path.exists():
             oracle_result_path.parent.mkdir(parents=True, exist_ok=True)
@@ -590,8 +590,9 @@ class PlanQualityEvaluator:
         reintroduce exactly the duplicate that prepare_cuad_data.py was changed to stop making).
 
         Restricting the ground truth to the optimization subset is the LOADER's job, not this
-        method's. Every dataset/datasubset this agent runs on names its identifier column `idx`,
-        but a benchmark's ground truth does not: CUAD's is keyed by `Filename` (bridged by
+        method's. Every dataset/datasubset this agent runs on names its identifier column in its
+        benchmark's `dataset.id_col` (`idx` for CUAD and SemBench ecomm, `reviewId` for SemBench
+        movie), but a benchmark's ground truth does not: CUAD's is keyed by `Filename` (bridged by
         prepare_cuad_data.py's idx -> filename mapping), and SemBench's is gold-SQL output whose
         columns its evaluator matches by position rather than by name. There is no id column to
         join on that means the same thing across benchmarks, so each loader handles its own --

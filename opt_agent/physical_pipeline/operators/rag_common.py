@@ -5,8 +5,8 @@ with two changes:
 
   1. Embeddings are computed with an OpenRouter-hosted embedding model (default
      "qwen/qwen3-embedding-8b") via a direct HTTP call to OpenRouter's /embeddings
-     endpoint -- the same approach agent_cost_model.opt_agent.llm_sampler.LLM_Sampler uses for its
-     embedding-based importance sampling. PZ's installed RAGFilter/RAGConvert now embed
+     endpoint -- the same approach agent_cost_model.sampling.embeddings.EmbeddingClient uses when
+     scoring rows for the optimization subset. PZ's installed RAGFilter/RAGConvert now embed
      via litellm using a `palimpzest.constants.Model`, but "qwen/qwen3-embedding-8b" isn't
      in PZ's curated model registry, so constructing a Model for it raises; we bypass PZ's
      embedding path (compute_embedding) entirely and call OpenRouter directly instead. PZ
@@ -55,7 +55,7 @@ _RAG_PLACEHOLDER_MODEL = Model.TEXT_EMBEDDING_3_SMALL
 def _rag_embed(model: str, text: str) -> tuple[list[float], GenerationStats]:
     """POST one input to OpenRouter's /embeddings endpoint; return (vector, GenerationStats).
 
-    Mirrors agent_cost_model.opt_agent.llm_sampler.LLM_Sampler._embed_call: raw HTTP with
+    Mirrors agent_cost_model.sampling.embeddings.EmbeddingClient._call: raw HTTP with
     encoding_format="float" so provider errors surface clearly instead of an SDK's opaque
     "No embedding data received".
     """

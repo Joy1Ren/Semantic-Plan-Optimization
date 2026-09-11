@@ -29,21 +29,20 @@ def docetl_root() -> Path:
     return root
 
 
-def _cuad_data_dir() -> Path:
+def cuad_data_dir() -> Path:
+    """Root of docetl's CUAD data, holding the train/ and test/ split directories. Which json
+    under it is the full dataset and which is the optimization set is declared once, in
+    prepare_cuad_data.py's FULL_SOURCE / OPTIMIZE_SOURCE."""
     return docetl_root() / "experiments" / "reasoning" / "data"
 
 
 # -- inputs read from the docetl checkout (read-only) -------------------------
 def cuad_ground_truth_csv() -> Path:
-    """The real, human-annotated CUAD clause annotations."""
-    return _cuad_data_dir() / "CUAD-master_clauses.csv"
+    """The real, human-annotated CUAD clause annotations. One file covers every split.
 
-
-def cuad_full_json() -> Path:
-    """The 15-document full dataset, read by prepare_cuad_data.py to assign every document its
-    idx. Scoring does not read a fixed population file: it derives the document population from
+    Scoring does not read a fixed population file: it derives the document population from
     the plan's own predicted rows (see quality_evaluator.py's _evaluate)."""
-    return _cuad_data_dir() / "train" / "cuad_small.json"
+    return cuad_data_dir() / "CUAD-master_clauses.csv"
 
 
 # -- data prepared into this repo (see prepare_cuad_data.py) ------------------

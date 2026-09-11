@@ -57,6 +57,34 @@ def format_path(template: str, context: dict[str, Any]) -> Path:
     return Path(template.format(**context))
 
 
+def load_query(config: dict[str, Any], context: dict[str, Any]) -> tuple[str, str, list[str]]:
+    """One query's (task prompt, evaluation metric, modalities) from a use case's config.
+
+    Lives here rather than in the runner because the sampler CLI resolves the same query the
+    same way -- a subset built from a different prompt than the one the optimizer later runs
+    would be silently wrong.
+    """
+    import tomllib
+
+    source = config["query_source"]
+    query_id = str(context["query_id"])
+    try:
+        task = config["task_prompts"][query_id].strip()
+        metric = config["query_metrics"][query_id]
+    except KeyError as error:
+        raise KeyError(
+            f"benchmark.yaml is missing the task prompt or evaluation metric for query {query_id}"
+        ) from error
+    if source["type"] == "toml":
+        path = Path(source["path"].format(**context))
+        with path.open("rb") as handle:
+            query = tomllib.load(handle)
+        return task, metric, query["metadata"].get("modalities", [])
+    if source["type"] == "text":
+        return task, metric, source.get("modalities", ["text"])
+    raise ValueError(f"Unsupported query source type: {source['type']!r}")
+
+
 def results_prefix(
     benchmark: str | Path,
     runner: str,

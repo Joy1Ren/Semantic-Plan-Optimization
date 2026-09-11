@@ -174,11 +174,11 @@ def _render_cells(cells: list[dict]) -> str:
 class WritePlanTool(Tool):
     name = "write_plan"
     doc = """\
-### write_plan(code, name, description="", optimizations=None)
+### write_plan(code, plan_name, description="", optimizations=None)
 Build and store a physical query plan WITHOUT executing it. `code` is a Python
 string that constructs a PhysicalPipeline and returns it as its last expression —
 do NOT call `.run()` in the plan code; `execute_plan` handles execution.
-`name` is the plan identifier you choose (e.g. "p1"). `description` is a short
+`plan_name` is the plan identifier you choose (e.g. "p1"). `description` is a short
 high-level label of the plan and the optimizations it embodies
 (e.g. "cheap sem_filter on truncated text, then sem_filter on image") — it is
 shown back to you in cost/estimate tables and helps you compare optimization ideas.
@@ -205,12 +205,21 @@ After this call, `plans[name]["plan"]` holds the built pipeline,
 `plans[name]["description"]` holds your label, and `plans[name]["optimizations"]`
 holds what you recorded here.
 
+EVERY column name a `map`/`sem_map`/`rag_map` declares must be NEW — an operator can only ADD
+columns, it can never overwrite one that an earlier operator produced. Re-declaring a name is
+rejected here.
+```python
+pipe.rag_map(cols=[{"name": "Parties_rag", ...}], ...)      # NOT "Parties"
+pipe.sem_map(cols=[{"name": "Parties_llm", ...}], ...)
+pipe.map(lambda r: {"Parties": r["Parties_llm"] or r["Parties_rag"]},
+         cols=[{"name": "Parties", ...}])                   # first use of "Parties"
+```
+
 Use `load_data(filename)` to read the relavent CSV and seed the pipeline's source table.
 Use `add_image_data(pipeline: PhysicalPipeline, image_col: str)` to attach images: it adds a NEW
 column named `image_col` (type `pz.ImageFilepath`) holding each row's image-file path. `image_col`
-MUST be a fresh column name — do NOT reuse an existing column such as the id column. Reusing an
-existing name generates nothing (the map produces no new field), so every row errors and the plan
-returns 0 output. Then pass images to a model via `depends_on=["<image_col>"]` on the semantic op.
+is subject to the same rule — it MUST be a fresh column name, not an existing one such as the id
+column. Then pass images to a model via `depends_on=["<image_col>"]` on the semantic op.
 
 
 ```python
@@ -273,10 +282,10 @@ email
 class ExecutePlanTool(Tool):
     name = "execute_plan"
     doc = """\
-### execute_plan(name)
-Execute the stored plan `name` on a reproducible sample of records. Plan-level and
+### execute_plan(plan_name)
+Execute the stored plan `plan_name` on a reproducible sample of records. Plan-level and
 operator-level quality, latency, cost, and token usage are appended to `plan_results`
-and `op_results`, respectively. After execution, `plans[name]["plan"]` holds the PhysicalPipeline.
+and `op_results`, respectively. After execution, `plans[plan_name]["plan"]` holds the PhysicalPipeline.
 
 Returns a compact summary dict with plan stats and per-operator stats. Key fields:
 - `quality`: 0–1 overall plan quality evaluated by an oracle. Higher is better.
