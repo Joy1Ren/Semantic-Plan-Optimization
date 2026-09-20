@@ -89,7 +89,7 @@ use_cases:
         The pairs MAY NOT be the same but output all order of pairs (e.g., include pair a,b and b,a but not a,a).
         Return the two `idx` columns in this order: first product's `idx`, second product's `idx`.
       "10": |-
-        Based on product images, find matching outfits consisting of shoes,
+        Based on product images and descriptions, find matching outfits consisting of shoes,
         bottomwear, and topwear in Black, Blue, Red, or White,
         where all three items are from the same brand, same color,
         and each is priced at $1000 or less. Return the three `idx` columns in

@@ -15,7 +15,11 @@ import yaml
 from agent_cost_model.paths import EXPERIMENTS_DIR, RESULTS_DIR
 
 # Directory name under experiments/ for each benchmark, keyed by its `name:` in benchmark.yaml.
-_BENCHMARK_DIRS = {"SemBench": "SemBench", "CUAD": "cuad"}
+_BENCHMARK_DIRS = {
+    "SemBench": "SemBench",
+    "CUAD": "cuad",
+    "CUAD Categories": "cuad_categories",
+}
 
 
 def benchmark_yaml_path(benchmark: str) -> Path:
@@ -91,12 +95,15 @@ def results_prefix(
     *,
     use_case: str = "",
     scale_factor: Any = "",
+    query_id: Any = "",
 ) -> Path:
-    """Where one (benchmark, use case, scale factor, runner) writes everything it produces.
+    """Where one (benchmark, use case, scale factor, query, runner) writes everything it produces.
 
-    The benchmark decides which of use_case/scale_factor appear: SemBench keys on both, CUAD
-    on neither. The runner owns the layout below the returned prefix.
+    The benchmark decides which of use_case/scale_factor/query_id appear: SemBench keys on the
+    first two, CUAD Categories on query_id, CUAD on none. The runner owns the layout below the
+    returned prefix.
     """
     config = load_benchmark(benchmark)
-    context = build_context(config, runner=runner, use_case=use_case, scale_factor=scale_factor)
+    context = build_context(config, runner=runner, use_case=use_case, scale_factor=scale_factor,
+                            query_id=query_id)
     return format_path(config["results_prefix"], context)

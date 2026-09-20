@@ -9,6 +9,9 @@ external_repo:
   default: ../docetl
   python_path: .
 results_prefix: "{results_dir}/CUAD/{runner}"
+# Shared with cuad_categories/benchmark.yaml, whose contracts keep the idx given here.
+sampling_dir: "{results_dir}/CUAD/_sampling"
+sampling_results_path: "{results_dir}/CUAD/_sampling/sampling_results.json"
 
 use_cases:
   cuad:

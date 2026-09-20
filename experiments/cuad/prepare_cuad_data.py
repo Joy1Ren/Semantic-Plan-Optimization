@@ -29,6 +29,7 @@ from pathlib import Path
 import pandas as pd
 
 from agent_cost_model.experiments.cuad.paths import (
+    BENCHMARK_DIR,
     DATASET_DIR,
     DATASUBSET_DIR,
     GROUND_TRUTH_DIR,
@@ -48,6 +49,9 @@ FULL_CSV = DATASET_DIR / "cuad.csv"
 OPTIMIZE_SOURCE = "train/cuad.json"  # 40 documents, disjoint from FULL_SOURCE
 OPTIMIZE_CSV = DATASUBSET_DIR / "cuad_optimize.csv"
 
+# Every CUAD contract, for the idx -> name map shared by all CUAD experiments.
+CUAD_JSON = BENCHMARK_DIR / "CUADv1.json"
+
 CONVERSIONS = [
     (FULL_SOURCE, FULL_CSV),
     (OPTIMIZE_SOURCE, OPTIMIZE_CSV),
@@ -66,15 +70,17 @@ def _load(relative_source: str) -> list[dict]:
 
 
 def _build_name_to_idx(records_by_source: dict[str, list[dict]]) -> dict[str, int]:
-    """Assign every document a small sequential idx, keyed by its real "name" (source
-    filename).
+    """Assign every one of CUAD's 510 contracts a small sequential idx, keyed by its real "name"
+    (source filename), so every CUAD experiment shares one idx -> name map.
 
-    Names from every source are pooled before sorting, rather than taken from the full set
-    alone: FULL_SOURCE and OPTIMIZE_SOURCE are disjoint splits, so an idx map built from the
-    full set would cover none of the optimize set. Pooling also means a document appearing in
-    both sources resolves to the same idx in both CSVs.
+    The documents in the sources come first, pooled and sorted: FULL_SOURCE and OPTIMIZE_SOURCE
+    are disjoint splits, so an idx map built from the full set would cover none of the optimize
+    set. The rest of CUADv1 follows, sorted, so adding them never renumbers a document already
+    in these CSVs (or in the embedding cache keyed by idx).
     """
     names = sorted({r["name"] for records in records_by_source.values() for r in records})
+    titles = [f"{doc['title']}.txt" for doc in json.loads(CUAD_JSON.read_text())["data"]]
+    names += sorted(set(titles) - set(names))
     return {name: i for i, name in enumerate(names)}
 
 

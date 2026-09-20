@@ -1,0 +1,304 @@
+name: CUAD Categories
+quality_adapter: agent_cost_model.experiments.cuad_categories.quality_evaluator
+
+# Nineteen questions over the SAME 140 CUAD contracts, one per query id. queries.py is what binds a
+# query id to its question: the extraction queries pull one category's value out of every contract,
+# the identification queries return the contracts satisfying a condition and are scored by F1 over
+# that set. Ground truth is cuad/ground_truth/cuad_gt.csv, written by cuad/clean_cuad_gt.py; its
+# `unusable` column names the contracts whose annotations for a category cannot be graded, and the
+# scorer leaves those out.
+results_prefix: "{results_dir}/CUAD_categories/q{query_id}/{runner}"
+# The embedding cache is the CUAD benchmark's own (cuad/benchmark.yaml): row vectors are keyed by
+# idx, and prepare_cuad_categories_data.py keeps every contract's cuad idx, so the contracts the two
+# datasets share are embedded once.
+sampling_dir: "{results_dir}/CUAD/_sampling"
+sampling_results_path: "{results_dir}/CUAD_categories/_sampling/sampling_results.json"
+
+use_cases:
+  cuad_categories:
+    # The task prompts live here rather than in an external query file, as in cuad/benchmark.yaml.
+    query_source:
+      type: text
+      modalities: [text]
+    task_prompts:
+      # extract: how many parties signed the contract
+      "1": |-
+        You are given the full text of one legal contract.
+
+        Extract the Parties if the contract states it.
+        Parties: The two or more parties who signed the contract
+
+        Output one row per input document, with these columns:
+          idx         copy the input row's idx unchanged
+          answer      the number of parties that signed the contract: a single integer and nothing
+                      else, e.g. 2
+      # identify: contracts signed by more than two parties
+      "2": |-
+        You are given the full text of one legal contract.
+
+        Return this contract only if more than two parties signed it. Count the parties to the contract -- the entities that
+        signed it -- not every company it names.
+
+        Return no row at all for a contract that does not qualify. For one that does,
+        output:
+          idx         copy the input row's idx unchanged
+      # extract: the date of the contract
+      "3": |-
+        You are given the full text of one legal contract.
+
+        Extract the Agreement Date if the contract states it.
+        Agreement Date: The date of the contract
+
+        Output one row per input document, with these columns:
+          idx         copy the input row's idx unchanged
+          answer      MM/DD/YYYY. Where the contract leaves a digit blank or blacks it out, write ?
+                      in its place, e.g. 04/??/2013; never guess a value the contract does not give.
+                      Leave empty if the contract states no agreement date.
+      # identify: contracts dated before 2010
+      "4": |-
+        You are given the full text of one legal contract.
+
+        Return the contract only if it is dated before 1 January 2010. The date of the contract is the date it was entered
+        into. A contract dated 2010 or later, or dated nowhere, does not qualify.
+        Return:
+          idx         copy the input row's idx unchanged
+      # extract: the date the contract takes effect
+      "5": |-
+        You are given the full text of one legal contract.
+
+        Extract the Effective Date if the contract states it.
+        Effective Date: The date when the contract is effective
+
+        Output one row per input document with:
+          idx         copy the input row's idx unchanged
+          answer      MM/DD/YYYY, writing ? for any digit the contract leaves blank (never guess one);
+                      or the single word relative if the contract takes effect on an event (execution,
+                      the last signature, a closing, an approval, conditions being met) rather than on
+                      a stated date. Leave empty if the contract says nothing about when it takes
+                      effect. Never calculate a date.
+          spans       needed only when the answer is relative: one concise verbatim quote from the
+                      contract -- the shortest passage that shows it, a sentence at most. Leave
+                      empty for every other answer.
+      # identify: contracts that take effect on an event, not a date
+      "6": |-
+        You are given the full text of one legal contract.
+
+        Return this contract only if it takes effect on an event rather than on a calendar date it states.
+        A contract that gives an effective date, or says nothing about taking effect, does not qualify.
+
+        Return no row at all for a contract that does not qualify. For one that does,
+        output:
+          idx         copy the input row's idx unchanged
+          reason      the full sentence(s) from the contract that say when it takes effect, quoted
+                      verbatim
+      # extract: when the contract's initial term expires
+      "7": |-
+        You are given the full text of one legal contract.
+
+        Extract the Expiration Date if the contract states it.
+        Expiration Date: On what date will the contract's initial term expire?
+
+        Output one row per input document, with:
+          idx         copy the input row's idx unchanged
+          answer      one of
+                        MM/DD/YYYY        the contract states the date; write ? for a blank digit
+                        <number> <unit>   it gives a term length instead of a date, e.g. "5 years"
+                        perpetual         it runs until someone terminates it, with no end
+                        unspecified       the term ends on an event, with no stated length
+                        redacted          the length is blacked out in the filing
+                      Never guess a value the contract does not give, and never calculate a date from a
+                      term length; report the term length itself. Leave empty if the contract has no
+                      expiration.
+          spans       needed only when the answer is unspecified or redacted: one concise verbatim
+                      quote from the contract -- the shortest passage that shows it, a sentence at
+                      most. Leave empty for every other answer.
+      # identify: contracts with no expiration
+      "8": |-
+        You are given the full text of one legal contract.
+
+        Return this contract only if it has no expiration: it runs until a party terminates it, with no end date and no fixed
+        term. A contract that expires on a date, or after a stated term, does not qualify.
+
+        Return no row at all for a contract that does not qualify. For one that does,
+        output a single row with:
+          idx         copy the input row's idx unchanged
+          reason      the full sentence(s) from the contract that show it has no expiration, quoted
+                      verbatim
+      # extract: the renewal term after the initial term expires
+      "9": |-
+        You are given the full text of one legal contract.
+
+        Extract the Renewal Term if the contract states it.
+        Renewal Term: What is the renewal term after the initial term expires? This includes automatic extensions and unilateral extensions with prior notice.
+
+        Output one row per input document, with these columns:
+          idx         copy the input row's idx unchanged
+          answer      one of
+                        <count> x <number> <unit>   how many times it renews and how long each renewal
+                                                    runs, with count "unlimited" when it keeps renewing:
+                                                    "unlimited x 1 years", "2 x 5 years", "1 x 12 months".
+                                                    The count and the length must both be right.
+                        perpetual                   the contract continues indefinitely, never renewing
+                        unspecified                 it renews but states no length
+                        redacted                    the length is blacked out in the filing
+                        MM/DD/YYYY                  it gives the renewal's end date rather than its length
+                      Leave empty if the contract does not renew.
+          spans       needed only when the answer is unspecified or redacted: one concise verbatim
+                      quote from the contract -- the shortest passage that shows it, a sentence at
+                      most. Leave empty for every other answer.
+      # identify: contracts that keep renewing with no limit
+      "10": |-
+        You are given the full text of one legal contract.
+
+        Return this contract only if it renews indefinitely: it keeps renewing for one period after another until a party
+        stops it. A contract that renews a set number of times, or not at all, does not qualify.
+
+        Return no row at all for a contract that does not qualify. For one that does,
+        output a single row with these columns:
+          idx         copy the input row's idx unchanged
+          reason      the full sentence(s) from the contract that say it renews, quoted verbatim
+      # extract: the notice needed to stop a renewal
+      "11": |-
+        You are given the full text of one legal contract.
+
+        Extract the Notice Period to Terminate Renewal if the contract states it.
+        Notice Period to Terminate Renewal: What is the notice period required to terminate renewal?
+
+        Output one row per input document, with these columns:
+          idx         copy the input row's idx unchanged
+          answer      <number> <days|weeks|months|years>; or redacted when the number is blacked out;
+                      or unspecified when notice is required but no period is stated. Leave empty if no
+                      notice is needed to stop a renewal.
+          spans       needed only when the answer is unspecified or redacted: one concise verbatim
+                      quote from the contract -- the shortest passage that shows it, a sentence at
+                      most. Leave empty for every other answer.
+      # identify: contracts needing 90 days' notice or more to stop a renewal
+      "12": |-
+        You are given the full text of one legal contract.
+
+        Return this contract only if stopping a renewal takes at least 90 days' notice. Count a month as 30 days and a year
+        as 365. A contract that needs less notice, or none, does not qualify.
+
+        Return no row at all for a contract that does not qualify. For one that does,
+        output a single row with these columns:
+          idx         copy the input row's idx unchanged
+      # extract: whose law governs the contract
+      "13": |-
+        You are given the full text of one legal contract.
+
+        Extract the Governing Law if the contract states it.
+        Governing Law: Which state/country's law governs the interpretation of the contract?
+
+        Output one row per input document, with these columns:
+          idx         copy the input row's idx unchanged
+          answer      the place or places whose law governs, each named as specifically as the contract
+                      names it: "Beijing" rather than China, "England" rather than the United Kingdom,
+                      "New York". Give a list, joining several with "; ". Use redacted if the place is
+                      blacked out. Leave empty if the contract does not say.
+      # identify: contracts governed by New York law
+      "14": |-
+        You are given the full text of one legal contract.
+
+        Return this contract only if New York law governs it.
+
+        Return no row at all for a contract that does not qualify. For one that does,
+        output:
+          idx         copy the input row's idx unchanged
+      # identify: contracts with more than two parties that are also governed by New York law
+      "15": |-
+        You are given the full text of one legal contract.
+
+        Return this contract only if BOTH of these hold:
+          1. more than two parties signed it, counting the entities that signed the contract;
+          2. New York law governs it.
+
+        Return no row at all for a contract that does not qualify. For one that does,
+        output a single row with these columns:
+          idx         copy the input row's idx unchanged
+      # identify: contracts expiring after 2000 that also grant audit rights
+      "16": |-
+        You are given the full text of one legal contract.
+
+        Return this contract only if BOTH of these hold:
+          1. it states an expiration date later than 31 December 2000 -- a contract that gives
+             only a term length ("five years from the effective date"), or no expiration, does
+             not qualify;
+          2. contains an Audit Rights clause: a party has the right to audit the books, records, or physical locations of the counterparty to ensure compliance with the contract.
+
+        Return no row at all for a contract that does not qualify. For one that does,
+        output:
+          idx         copy the input row's idx unchanged
+      # identify: contracts that renew indefinitely and need 90 days' notice or more to stop
+      "17": |-
+        You are given the full text of one legal contract.
+
+        Return this contract only if BOTH of these hold:
+          1. it renews indefinitely, one period after another until a party stops it;
+          2. stopping a renewal takes at least 90 days' notice, counting a month as 30 days.
+
+        Return no row at all for a contract that does not qualify. For one that does,
+        output:
+          idx         copy the input row's idx unchanged
+      # identify: contracts with no expiration that also require insurance
+      "18": |-
+        You are given the full text of one legal contract.
+
+        Return this contract only if BOTH of these hold:
+          1. it has no expiration: it runs until a party terminates it, with no end date and
+             no fixed term;
+          2. contains an Insurance clause: there is a requirement for insurance that must be maintained by one party for the benefit of the counterparty.
+
+        Return no row at all for a contract that does not qualify. For one that does,
+        output:
+          idx         copy the input row's idx unchanged
+      # identify: contracts dated before 2010 that also contain a non-compete
+      "19": |-
+        You are given the full text of one legal contract.
+
+        Return this contract only if BOTH of these hold:
+          1. it is dated before 1 January 2010;
+          2. contains a Non-Compete clause: there is a restriction on the ability of a party to compete with the counterparty or operate in a certain geography or business or technology sector
+
+        Return no row at all for a contract that does not qualify. For one that does,
+        output a single row with these columns:
+          idx         copy the input row's idx unchanged
+      # extract: how many parties signed the contract, scored by how far the count is off
+      "20": |-
+        You are given the full text of one legal contract.
+
+        Extract the number of parties if the contract states it.
+        Parties: The two or more parties who signed the contract
+
+        Output one row per input document, with these columns:
+          idx         copy the input row's idx unchanged
+          answer      the number of parties that signed the contract: a single integer and nothing
+                      else, e.g. 2
+    query_metrics:  # see queries.py (Query.metric), scoring.py and quality_evaluator.py
+      "1": answer_match_span_jaccard  # cuad_parties
+      "2": set_f1  # cuad_parties_over_two
+      "3": answer_match_span_jaccard  # cuad_agreement_date
+      "4": set_f1  # cuad_agreement_before_2010
+      "5": answer_match_span_jaccard  # cuad_effective_date
+      "6": set_f1_reason_jaccard  # cuad_effective_on_event
+      "7": answer_match_span_jaccard  # cuad_expiration_date
+      "8": set_f1_reason_jaccard  # cuad_perpetual
+      "9": answer_match_span_jaccard  # cuad_renewal_term
+      "10": set_f1_reason_jaccard  # cuad_renews_indefinitely
+      "11": answer_match_span_jaccard  # cuad_notice_period_to_terminate_renewal
+      "12": set_f1  # cuad_notice_90_days
+      "13": answer_match_span_jaccard  # cuad_governing_law
+      "14": set_f1  # cuad_new_york_law
+      "15": set_f1  # cuad_many_parties_new_york
+      "16": set_f1  # cuad_expires_after_2000_with_audit
+      "17": set_f1  # cuad_evergreen_with_long_notice
+      "18": set_f1  # cuad_perpetual_with_insurance
+      "19": set_f1  # cuad_old_with_non_compete
+      "20": party_count_relative_error  # cuad_parties_count_error
+    dataset:
+      directory: "{benchmark_dir}/dataset"
+      source_csv: "cuad_clean_140.csv"
+      id_col: idx
+    # One subset per query: sampling writes Q{id}_subset_{mode}.csv, which run_opt.py reads back.
+    subset_path: "{benchmark_dir}/datasubset_opt/Q{query_id}_subset.csv"
+    # one file per query, written by cuad_categories_gt.py from cuad/ground_truth/cuad_gt.csv
+    ground_truth_path: "{benchmark_dir}/ground_truth/Q{query_id}_gt.csv"
