@@ -87,31 +87,42 @@ Free operators (ordinary code, no LLM cost): filter, map, join, project, limit, 
 # so the agent knows exactly how the 0–1 `quality` score it optimizes is computed.
 _QUALITY_METRIC_DOCS = {
     "f1-score": (
-        "F1 of the returned id set vs. the oracle/ground-truth id set — the harmonic mean of "
+        "F1 of the returned id set vs. the ground truth id set — the harmonic mean of "
         "precision (fraction of returned ids that are correct) and recall (fraction of correct ids "
         "returned). 1.0 = exactly the right set; both missing and extra ids lower it."
     ),
     "adjusted-rand-index": (
-        "Adjusted Rand Index between your per-record class assignment and the oracle's — a "
+        "Adjusted Rand Index between your per-record class assignment and the ground truth's — a "
         "clustering-agreement score corrected for chance. 1.0 = identical grouping, ~0 = chance-level, "
         "and it can go negative. Used for classification/grouping queries."
     ),
     "spearman-rank": (
-        "Spearman rank correlation between your scoring and the oracle's -- a monotonic"
+        "Spearman rank correlation between your scoring and the ground truth's -- a monotonic "
         "agreement score. 1.0 = perfect positive correlation, ~0 = no correlation, -1.0 = perfect negative correlation"
     ),
     "relative-error": (
-        "A transformed metric from relative error between your value and the oracle's: 1/(1 + relative error)."
+        "A transformed metric from relative error between your value and the ground truth's: 1/(1 + relative error). "
         "1.0 = exact match. ~0 = very large difference"
     ),
     "f1_jaccard": (
-        "F1 over per-record binary presence/absence decisions vs. the oracle, but a record only "
-        "counts as a true positive if BOTH (a) you correctly decided the clause/item is present, AND "
-        "(b) the Jaccard similarity (word-level) between your extracted text span and the oracle's "
-        "span is > 0.15. Getting the binary decision right with a low-overlap or missing span still "
-        "counts as wrong -- not a true positive. 1.0 = every present/absent decision correct and every "
-        "extracted span sufficiently overlaps the oracle's; extract the actual relevant clause text, "
-        "not just a presence flag."
+        "F1 per clause category, averaged over CUAD's 41 categories. Every (document, category) pair is "
+        "one decision, judged on the text span you extracted for that category. A document only passes if it "
+        "also reaches word-level Jaccard similarity > 0.15"
+    ),
+    "set_f1": (
+        "F1 of the set of documents your plan returns vs. the set that satisfies the query in the "
+        "ground truth."
+    ),
+    "set_f1_reason_jaccard": (
+        "Like f1 score but a qualifying document you return counts as a TP only if its `reason` text "
+        "shares enough words with the clause the ground truth highlights (token-set Jaccard > 0.5)."
+    ),
+    "answer_match_span_jaccard": (
+        "Accuracy of answers and span token-set jaccard > 0.5 when applicable."
+    ),
+    "party_count_relative_error": (
+        "A transformed metric from absolute relative error: 1 / (1 + |true count - your count| / true count)"
+        " 1.0 = exact match. ~0 = very large difference"
     ),
 }
 
@@ -170,7 +181,9 @@ def _quality_metric_reminder(eval_metric: str | None) -> str:
     metric_desc = f"`{eval_metric}`" if eval_metric else "a plan-output-vs-oracle score"
     return (
         f"quality = {metric_desc} (0-1, higher is better). It scores the final plan output using the "
-        "evaluation metric; per_sem_op_quality scores the accuracy per semantic operator."
+        "evaluation metric; per_sem_op_quality scores the accuracy per semantic operator. "
+        "quality_counts, when present, gives the TP/FP/FN/TN counts behind quality (see the Plan "
+        "Quality Metric section for what each one means for this metric)."
     )
 
 

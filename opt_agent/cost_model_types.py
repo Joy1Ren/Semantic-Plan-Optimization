@@ -258,6 +258,7 @@ def _dump_opt_debug_artifacts(
             quality_result.per_sem_op_quality if quality_result is not None else None
         ),
         "quality_note": quality_result.quality_note if quality_result is not None else None,
+        "quality_counts": quality_result.quality_counts if quality_result is not None else None,
     })
     (out_dir / "plan_result.json").write_text(_json.dumps(plan_summary, indent=2, default=str))
 

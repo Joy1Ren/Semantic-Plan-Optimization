@@ -146,6 +146,7 @@ class CostModelAgent:
            - After execution, `plans[name]["plan"]` is updated with the executed PhysicalPipeline.
         4. Evaluate with `plan_results.df` and `op_results.df`:
            - `quality`: 0–1 overall plan quality.
+           - `quality_counts`: the TP/FP/FN/TN counts behind `quality`, for metrics built from counts.
            - `per_sem_op_quality`: per-semantic-operator quality (0–1). Use to diagnose
              which operator is the bottleneck. Use `get_op_samples(plan_name)` to inspect
              input/output pairs for an operator.
@@ -225,6 +226,7 @@ class CostModelAgent:
            - `quality`: 0–1 overall plan quality evaluated by an oracle. Higher is better.
              Treat oracle quality scores as ground truth — do not try to replicate or
              reverse-engineer the oracle; simply observe and optimize.
+           - `quality_counts`: the TP/FP/FN/TN counts behind `quality`, for metrics built from counts.
            - `per_sem_op_quality`: per-semantic-operator quality (0–1). Use to diagnose
              which operator is the bottleneck.
 
@@ -298,6 +300,7 @@ class CostModelAgent:
            - `quality`: 0–1 overall plan quality evaluated by an oracle. Higher is better.
              Treat oracle quality scores as ground truth — do not try to replicate or
              reverse-engineer the oracle; simply observe and optimize.
+           - `quality_counts`: the TP/FP/FN/TN counts behind `quality`, for metrics built from counts.
            - `per_sem_op_quality`: per-semantic-operator quality (0–1). Use to diagnose
              which operator is the bottleneck. Use `get_op_samples(plan_name)` to inspect
              input/output pairs for an operator.

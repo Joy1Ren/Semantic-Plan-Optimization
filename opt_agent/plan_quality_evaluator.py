@@ -111,6 +111,7 @@ class QualityResult:
     per_sem_op_quality: dict[str, float] = field(default_factory=dict)
     quality_note: str | None = None         # human-readable reason when quality is not a real score
                                             # (e.g. oracle produced no rows on this subset)
+    quality_counts: dict | None = None      # TP/FP/FN/TN behind quality, for metrics that have them
 
 
 class _MemoizingGenerator:
@@ -354,6 +355,7 @@ class PlanQualityEvaluator:
 
         # Plan quality
         quality = float("nan")
+        self.last_quality_counts = None     # score_plan sets it when its metric has counts
         quality_note = None
         gt_path = self.ground_truth_path_in_use()
         if not self.has_ground_truth(gt_df, gt_path):
@@ -373,7 +375,8 @@ class PlanQualityEvaluator:
             except Exception as e:
                 print(f"[QualityEvaluator] plan quality evaluation failed: {e}")
 
-        return QualityResult(quality=quality, per_sem_op_quality=per_sem_op_quality, quality_note=quality_note)
+        return QualityResult(quality=quality, per_sem_op_quality=per_sem_op_quality,
+                             quality_note=quality_note, quality_counts=self.last_quality_counts)
 
     def ground_truth_path_in_use(self) -> "Path | None":
         """The FILE quality is scored against for this run.
@@ -423,6 +426,10 @@ class PlanQualityEvaluator:
         optimization subset during search, the full dataset for the final evaluation. A scorer
         that measures over a document population takes it from there rather than from the plan's
         own output, so a plan that drops documents is charged for them.
+
+        A scorer whose metric is built from TP/FP/FN/TN counts also sets `self.last_quality_counts`
+        to them (split by reason where a Jaccard gate applies; see prompts._QUALITY_METRIC_DOCS),
+        and `evaluate` shows them to the agent next to `quality`.
         """
         raise NotImplementedError(
             f"{type(self).__name__} must implement score_plan(); see "

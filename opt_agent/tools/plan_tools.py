@@ -294,6 +294,8 @@ Returns a compact summary dict with plan stats and per-operator stats. Key field
   which operator is the bottleneck. `per_sem_op_quality_metric` states how that
   score is computed for each operator type in this plan — read it before acting on
   a low score, since the definition differs by operator type.
+- `quality_counts` (only for metrics built from counts): the TP/FP/FN/TN behind `quality`,
+  split by reason where a Jaccard gate applies. Use it to tell missed records from wrong ones.
 - `cost_usd`, `latency_s`, `input_tokens`, `output_tokens`: aggregated over all ops.
 To inspect accumulated results use `plan_results.df` and `op_results.df`.
 To view sample input/output pairs use `get_op_samples(plan_name)`.
@@ -452,12 +454,15 @@ execute_plan("p1")
             "per_sem_op_quality": (
                 quality_result.per_sem_op_quality if quality_result is not None else {}
             ),
+            "quality_counts": quality_result.quality_counts if quality_result is not None else None,
             "op_samples": op_samples,
         }
         self._plan_results.append([plan_row])
         self._op_results.append(per_op_list)
 
         plan_summary = {k: v for k, v in plan_row.items() if k not in ("op_samples", "plan_str")}
+        if plan_summary["quality_counts"] is None:
+            del plan_summary["quality_counts"]
         # When quality is N/A because the oracle returned no rows, explain it in the observation so
         # the agent doesn't read the bare NaN as a failed plan.
         if quality_result is not None and getattr(quality_result, "quality_note", None):

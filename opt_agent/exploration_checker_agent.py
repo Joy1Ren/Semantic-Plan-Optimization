@@ -323,6 +323,8 @@ class ExplorationCheckerAgent:
             f"operators: ({self._op_chain(name)})",
             f"optimizations (recorded by the plan-writing agent):\n{self._fmt_optimizations(row.get('optimizations'))}",
             f"quality: {self._fmt_num(row.get('quality'), '.3f')}",
+            *([f"quality counts: {json.dumps(row['quality_counts'], default=str)}"]
+              if row.get("quality_counts") else []),
             f"per-operator quality: {per_op_s}",
             f"cost_usd: {self._fmt_num(row.get('cost_usd'), '.6f')}",
             f"latency_s (sum of per-operator times): {self._fmt_num(row.get('latency_s'), '.3f')}",
