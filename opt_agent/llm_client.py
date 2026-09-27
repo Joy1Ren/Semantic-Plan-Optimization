@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from typing import Any, Protocol
 
+from agent_cost_model.opt_agent.pricing import token_cost
+
 
 class LLMClient(Protocol):
     def generate(self, system: str, messages: list[dict]) -> Any: ...
@@ -77,46 +79,15 @@ class OpenRouterClient:
             api_key=api_key or os.environ["OPENROUTER_API_KEY"],
         )
 
-    @staticmethod
-    def _extract_cost_usd(resp: Any) -> float:
-        """Best-effort extraction of provider-reported dollar cost from a chat response."""
-        candidates = []
-        usage = getattr(resp, "usage", None)
-        if usage is not None:
-            candidates.extend([
-                getattr(usage, "cost", None),
-                getattr(usage, "total_cost", None),
-                getattr(usage, "estimated_cost", None),
-            ])
-            usage_extra = getattr(usage, "model_extra", None) or {}
-            if isinstance(usage_extra, dict):
-                candidates.extend([
-                    usage_extra.get("cost"),
-                    usage_extra.get("total_cost"),
-                    usage_extra.get("estimated_cost"),
-                ])
-        resp_extra = getattr(resp, "model_extra", None) or {}
-        if isinstance(resp_extra, dict):
-            candidates.extend([
-                resp_extra.get("cost"),
-                resp_extra.get("total_cost"),
-                resp_extra.get("estimated_cost"),
-            ])
-            usage_extra = resp_extra.get("usage")
-            if isinstance(usage_extra, dict):
-                candidates.extend([
-                    usage_extra.get("cost"),
-                    usage_extra.get("total_cost"),
-                    usage_extra.get("estimated_cost"),
-                ])
-
-        for value in candidates:
-            try:
-                if value is not None:
-                    return float(value)
-            except (TypeError, ValueError):
-                continue
-        return 0.0
+    def _cost_usd(self, resp: Any) -> float:
+        usage = resp.usage
+        details = getattr(usage, "prompt_tokens_details", None)
+        return token_cost(
+            self.model,
+            usage.prompt_tokens,
+            usage.completion_tokens,
+            cached_tokens=getattr(details, "cached_tokens", 0) or 0,
+        )
 
     def generate(self, system: str, messages: list[dict]) -> tuple[str, str | None, dict[str, Any]]:
         msgs = [{"role": "system", "content": system}, *messages]
@@ -132,6 +103,6 @@ class OpenRouterClient:
         msg = resp.choices[0].message
         content = msg.content or ""
         reasoning = getattr(msg, "reasoning", None) or (getattr(msg, "model_extra", None) or {}).get("reasoning")
-        cost_usd = self._extract_cost_usd(resp)
+        cost_usd = self._cost_usd(resp)
         self.total_cost_usd += cost_usd
         return content, reasoning, {"cost_usd": cost_usd}
