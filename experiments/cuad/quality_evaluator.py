@@ -175,12 +175,12 @@ class QualityEvaluator(PlanQualityEvaluator):
 
     def __init__(
         self,
-        oracle_client,
-        oracle_model: str,
         query_id: int,
-        llm_judge_dir: str | Path,
-        subset_path: str | Path,
         ground_truth_path: str | Path,
+        oracle_client=None,
+        oracle_model: str | None = None,
+        llm_judge_dir: str | Path | None = None,
+        subset_path: str | Path | None = None,
         run_dir: str | Path | None = None,
         oracle_reasoning_effort: str | None = None,
         use_oracle_ground_truth: bool = False,
@@ -189,7 +189,6 @@ class QualityEvaluator(PlanQualityEvaluator):
         # `**_ignored` absorbs the keywords the engine passes to every adapter's constructor
         # that this one has no use for -- `use_case` and `scale_factor`, which SemBench needs to
         # pick its evaluator but CUAD does not (one use case, one query, no scale factor).
-        subset_path = Path(subset_path)
         ground_truth_path = Path(ground_truth_path)
         super().__init__(
             oracle_client=oracle_client,

@@ -201,8 +201,9 @@ def _population_names(population_path: str | Path) -> list[str]:
 class QualityEvaluator(PlanQualityEvaluator):
     """Scores one of benchmark.yaml's questions, chosen by the query id it is constructed with."""
 
-    def __init__(self, oracle_client, oracle_model: str, query_id: int, llm_judge_dir: str | Path,
-                 subset_path: str | Path, ground_truth_path: str | Path | None = None,
+    def __init__(self, query_id: int, ground_truth_path: str | Path | None = None,
+                 oracle_client=None, oracle_model: str | None = None,
+                 llm_judge_dir: str | Path | None = None, subset_path: str | Path | None = None,
                  run_dir: str | Path | None = None, oracle_reasoning_effort: str | None = None,
                  use_oracle_ground_truth: bool = False, **_ignored) -> None:
         try:
@@ -217,13 +218,19 @@ class QualityEvaluator(PlanQualityEvaluator):
             oracle_client=oracle_client,
             oracle_model=oracle_model,
             query_id=query_id,
-            subset_path=Path(subset_path),
+            subset_path=subset_path,
             normalize_df=normalize_eval_df,
             llm_judge_dir=llm_judge_dir,
             run_dir=run_dir,
             oracle_reasoning_effort=oracle_reasoning_effort,
             use_oracle_ground_truth=use_oracle_ground_truth,
-            ground_truth_path=Path(ground_truth_path or GROUND_TRUTH_CSV),
+            # benchmark.yaml names the per-query file and the runner passes it; the default is
+            # the same file, so constructing an evaluator without one (a standalone script, a
+            # test) still scores against this query's own ground truth.
+            ground_truth_path=(
+                Path(ground_truth_path) if ground_truth_path
+                else per_query_ground_truth(int(query_id))
+            ),
         )
 
     def has_ground_truth(self, ground_truth_df, ground_truth_path) -> bool:

@@ -175,7 +175,7 @@ def _regenerate_ground_truth_from_subset(
 
 
 def _load_ground_truth(
-    use_case: str, scale_factor: int, query_id: int, subset_path: Path, ground_truth_path: Path
+    use_case: str, scale_factor: int, query_id: int, subset_path: Path | None, ground_truth_path: Path
 ) -> pd.DataFrame:
     """Ground truth for direct (non-oracle) quality scoring: prefer regenerating it from gold
     SQL over the datasubset (accurate — includes columns the datasubset strips out, e.g. movie's
@@ -187,8 +187,8 @@ def _load_ground_truth(
     of one query keep four separate ground truths instead of colliding on one filename; the
     file is an artifact to eyeball, never read back as a cache.
     """
-    subset_gt_path = subset_path.with_name(f"{subset_path.stem}_gt.csv")
-    if subset_path.exists():
+    if subset_path is not None and subset_path.exists():
+        subset_gt_path = subset_path.with_name(f"{subset_path.stem}_gt.csv")
         subset_df = pd.read_csv(subset_path)
         regenerated = _regenerate_ground_truth_from_subset(use_case, scale_factor, query_id, subset_df)
         if regenerated is not None:
@@ -280,21 +280,24 @@ class QualityEvaluator(PlanQualityEvaluator):
 
     def __init__(
         self,
-        oracle_client,
-        oracle_model: str,
         query_id: int,
         use_case: str,
         scale_factor: int,
-        llm_judge_dir: str | Path,
-        subset_path: str | Path,
         ground_truth_path: str | Path,
+        oracle_client=None,
+        oracle_model: str | None = None,
+        llm_judge_dir: str | Path | None = None,
+        subset_path: str | Path | None = None,
         run_dir: str | Path | None = None,
         oracle_reasoning_effort: str | None = None,
         use_oracle_ground_truth: bool = True,
+        # Every adapter is constructed with one fixed keyword set (see CostModelAgent._setup_run);
+        # absorbing the rest is what lets the engine add one without breaking every benchmark.
+        **_ignored,
     ) -> None:
         # Both come from benchmark.yaml (`subset_path`, `ground_truth_path`) via the runner, so
         # this adapter never re-derives a path the config already declares.
-        subset_path = Path(subset_path)
+        subset_path = Path(subset_path) if subset_path else None
         ground_truth_path = Path(ground_truth_path)
         self._use_case = use_case
         self._scale_factor = scale_factor
