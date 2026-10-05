@@ -456,6 +456,10 @@ def evaluate_lambda(
             authorized_imports,
         )
 
+    # Same convention as create_function: the source the agent wrote, since inspect.getsource
+    # on this wrapper returns the wrapper itself.
+    lambda_func.__source__ = ast.unparse(lambda_expression)
+
     return lambda_func
 
 
@@ -1682,9 +1686,11 @@ def evaluate_python_code(
         state["_print_outputs"].value = truncate_content(
             str(state["_print_outputs"]), max_length=max_print_outputs_length
         )
+        # `from e` keeps the cause chain: without it the traceback stops at this boundary and
+        # never names the frame inside the plan code that actually failed.
         raise InterpreterError(
             f"Code execution failed at line '{describe_node(code, node)}' due to: {type(e).__name__}: {e}"
-        )
+        ) from e
 
 
 @dataclass

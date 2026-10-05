@@ -4,6 +4,7 @@ by the `PhysicalPipeline` fluent interface (pipeline.py)."""
 from __future__ import annotations
 
 import hashlib
+import inspect
 import json
 from dataclasses import dataclass
 from typing import Any
@@ -246,6 +247,18 @@ def _compute_op_id(op_type: str, params: dict) -> str:
     """Stable 10-char hex id derived from op_type and id params."""
     payload = json.dumps({"op_type": op_type, **{k: str(v) for k, v in params.items()}}, sort_keys=True)
     return hashlib.sha256(payload.encode()).hexdigest()[:10]
+
+
+def _fn_source(fn) -> str:
+    """Source of a UDF, for `attributes`. Functions built by the plan sandbox are interpreter
+    wrappers that all share one body, so their real source is read from `__source__`."""
+    src = getattr(fn, "__source__", None)
+    if src:
+        return src
+    try:
+        return inspect.getsource(fn).strip()
+    except (OSError, TypeError):
+        return repr(fn)
 
 
 def _cols_attribute(cols: list[dict]) -> list[dict]:
