@@ -1,0 +1,287 @@
+# Hand-written baseline plans for cuad_categories: one reasonable, unoptimized plan per query, the
+# comparison point for what the optimizer finds. Run with experiments/run_baseline.py.
+#
+# Keyed by query id. Each value is plan code, executed in the same sandbox
+# WritePlanTool uses, plus `source_csv` -- the query's source file name as benchmark.yaml
+# resolves it, so one plan serves every scale factor. The last expression must be the
+# PhysicalPipeline.
+#
+# Every LLM operator uses gpt-4o-mini.
+
+# extract: how many parties signed the contract
+"1": |
+  pipe = PhysicalPipeline(plan_name, "contracts", load_data(source_csv))
+  pipe.sem_map(
+      cols=[{"name": "answer", "type": int, "description": "The number of parties that signed the contract (the entities with signature blocks, not every company the contract names). A single integer, e.g. 2."}],
+      model=pz.Model.GPT_4o_MINI,
+      depends_on=["document"],
+  )
+  pipe.project(["idx", "answer"])
+  pipe
+
+# identify: contracts signed by more than two parties
+"2": |
+  pipe = PhysicalPipeline(plan_name, "contracts", load_data(source_csv))
+  pipe.sem_filter(
+      "More than two parties signed this contract. Count the entities that signed it, not every company it names.",
+      model=pz.Model.GPT_4o_MINI,
+      depends_on=["document"],
+  )
+  pipe.project(["idx"])
+  pipe
+
+# extract: the date of the contract
+"3": |
+  pipe = PhysicalPipeline(plan_name, "contracts", load_data(source_csv))
+  pipe.sem_map(
+      cols=[{"name": "answer", "type": str, "description": "The Agreement Date (the date of the contract) as MM/DD/YYYY. Write ? for any digit the contract leaves blank or blacks out, e.g. 04/??/2013; never guess. Empty if the contract states no agreement date."}],
+      model=pz.Model.GPT_4o_MINI,
+      depends_on=["document"],
+  )
+  pipe.project(["idx", "answer"])
+  pipe
+
+# identify: contracts dated before 2010
+"4": |
+  pipe = PhysicalPipeline(plan_name, "contracts", load_data(source_csv))
+  pipe.sem_filter(
+      "The contract is dated (entered into) before 1 January 2010. A contract dated 2010 or later, or not dated at all, does not qualify.",
+      model=pz.Model.GPT_4o_MINI,
+      depends_on=["document"],
+  )
+  pipe.project(["idx"])
+  pipe
+
+# extract: the date the contract takes effect
+"5": |
+  pipe = PhysicalPipeline(plan_name, "contracts", load_data(source_csv))
+  pipe.sem_map(
+      cols=[
+          {"name": "answer", "type": str, "description": "The Effective Date as MM/DD/YYYY, writing ? for any digit the contract leaves blank (never guess one); or the single word relative if the contract takes effect on an event (execution, the last signature, a closing, an approval, conditions being met) rather than a stated date. Empty if the contract says nothing about when it takes effect. Never calculate a date."},
+          {"name": "spans", "type": str, "description": "Only when answer is relative: the shortest verbatim quote from the contract (a sentence at most) that shows it. Empty otherwise."},
+      ],
+      model=pz.Model.GPT_4o_MINI,
+      depends_on=["document"],
+  )
+  pipe.project(["idx", "answer", "spans"])
+  pipe
+
+# identify: contracts that take effect on an event, not a date
+"6": |
+  pipe = PhysicalPipeline(plan_name, "contracts", load_data(source_csv))
+  pipe.sem_filter(
+      "The contract takes effect on an event (e.g. execution, a signature, a closing, an approval) rather than on a calendar date it states. A contract that gives an effective date, or says nothing about taking effect, does not qualify.",
+      model=pz.Model.GPT_4o_MINI,
+      depends_on=["document"],
+  )
+  pipe.sem_map(
+      cols=[{"name": "reason", "type": str, "description": "A concise verbatim span containing when the contract takes effect. The contract's own words, copied exactly, with nothing before or after them."}],
+      model=pz.Model.GPT_4o_MINI,
+      depends_on=["document"],
+  )
+  pipe.project(["idx", "reason"])
+  pipe
+
+# extract: when the contract's initial term expires
+"7": |
+  pipe = PhysicalPipeline(plan_name, "contracts", load_data(source_csv))
+  pipe.sem_map(
+      cols=[
+          {"name": "answer", "type": str, "description": "When the initial term expires, as one of: MM/DD/YYYY if the contract states the date (? for a blank digit); '<number> <unit>' if it gives a term length instead, e.g. '5 years'; perpetual if it runs until someone terminates it; unspecified if the term ends on an event with no stated length; redacted if the length is blacked out. Never calculate a date from a term length. Empty if the contract has no expiration."},
+          {"name": "spans", "type": str, "description": "Only when answer is unspecified or redacted: the shortest verbatim quote from the contract (a sentence at most) that shows it. Empty otherwise."},
+      ],
+      model=pz.Model.GPT_4o_MINI,
+      depends_on=["document"],
+  )
+  pipe.project(["idx", "answer", "spans"])
+  pipe
+
+# identify: contracts with no expiration
+"8": |
+  pipe = PhysicalPipeline(plan_name, "contracts", load_data(source_csv))
+  pipe.sem_filter(
+      "The contract has no expiration: it runs until a party terminates it, with no end date and no fixed term. A contract that expires on a date or after a stated term does not qualify.",
+      model=pz.Model.GPT_4o_MINI,
+      depends_on=["document"],
+  )
+  pipe.sem_map(
+      cols=[{"name": "reason", "type": str, "description": "A concise verbatim span containing what shows the contract has no expiration. The contract's own words, copied exactly, with nothing before or after them."}],
+      model=pz.Model.GPT_4o_MINI,
+      depends_on=["document"],
+  )
+  pipe.project(["idx", "reason"])
+  pipe
+
+# extract: the renewal term after the initial term expires
+"9": |
+  pipe = PhysicalPipeline(plan_name, "contracts", load_data(source_csv))
+  pipe.sem_map(
+      cols=[
+          {"name": "answer", "type": str, "description": "The renewal term after the initial term expires (including automatic and unilateral extensions), as one of: '<count> x <number> <unit>' giving how many times it renews and how long each renewal runs, with count 'unlimited' when it keeps renewing, e.g. 'unlimited x 1 years', '2 x 5 years'; perpetual if it continues indefinitely without renewing; unspecified if it renews but states no length; redacted if the length is blacked out; MM/DD/YYYY if it gives the renewal's end date. Empty if the contract does not renew."},
+          {"name": "spans", "type": str, "description": "Only when answer is unspecified or redacted: the shortest verbatim quote from the contract (a sentence at most) that shows it. Empty otherwise."},
+      ],
+      model=pz.Model.GPT_4o_MINI,
+      depends_on=["document"],
+  )
+  pipe.project(["idx", "answer", "spans"])
+  pipe
+
+# identify: contracts that keep renewing with no limit
+"10": |
+  pipe = PhysicalPipeline(plan_name, "contracts", load_data(source_csv))
+  pipe.sem_map(
+      cols=[
+          {"name": "qualifies", "type": bool, "description": "True if this contract renews indefinitely: it keeps renewing for one period after another until a party stops it. A contract that renews a set number of times, or not at all, does not qualify."},
+          {"name": "reason", "type": str, "description": "If it qualifies, the full sentence(s) from the contract that say it renews, quoted verbatim. Otherwise empty."},
+      ],
+      model=pz.Model.GPT_4o_MINI,
+      depends_on=["document"],
+  )
+  pipe.filter(lambda row: bool(row["qualifies"]))
+  pipe.project(["idx", "reason"])
+  pipe
+
+# extract: the notice needed to stop a renewal
+"11": |
+  pipe = PhysicalPipeline(plan_name, "contracts", load_data(source_csv))
+  pipe.sem_map(
+      cols=[
+          {"name": "answer", "type": str, "description": "The notice period required to terminate renewal, as '<number> <days|weeks|months|years>'; redacted if the number is blacked out; unspecified if notice is required but no period is stated. Empty if no notice is needed to stop a renewal."},
+          {"name": "spans", "type": str, "description": "Only when answer is unspecified or redacted: the shortest verbatim quote from the contract (a sentence at most) that shows it. Empty otherwise."},
+      ],
+      model=pz.Model.GPT_4o_MINI,
+      depends_on=["document"],
+  )
+  pipe.project(["idx", "answer", "spans"])
+  pipe
+
+# identify: contracts needing 90 days' notice or more to stop a renewal
+"12": |
+  pipe = PhysicalPipeline(plan_name, "contracts", load_data(source_csv))
+  pipe.sem_filter(
+      "Stopping a renewal of this contract takes at least 90 days' notice (count a month as 30 days and a year as 365). A contract that needs less notice, or none, does not qualify.",
+      model=pz.Model.GPT_4o_MINI,
+      depends_on=["document"],
+  )
+  pipe.project(["idx"])
+  pipe
+
+# extract: whose law governs the contract
+"13": |
+  pipe = PhysicalPipeline(plan_name, "contracts", load_data(source_csv))
+  pipe.sem_map(
+      cols=[{"name": "answer", "type": str, "description": "The place(s) whose law governs the contract, each named as specifically as the contract names it (e.g. 'Beijing' rather than China, 'England' rather than the United Kingdom, 'New York'), joined with '; '. redacted if blacked out. Empty if the contract does not say."}],
+      model=pz.Model.GPT_4o_MINI,
+      depends_on=["document"],
+  )
+  pipe.project(["idx", "answer"])
+  pipe
+
+# identify: contracts governed by New York law
+"14": |
+  pipe = PhysicalPipeline(plan_name, "contracts", load_data(source_csv))
+  pipe.sem_filter(
+      "New York law governs this contract.",
+      model=pz.Model.GPT_4o_MINI,
+      depends_on=["document"],
+  )
+  pipe.project(["idx"])
+  pipe
+
+# identify: contracts with more than two parties that are also governed by New York law
+"15": |
+  pipe = PhysicalPipeline(plan_name, "contracts", load_data(source_csv))
+  pipe.sem_filter(
+      "Both hold: (1) more than two parties signed this contract, counting the entities that signed it; (2) New York law governs it.",
+      model=pz.Model.GPT_4o_MINI,
+      depends_on=["document"],
+  )
+  pipe.project(["idx"])
+  pipe
+
+# identify: contracts expiring after 2000 that also grant audit rights
+"16": |
+  pipe = PhysicalPipeline(plan_name, "contracts", load_data(source_csv))
+  pipe.sem_filter(
+      "Both hold: (1) the contract states an expiration date later than 31 December 2000 -- a contract that gives only a term length, or no expiration, does not qualify; (2) a party has the right to audit the books, records, or physical locations of the counterparty to ensure compliance with the contract.",
+      model=pz.Model.GPT_4o_MINI,
+      depends_on=["document"],
+  )
+  pipe.project(["idx"])
+  pipe
+
+# identify: contracts that renew indefinitely and need 90 days' notice or more to stop
+"17": |
+  pipe = PhysicalPipeline(plan_name, "contracts", load_data(source_csv))
+  pipe.sem_filter(
+      "Both hold: (1) the contract renews indefinitely, one period after another until a party stops it; (2) stopping a renewal takes at least 90 days' notice, counting a month as 30 days.",
+      model=pz.Model.GPT_4o_MINI,
+      depends_on=["document"],
+  )
+  pipe.project(["idx"])
+  pipe
+
+# identify: contracts with no expiration that also require insurance
+"18": |
+  pipe = PhysicalPipeline(plan_name, "contracts", load_data(source_csv))
+  pipe.sem_filter(
+      "Both hold: (1) the contract has no expiration: it runs until a party terminates it, with no end date and no fixed term; (2) one party must maintain insurance for the benefit of the counterparty.",
+      model=pz.Model.GPT_4o_MINI,
+      depends_on=["document"],
+  )
+  pipe.project(["idx"])
+  pipe
+
+# identify: contracts dated before 2010 that also contain a non-compete
+"19": |
+  pipe = PhysicalPipeline(plan_name, "contracts", load_data(source_csv))
+  pipe.sem_filter(
+      "Both hold: (1) the contract is dated before 1 January 2010; (2) it restricts a party's ability to compete with the counterparty or to operate in a certain geography or business or technology sector.",
+      model=pz.Model.GPT_4o_MINI,
+      depends_on=["document"],
+  )
+  pipe.project(["idx"])
+  pipe
+
+# extract: how many parties signed the contract, scored by how far the count is off
+"20": |
+  pipe = PhysicalPipeline(plan_name, "contracts", load_data(source_csv))
+  pipe.sem_map(
+      cols=[{"name": "answer", "type": int, "description": "The number of parties that signed the contract (the entities with signature blocks, not every company the contract names). A single integer, e.g. 2."}],
+      model=pz.Model.GPT_4o_MINI,
+      depends_on=["document"],
+  )
+  pipe.project(["idx", "answer"])
+  pipe
+
+# identify: the expiration date of contracts that also restrict volume
+"21": |
+  pipe = PhysicalPipeline(plan_name, "contracts", load_data(source_csv))
+  pipe.sem_filter(
+      "Both hold: (1) the contract states its expiration terms: when its initial term ends, or that it has no end at all; a contract that says nothing about its term ending does not qualify; (2) there is a fee increase or consent requirement, etc. if one party's use of the product/services exceeds a certain threshold.",
+      model=pz.Model.GPT_4o_MINI,
+      depends_on=["document"],
+  )
+  pipe.sem_map(
+      cols=[{"name": "reason", "type": str, "description": "A concise verbatim span containing the expiration terms. The contract's own words, copied exactly, with nothing before or after them."}],
+      model=pz.Model.GPT_4o_MINI,
+      depends_on=["document"],
+  )
+  pipe.project(["idx", "reason"])
+  pipe
+
+# identify: the expiration date of contracts that can also be terminated for convenience
+"22": |
+  pipe = PhysicalPipeline(plan_name, "contracts", load_data(source_csv))
+  pipe.sem_filter(
+      "Both hold: (1) the contract states its expiration terms: when its initial term ends, or that it has no end at all; a contract that says nothing about its term ending does not qualify; (2) a party can terminate the contract without cause, solely by giving notice and allowing a waiting period to expire.",
+      model=pz.Model.GPT_4o_MINI,
+      depends_on=["document"],
+  )
+  pipe.sem_map(
+      cols=[{"name": "reason", "type": str, "description": "A concise verbatim span containing the expiration terms. The contract's own words, copied exactly, with nothing before or after them."}],
+      model=pz.Model.GPT_4o_MINI,
+      depends_on=["document"],
+  )
+  pipe.project(["idx", "reason"])
+  pipe

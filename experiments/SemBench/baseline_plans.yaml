@@ -1,0 +1,328 @@
+# Hand-written baseline plans for SemBench: one reasonable, unoptimized plan per query, the
+# comparison point for what the optimizer finds. Run with experiments/run_baseline.py.
+#
+# Keyed by use case, then query id. Each value is plan code, executed in the same sandbox
+# WritePlanTool uses, plus `source_csv` -- the query's source file name as benchmark.yaml
+# resolves it, so one plan serves every scale factor. The last expression must be the
+# PhysicalPipeline.
+#
+# Every LLM operator uses gpt-4o-mini.
+
+ecomm:
+  # backpacks from Reebok (text)
+  "1": |
+    pipe = PhysicalPipeline(plan_name, "products", load_data(source_csv))
+    pipe.sem_filter(
+        "The product is a backpack from the brand Reebok.",
+        model=pz.Model.GPT_4o_MINI,
+        depends_on=["productDisplayName", "productDescriptors"],
+    )
+    pipe.project(["idx"])
+    pipe
+
+  # yellow-and-silver sports shoes (image)
+  "2": |
+    pipe = PhysicalPipeline(plan_name, "products", load_data(source_csv))
+    add_image_data(pipe, "image")
+    pipe.sem_filter(
+        "The image shows a pair of sports shoes that are predominantly yellow and silver.",
+        model=pz.Model.GPT_4o_MINI,
+        depends_on=["image"],
+    )
+    pipe.project(["idx"])
+    pipe
+
+  # brand (text)
+  "3": |
+    pipe = PhysicalPipeline(plan_name, "products", load_data(source_csv))
+    pipe.sem_map(
+        cols=[{"name": "category", "type": str, "description": "The brand name of the product."}],
+        model=pz.Model.GPT_4o_MINI,
+        depends_on=["productDisplayName", "productDescriptors"],
+    )
+    pipe.project(["idx", "category"])
+    pipe
+
+  # primary color (image)
+  "4": |
+    pipe = PhysicalPipeline(plan_name, "products", load_data(source_csv))
+    add_image_data(pipe, "image")
+    pipe.sem_map(
+        cols=[{"name": "category", "type": str, "description": "The single primary color of the depicted product, as one common color name, e.g. Black, Blue, White."}],
+        model=pz.Model.GPT_4o_MINI,
+        depends_on=["image"],
+    )
+    pipe.project(["idx", "category"])
+    pipe
+
+  # product type (text)
+  "5": |
+    pipe = PhysicalPipeline(plan_name, "products", load_data(source_csv))
+    pipe.sem_map(
+        cols=[{"name": "category", "type": str, "description": "Exactly one of: Dress (a one-piece outer garment worn on the torso that hangs down over the legs), Bottomwear (trousers, jeans, skirts, shorts, leggings), Socks, Topwear (shirts, blouses, t-shirts, jackets), Innerwear (underwear, bras, undershirts)."}],
+        model=pz.Model.GPT_4o_MINI,
+        depends_on=["productDisplayName", "productDescriptors"],
+    )
+    pipe.project(["idx", "category"])
+    pipe
+
+  # product type (image)
+  "6": |
+    pipe = PhysicalPipeline(plan_name, "products", load_data(source_csv))
+    add_image_data(pipe, "image")
+    pipe.sem_map(
+        cols=[{"name": "category", "type": str, "description": "Exactly one of: Dress (a one-piece outer garment worn on the torso that hangs down over the legs), Bottomwear (trousers, jeans, skirts, shorts, leggings), Socks, Topwear (shirts, blouses, t-shirts, jackets), Innerwear (underwear, bras, undershirts)."}],
+        model=pz.Model.GPT_4o_MINI,
+        depends_on=["image"],
+    )
+    pipe.project(["idx", "category"])
+    pipe
+
+  # pairs <= $500 with the same brand and category (text), a,a included
+  "7": |
+    items = PhysicalPipeline(plan_name, "products", load_data(source_csv))
+    items.filter(lambda row: float(row["price"]) <= 500)
+    items.sem_map(
+        cols=[
+            {"name": "brand", "type": str, "description": "The product's brand, lowercase, e.g. adidas."},
+            {"name": "category", "type": str, "description": "The product's category as a short lowercase noun, e.g. t-shirt."},
+        ],
+        model=pz.Model.GPT_4o_MINI,
+        depends_on=["productDisplayName", "productDescriptors"],
+    )
+    items.join(
+        items,
+        lambda l, r: bool(l["brand"]) and bool(l["category"])
+        and str(l["brand"]).lower() == str(r["brand"]).lower()
+        and str(l["category"]).lower() == str(r["category"]).lower(),
+    )
+    items.project(["idx", "idx_right"])
+    items
+
+  # match each product's text to its image
+  "8": |
+    text = PhysicalPipeline(plan_name, "products", load_data(source_csv))
+    text.project(["idx", "productDisplayName", "productDescriptors"])
+    images = PhysicalPipeline(f"{plan_name}_images", "products", load_data(source_csv))
+    add_image_data(images, "image")
+    images.project(["idx", "image"])
+    text.sem_join(
+        images,
+        "The image depicts the product described by the title (productDisplayName) and description (productDescriptors).",
+        model=pz.Model.GPT_4o_MINI,
+    )
+    text.project(["idx", "idx_right"])
+    text
+
+  # distinct pairs < $800, single base color, same category and color (image)
+  "9": |
+    items = PhysicalPipeline(plan_name, "products", load_data(source_csv))
+    items.filter(lambda row: float(row["price"]) < 800)
+    add_image_data(items, "image")
+    items.sem_map(
+        cols=[
+            {"name": "category", "type": str, "description": "The type of object depicted, as a short lowercase noun, e.g. tshirts, watches, sports shoes, handbags."},
+            {"name": "color", "type": str, "description": "The product's color: exactly one of black, blue, red, white, orange, green if it is a single one of these colors; otherwise multicolor."},
+        ],
+        model=pz.Model.GPT_4o_MINI,
+        depends_on=["image"],
+    )
+    items.filter(lambda row: str(row["color"]).lower() in ("black", "blue", "red", "white", "orange", "green"))
+    items.join(
+        items,
+        lambda l, r: l["idx"] != r["idx"]
+        and str(l["color"]).lower() == str(r["color"]).lower()
+        and bool(l["category"]) and str(l["category"]).lower() == str(r["category"]).lower(),
+    )
+    items.project(["idx", "idx_right"])
+    items
+
+  # outfits: shoes + bottomwear + topwear, same brand and color, each <= $1000 (image)
+  "10": |
+    def labeled(name):
+        p = PhysicalPipeline(name, "products", load_data(source_csv))
+        p.filter(lambda row: float(row["price"]) <= 1000)
+        add_image_data(p, "image")
+        p.sem_map(
+            cols=[
+                {"name": "role", "type": str, "description": "Exactly one of: shoes, bottomwear, topwear, other."},
+                {"name": "color", "type": str, "description": "The product's main color: exactly one of black, blue, red, white, other."},
+                {"name": "brand", "type": str, "description": "The brand shown on the product, lowercase; empty if not visible."},
+            ],
+            model=pz.Model.GPT_4o_MINI,
+            depends_on=["image"],
+        )
+        p.filter(lambda row: str(row["color"]).lower() in ("black", "blue", "red", "white") and bool(row["brand"]))
+        return p
+
+    outfits = labeled(plan_name)
+    outfits.filter(lambda row: str(row["role"]).lower() in ("shoes", "bottomwear"))
+    outfits.join(
+        outfits,
+        lambda l, r: str(l["role"]).lower() == "shoes" and str(r["role"]).lower() == "bottomwear"
+        and str(l["color"]).lower() == str(r["color"]).lower()
+        and str(l["brand"]).lower() == str(r["brand"]).lower(),
+    )
+    tops = labeled(f"{plan_name}_tops")
+    tops.filter(lambda row: str(row["role"]).lower() == "topwear")
+    tops.add_col_suffix("_top")
+    outfits.join(
+        tops,
+        lambda l, r: str(l["color"]).lower() == str(r["color_top"]).lower()
+        and str(l["brand"]).lower() == str(r["brand_top"]).lower(),
+    )
+    outfits.project(["idx", "idx_right", "idx_top"])
+    outfits
+
+  # all-black outfits: shoes + bottomwear + topwear + accessory <= $500, same brand (text + image)
+  "11": |
+    def labeled(name):
+        p = PhysicalPipeline(name, "products", load_data(source_csv))
+        add_image_data(p, "image")
+        p.sem_map(
+            cols=[
+                {"name": "role", "type": str, "description": "Exactly one of: shoes, bottomwear (excluding swimwear), topwear (excluding swimwear), accessory (a watch, jewellery, or bag), other."},
+                {"name": "is_black", "type": bool, "description": "True if the product is black."},
+                {"name": "brand", "type": str, "description": "The product's brand, lowercase."},
+            ],
+            model=pz.Model.GPT_4o_MINI,
+            depends_on=["productDisplayName", "productDescriptors", "image"],
+        )
+        p.filter(lambda row: bool(row["is_black"]) and bool(row["brand"]))
+        return p
+
+    lower = labeled(plan_name)
+    lower.filter(lambda row: str(row["role"]).lower() in ("shoes", "bottomwear"))
+    lower.join(
+        lower,
+        lambda l, r: str(l["role"]).lower() == "shoes" and str(r["role"]).lower() == "bottomwear"
+        and str(l["brand"]).lower() == str(r["brand"]).lower(),
+    )
+    upper = labeled(f"{plan_name}_upper")
+    upper.filter(
+        lambda row: str(row["role"]).lower() == "topwear"
+        or (str(row["role"]).lower() == "accessory" and float(row["price"]) <= 500)
+    )
+    upper.join(
+        upper,
+        lambda l, r: str(l["role"]).lower() == "topwear" and str(r["role"]).lower() == "accessory"
+        and str(l["brand"]).lower() == str(r["brand"]).lower(),
+    )
+    upper.add_col_suffix("_up")
+    lower.join(upper, lambda l, r: str(l["brand"]).lower() == str(r["brand_up"]).lower())
+    lower.project(["idx", "idx_right", "idx_up", "idx_right_up"])
+    lower
+
+  # Adidas / Puma products: brand and master category (text)
+  "12": |
+    pipe = PhysicalPipeline(plan_name, "products", load_data(source_csv))
+    pipe.sem_map(
+        cols=[
+            {"name": "brand", "type": str, "description": "The product's brand name, lowercase."},
+            {"name": "category", "type": str, "description": "The product's master category: exactly one of accessories, apparel, footwear."},
+        ],
+        model=pz.Model.GPT_4o_MINI,
+        depends_on=["productDisplayName", "productDescriptors"],
+    )
+    pipe.filter(lambda row: str(row["brand"]).strip().lower() in ("adidas", "puma"))
+    pipe.project(["idx", "brand", "category"])
+    pipe
+
+  # men's striped blue/black round-neck short-sleeve running shirts (text + image)
+  "13": |
+    pipe = PhysicalPipeline(plan_name, "products", load_data(source_csv))
+    add_image_data(pipe, "image")
+    pipe.sem_filter(
+        "The product is a men's running shirt with a round neck and short sleeves, blue or black (not a bright color like white, and not green), with a striped design, suitable for outdoor running in warm weather.",
+        model=pz.Model.GPT_4o_MINI,
+        depends_on=["productDisplayName", "productDescriptors", "image"],
+    )
+    pipe.project(["idx"])
+    pipe
+
+  # products < 130 whose image matches the description and shows white socks
+  "14": |
+    pipe = PhysicalPipeline(plan_name, "products", load_data(source_csv))
+    pipe.filter(lambda row: float(row["price"]) < 130)
+    add_image_data(pipe, "image")
+    pipe.sem_filter(
+        "The image matches the product's title and description, and the image depicts white socks.",
+        model=pz.Model.GPT_4o_MINI,
+        depends_on=["productDisplayName", "productDescriptors", "image"],
+    )
+    pipe.project(["idx"])
+    pipe
+
+movie:
+  # count of positive reviews for taken_3
+  "3": |
+    reviews = PhysicalPipeline(plan_name, "reviews", load_data(source_csv).fillna(""))
+    reviews.filter(lambda row: row["idx"] == "taken_3")
+    reviews.sem_filter(
+        "The review expresses a positive sentiment toward the movie.",
+        model=pz.Model.GPT_4o_MINI,
+        depends_on=["reviewText"],
+    )
+    reviews.groupby(group_by_fields=["idx"], agg_funcs=["count"], agg_fields=["reviewId"])
+    reviews.map(
+        lambda row: {"positive_review_cnt": int(row["count(reviewId)"])},
+        cols=[{"name": "positive_review_cnt", "type": int, "description": "Number of positive reviews"}],
+    )
+    reviews.project(["positive_review_cnt"])
+    reviews
+
+  # pairs of opposite-sentiment reviews for ant_man_and_the_wasp_quantumania
+  "7": |
+    reviews = PhysicalPipeline(plan_name, "reviews", load_data(source_csv).fillna(""))
+    reviews.filter(lambda row: row["idx"] == "ant_man_and_the_wasp_quantumania")
+    reviews.sem_map(
+        cols=[{"name": "sentiment", "type": str, "description": "The review's sentiment toward the movie: exactly one of positive, negative."}],
+        model=pz.Model.GPT_4o_MINI,
+        depends_on=["reviewText"],
+    )
+    reviews.join(
+        reviews,
+        lambda l, r: l["reviewId"] != r["reviewId"]
+        and {str(l["sentiment"]).lower(), str(r["sentiment"]).lower()} == {"positive", "negative"},
+    )
+    reviews.map(
+        lambda row: {"movie_name": row["idx"], "reviewId1": row["reviewId"], "reviewId2": row["reviewId_right"]},
+        cols=[
+            {"name": "movie_name", "type": str, "description": "Movie id"},
+            {"name": "reviewId1", "type": str, "description": "First review id"},
+            {"name": "reviewId2", "type": str, "description": "Second review id"},
+        ],
+    )
+    reviews.project(["movie_name", "reviewId1", "reviewId2"])
+    reviews
+
+  # 1-5 score per review for ant_man_and_the_wasp_quantumania
+  "9": |
+    reviews = PhysicalPipeline(plan_name, "reviews", load_data(source_csv).fillna(""))
+    reviews.filter(lambda row: row["idx"] == "ant_man_and_the_wasp_quantumania")
+    reviews.sem_map(
+        cols=[{"name": "reviewScore", "type": int, "description": "How much the reviewer liked the movie, from 1 (hated it) to 5 (loved it)."}],
+        model=pz.Model.GPT_4o_MINI,
+        depends_on=["reviewText"],
+    )
+    reviews.project(["reviewId", "reviewScore"])
+    reviews
+
+  # rank movies by average 1-5 review score
+  "10": |
+    reviews = PhysicalPipeline(plan_name, "reviews", load_data(source_csv).fillna(""))
+    reviews.sem_map(
+        cols=[{"name": "reviewScore", "type": int, "description": "How much the reviewer liked the movie, from 1 (hated it) to 5 (loved it)."}],
+        model=pz.Model.GPT_4o_MINI,
+        depends_on=["reviewText"],
+    )
+    reviews.groupby(group_by_fields=["idx"], agg_funcs=["average"], agg_fields=["reviewScore"])
+    reviews.map(
+        lambda row: {"movie_name": row["idx"], "movieScore": row["average(reviewScore)"]},
+        cols=[
+            {"name": "movie_name", "type": str, "description": "Movie id"},
+            {"name": "movieScore", "type": float, "description": "Average review score"},
+        ],
+    )
+    reviews.project(["movie_name", "movieScore"])
+    reviews

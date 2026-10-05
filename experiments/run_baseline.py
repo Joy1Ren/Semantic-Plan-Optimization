@@ -2,8 +2,8 @@
 dataset and score them against the benchmark's real ground truth -- the comparison point for the optimizer's results.
 
 Each (query, scale factor) is executed and scored exactly as run_opt's final evaluation does
-it: the same plan sandbox, the same adapter's normalize / score_plan. Results land under
-results/baseline/{use_case}[/sf_{scale_factor}]/:
+it: the same plan sandbox, the same adapter's normalize / score_plan. Results land under the
+benchmark's results_prefix with runner "baseline" (e.g. results/CUAD_categories/q{id}/baseline/):
 
     metrics.json               {query_id: {metric_type, plan_code, run1: {...}, run2: ...}}
     raw_results/Q{id}_{k}.csv  the plan's raw output, run k
@@ -25,14 +25,14 @@ from pathlib import Path
 import pandas as pd
 import yaml
 
-from agent_cost_model.experiments.config import build_context, format_path, load_benchmark
+from agent_cost_model.experiments.config import (
+    build_context, expose_query_data, format_path, load_benchmark,
+)
 from agent_cost_model.experiments.external_repo import activate
 from agent_cost_model.opt_agent.llm_client import patch_litellm_for_openrouter
 from agent_cost_model.opt_agent.local_python_executor import LocalPythonExecutor
 from agent_cost_model.opt_agent.physical_pipeline import PhysicalPipeline
-from agent_cost_model.paths import RESULTS_DIR
 
-BASELINE_RESULTS_DIR = RESULTS_DIR / "baseline"
 # CostModelAgent's default authorized_imports, so baseline plans run in the same sandbox.
 PLAN_AUTHORIZED_IMPORTS = ["json", "palimpzest", "pandas", "numpy"]
 
@@ -76,12 +76,11 @@ def run_query(benchmark: dict, use_case: str, query_id: str, scale_factor, code:
                             scale_factor=scale_factor, query_id=query_id, repo_root=repo_root or "")
     data_dir = format_path(dataset_config["directory"], context)
     source_csv = dataset_config["source_csv"].format(**context)
+    expose_query_data(use_case_config, context)
     gt_path = format_path(use_case_config["ground_truth_path"], context)
     metric = use_case_config["query_metrics"][query_id]
 
-    out_dir = BASELINE_RESULTS_DIR / use_case
-    if scale_factor is not None:
-        out_dir = out_dir / f"sf_{scale_factor}"
+    out_dir = format_path(benchmark["results_prefix"], context)
     raw_dir = out_dir / "raw_results"
     raw_dir.mkdir(parents=True, exist_ok=True)
 
