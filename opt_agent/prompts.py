@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import os
 import pathlib
+import re
 
 _PHYSICAL_SEMANTIC_OPERATORS = {
     "sem_filter": "pipeline.sem_filter(condition: str, model: pz.Mode) — LLM filter; keeps rows where condition is true.",
@@ -37,7 +38,12 @@ _PHYSICAL_NONSEMANTIC_OPERATORS = {
             "Right-side columns are suffixed with '_right' on a name collision. Prefer this over sem_join when the match is an exact/computable predicate."
             "Performs a self join when `other` is the same instance as `pipeline`",
     "project": "pipeline.project(cols: list[str]) — Select a subset of columns.",
-    "limit": "pipeline.limit(n: int) — Keep at most n rows.",
+    "limit": "pipeline.limit(n: int) — Keep at most n rows."
+             " NOTE: limit is NOT applied while you are searching (plans run on a small subset, where"
+             " truncating to n would leave almost nothing to score) but IS applied in the final"
+             " full-dataset run. So a limit costs you nothing in the quality you observe here and can"
+             " only lose you results there: use it ONLY when the query asks for a fixed number of"
+             " results.",
     "groupby": "pipeline.groupby(group_by_fields: list[str], agg_funcs: list[str], agg_fields: list[str]) — Group and aggregate. Produces schema name 'agg_func(agg_field)', e.g. 'count(reviewId)' or 'average(score)'.",
 }
 # The model catalog offered to every agent (plan writer, cost helper, exploration checker).
@@ -48,6 +54,7 @@ _PHYSICAL_NONSEMANTIC_OPERATORS = {
 # provided" at PLAN-CONSTRUCTION time unless GEMINI_API_KEY is also set. Set
 # AGENT_MODEL_CATALOG=available_models.txt (with that key exported) to offer them again.
 _MODEL_CATALOG_FILE = os.environ.get("AGENT_MODEL_CATALOG", "available_models_openai.txt")
+# _MODEL_CATALOG_FILE = os.environ.get("AGENT_MODEL_CATALOG", "available_models.txt")
 _AVAILABLE_MODELS_TEXT = (pathlib.Path(__file__).parent / _MODEL_CATALOG_FILE).read_text()
 
 # A compact restatement of the two catalogs above: operator names and the knobs each one exposes,
@@ -175,13 +182,27 @@ def _sem_op_quality_docs(op_types) -> dict[str, str]:
     return {op_type: _SEM_OP_QUALITY_DOCS[op_type] for op_type in sorted(present)}
 
 
-def _quality_metric_reminder(eval_metric: str | None) -> str:
+def _per_op_quality_text(text: str, enabled: bool) -> str:
+    """Resolve a prompt's `<per_op_quality>` ... `</per_op_quality>` blocks: keep their content
+    when the oracle judges per-operator quality, drop it when it does not (run_opt's
+    --no-oracle-operator-quality), so nobody is told about a score they will never be shown."""
+    return re.sub(
+        r"^[ \t]*<per_op_quality>\n(.*?)^[ \t]*</per_op_quality>\n",
+        lambda m: m.group(1) if enabled else "",
+        text, flags=re.M | re.S,
+    )
+
+
+def _quality_metric_reminder(eval_metric: str | None, per_op_quality: bool = True) -> str:
     """One-line reminder of what `quality` measures, shown on every execute_plan result so the agent
     keeps the metric in mind — and understands why overall quality can diverge from per_sem_op_quality."""
     metric_desc = f"`{eval_metric}`" if eval_metric else "a plan-output-vs-oracle score"
+    per_op = (
+        "; per_sem_op_quality scores the accuracy per semantic operator" if per_op_quality else ""
+    )
     return (
         f"quality = {metric_desc} (0-1, higher is better). It scores the final plan output using the "
-        "evaluation metric; per_sem_op_quality scores the accuracy per semantic operator. "
+        f"evaluation metric{per_op}. "
         "quality_counts, when present, gives the TP/FP/FN/TN counts behind quality (see the Plan "
         "Quality Metric section for what each one means for this metric)."
     )
@@ -203,6 +224,45 @@ def _quality_metric_section(eval_metric: str | None) -> str:
         "## Plan Quality Metric\n"
         f"The `quality` score (0–1) reported for each executed plan is: {doc}"
     )
+
+_COST_AWARENESS = """
+## Optimization budget
+
+Searching costs money: every step, and every plan you execute, spends real dollars. After each
+step you are shown what that step cost, what the search has spent in total, and the size of the
+optimization subset next to the size of the full dataset.
+
+Writing and executing one more plan costs the search far more than that plan's own `cost_usd`:
+besides running the plan, it pays for the other optimization machinery that runs alongside each
+plan. That is why the step that executes a plan costs much more than the plan reports. Price
+another plan at what your write and execute steps have actually cost, never at its `cost_usd`.
+
+The plan you choose will be run on the FULL dataset, so a cost saving measured on the subset
+scales up when the plan is finally run. That scaled saving is what another round of searching
+has to beat.
+- Work out the scale factor; do NOT assume it is (full dataset size / subset size). The subset
+  was chosen to be RELEVANT to this query, so its rows are far likelier to reach your paid
+  operators than an average row of the full dataset. On the full dataset a deterministic
+  `filter` or a selective early operator discards many rows for free, and those rows cost
+  nothing. The size ratio is therefore an UPPER BOUND on the real scale factor, usually a loose one.
+- Measure it instead. `explore_data(filename)` returns the full table: count how many rows
+  actually survive to each paid operator under your plan — how many match the deterministic
+  conditions your plan filters on, how many carry the field a semantic operator reads. That
+  count over the subset's count is the scale factor for that operator's cost. This is ordinary
+  aggregate exploration and is covered by the HARD RULES above: use it to judge cost, never to
+  identify or hardcode specific records.
+- Judge the NEXT step, never the last ones. What the search has already spent is sunk: it
+  cannot be recovered and must not enter the decision. The only question is whether writing and
+  executing ONE more plan — roughly what a recent write step plus its execute step cost — is likely to buy a
+  full-dataset saving larger than that.
+- This applies to chasing COST. If a plan has a real chance of raising QUALITY, write and
+  execute it even when it costs more than it would save. Quality is never traded away to save
+  optimization dollars.
+- Measuring the extremes early is still worth paying for. A couple of cheap, possibly
+  low-quality plans early on establish the achievable cost/quality range, which is what makes
+  later "is another round worth it" judgments meaningful. This guidance bites late in the
+  search, once the frontier is established and the remaining cost cuts are small.
+"""
 
 _SYSTEM_TEMPLATE = """\
 {briefing}
@@ -270,8 +330,8 @@ separate minimal sandbox — see the write_plan tool description).
 - `plan_codes`      : dict[str, str] — code strings stored by write_plan (keys = plan names)
 - `plan_results`    : the observed-execution store (`plan_results.rows`, `plan_results.df`)
 - `op_results`      : the observed-execution store (`op_results.rows`, `op_results.df`, `op_results.summary()`)
-- stdlib: `math`, `statistics`, `random`, `collections`, `itertools`, `json`
-
+- `pandas`, `numpy`, plus stdlib: `math`, `statistics`, `random`, `re`, `collections`, `itertools`, `json`
+{cost_awareness}
 You have <= {max_steps} steps. On each step output EXACTLY ONE fenced block:
   - a ```python``` block — runs in the sandbox; its stdout/return value comes back as your next observation; or
   - a ```json``` block — your final answer (parsed as data, not executed). Emit this once, when done.

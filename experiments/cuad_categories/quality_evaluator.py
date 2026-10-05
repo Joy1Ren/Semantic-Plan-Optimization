@@ -205,7 +205,8 @@ class QualityEvaluator(PlanQualityEvaluator):
                  oracle_client=None, oracle_model: str | None = None,
                  llm_judge_dir: str | Path | None = None, subset_path: str | Path | None = None,
                  run_dir: str | Path | None = None, oracle_reasoning_effort: str | None = None,
-                 use_oracle_ground_truth: bool = False, **_ignored) -> None:
+                 use_oracle_ground_truth: bool = False, oracle_operator_quality: bool = True,
+                 **_ignored) -> None:
         try:
             self.QUERY = QUERY_BY_ID[int(query_id)]
         except (KeyError, TypeError, ValueError):
@@ -224,6 +225,7 @@ class QualityEvaluator(PlanQualityEvaluator):
             run_dir=run_dir,
             oracle_reasoning_effort=oracle_reasoning_effort,
             use_oracle_ground_truth=use_oracle_ground_truth,
+            oracle_operator_quality=oracle_operator_quality,
             # benchmark.yaml names the per-query file and the runner passes it; the default is
             # the same file, so constructing an evaluator without one (a standalone script, a
             # test) still scores against this query's own ground truth.

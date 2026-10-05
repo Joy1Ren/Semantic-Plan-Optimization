@@ -184,6 +184,7 @@ class QualityEvaluator(PlanQualityEvaluator):
         run_dir: str | Path | None = None,
         oracle_reasoning_effort: str | None = None,
         use_oracle_ground_truth: bool = False,
+        oracle_operator_quality: bool = True,
         **_ignored,
     ) -> None:
         # `**_ignored` absorbs the keywords the engine passes to every adapter's constructor
@@ -200,6 +201,7 @@ class QualityEvaluator(PlanQualityEvaluator):
             run_dir=run_dir,
             oracle_reasoning_effort=oracle_reasoning_effort,
             use_oracle_ground_truth=use_oracle_ground_truth,
+            oracle_operator_quality=oracle_operator_quality,
             ground_truth_path=ground_truth_path,
         )
 
