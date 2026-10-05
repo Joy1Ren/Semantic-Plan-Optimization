@@ -159,7 +159,10 @@ explore_images(ids, question="Is the garment's sleeve length clearly visible?")
             })
             attached.append(str(image_id))
 
-        lines = [f"Attaching {len(attached)} image(s){note}; they appear below as vision inputs in your next step."]
+        lines = [
+            f"Describing {len(attached)} image(s){note}; the descriptions appear at the end of "
+            "this step's observation, and stay in your context from there."
+        ]
         if attached:
             lines.append(f"  shown {self._id_col}s: {attached}")
         if question:

@@ -26,11 +26,13 @@ from dataclasses import dataclass
 from typing import Any
 
 from agent_cost_model.opt_agent.cost_model_types import ResultsStore, get_op_type, iter_operators
+from agent_cost_model.opt_agent import run_log
 from agent_cost_model.opt_agent.errors import ParseError
 from agent_cost_model.opt_agent.llm_client import LLMClient
 from agent_cost_model.opt_agent.prompts import (
     _AVAILABLE_MODELS_TEXT,
     _OPERATOR_CATALOG_BRIEF,
+    _per_op_quality_text,
     _quality_metric_section,
     _sem_op_quality_docs,
 )
@@ -58,7 +60,36 @@ class ExplorationCheckerAgent:
     anything — including it would let the agent claim coverage it never measured.
     """
 
-    _SYSTEM = textwrap.dedent("""\
+    _COST_BUDGET = textwrap.dedent("""\
+
+        THE COST OF CONTINUING. Searching is not free: every extra plan the agent writes and executes
+        spends real dollars, and asking for one is asking to spend them. You are shown what the search
+        has spent so far, what each executed plan cost the search to write and execute, the average
+        of those per-plan costs, and the size of the optimization subset next to the full dataset the
+        chosen plan will finally be run on.
+
+        A plan's search cost is far larger than its own cost_usd: writing and executing a plan also
+        pays for the other optimization machinery that runs alongside it. The average per-plan search
+        cost is the price of one more plan — never price it at a plan's cost_usd.
+
+        Weigh only the NEXT plan. Money already spent is sunk — it is a reason neither to continue nor
+        to stop. Compare the price of one more plan against the saving your suggestion would
+        plausibly produce ON THE FULL DATASET.
+
+        Do not scale that saving by (full dataset size / subset size). The subset was chosen to be
+        RELEVANT to this query, so its rows reach the paid operators far more often than an average
+        full-dataset row does, and on the full dataset a deterministic filter discards many rows for
+        free. The size ratio is an upper bound on the real scale factor, usually a loose one; the agent
+        can measure the true one against the full dataset, you cannot. Treat a saving that only looks
+        worthwhile at the upper bound as not established.
+
+        This weighing applies to suggestions that chase COST. A suggestion with a real chance of
+        raising QUALITY is worth making even when it costs more than it saves. And early in a search,
+        measuring the cheap and expensive extremes is worth its price even if neither plan wins — that
+        is what establishes the range every later judgment is made against.
+        """)
+
+    _SYSTEM_TEMPLATE = textwrap.dedent("""\
         You review how thoroughly a query-optimization search has explored its options.
 
         THE SETTING. A *semantic plan* answers a natural-language query over a table of records.
@@ -93,7 +124,7 @@ class ExplorationCheckerAgent:
         the search is near done, and only a clearly promising move justifies another plan.
         "Exhausted" is the EXPECTED verdict for a mature search, not a failure to find something.
         The burden of proof is on continuing, not on stopping.
-
+        {cost_budget}
         THE SPACE THAT EXISTS. Below are the operators and models the agent is allowed to use.
         This is NOT a list of optimizations to recommend, and the agent has it already — it is
         here only so you can tell which choices are POSSIBLE, so that you never propose something
@@ -119,10 +150,12 @@ class ExplorationCheckerAgent:
           whatever it cost. Never treat it as evidence for or against a direction, and do not ask
           for a more elaborate version of it. If that direction still looks worth testing, ask
           for the SIMPLEST plan that would actually score.
+        <per_op_quality>
         - PER-OPERATOR QUALITY IS NOT PLAN QUALITY. It measures one operator against the input it
           actually received, so it can be high while the plan scores badly (and the reverse).
           Plan `quality` is the objective. Never recommend a direction on per-operator scores
           alone when plan quality points the other way.
+        </per_op_quality>
 
         HOW TO JUDGE (guidance, not rules — weigh the whole picture):
         - Make sure to also execute BASELINE plans to understand the range of possible quality/cost.
@@ -160,10 +193,7 @@ class ExplorationCheckerAgent:
         RESPOND with EXACTLY ONE fenced ```json``` block and nothing else:
           {{"underexplored": true,  "suggestion": "<what to try next, and why the evidence supports it>"}}
           {{"underexplored": false, "suggestion": ""}}
-        """).format(
-        operator_catalog=_OPERATOR_CATALOG_BRIEF.rstrip(),
-        model_catalog=_AVAILABLE_MODELS_TEXT.strip(),
-    )
+        """)
 
     def __init__(
         self,
@@ -175,6 +205,8 @@ class ExplorationCheckerAgent:
         eval_metric: str | None = None,
         verbose: bool = True,
         context_budget_chars: int = 80_000,
+        cost_aware: bool = False,
+        per_op_quality: bool = True,
     ) -> None:
         self.llm = llm
         self.plans = plans
@@ -183,6 +215,16 @@ class ExplorationCheckerAgent:
         self.eval_metric = eval_metric
         self.verbose = verbose
         self.context_budget_chars = context_budget_chars
+        # Formatted per instance, in ONE pass, because the cost-budget section is per-run while
+        # the two catalogs are not. A second .format() pass would eat the `{{...}}` escapes that
+        # hold the JSON output contract.
+        self.cost_aware = cost_aware
+        self.per_op_quality = per_op_quality
+        self._system = _per_op_quality_text(self._SYSTEM_TEMPLATE.format(
+            operator_catalog=_OPERATOR_CATALOG_BRIEF.rstrip(),
+            model_catalog=_AVAILABLE_MODELS_TEXT.strip(),
+            cost_budget=self._COST_BUDGET if cost_aware else "",
+        ), per_op_quality)
 
         self.cost_usd: float = 0.0
         # Every verdict this run produced — saved to exploration_check/Q{id}_{rc}.json so a run
@@ -197,15 +239,21 @@ class ExplorationCheckerAgent:
             print(msg)
 
     # -- public entry point ------------------------------------------------
-    def check(self, *, reason: str) -> ExplorationCheck:
+    def check(self, *, reason: str, budget: dict | None = None) -> ExplorationCheck:
         """Ask the reviewer for one verdict. Never raises: any transport, parse, or shape
         problem is logged and returns "not underexplored", so a checker failure can never
-        break the plan search that depends on it."""
+        break the plan search that depends on it.
+
+        `budget` is the caller's spend snapshot as of the step that triggered this check
+        (see `_budget_section`); passed only in cost-aware runs."""
         n_executed = len(self._executed_rows())
         try:
-            result = self._check(reason=reason)
+            result = self._check(reason=reason, budget=budget)
         except Exception as e:
             self._log(f"[explore-check] failed ({reason}): {type(e).__name__}: {e}")
+            run_log.log_error(
+                "explore-check", f"{type(e).__name__}: {e}", content=f"reason={reason}", exc=e
+            )
             self.trajectory_steps.append({
                 "agent": "exploration_checker", "event": "check_error", "check_reason": reason,
                 "observation": f"{type(e).__name__}: {e}",
@@ -219,19 +267,27 @@ class ExplorationCheckerAgent:
         })
         return result
 
-    def _check(self, *, reason: str) -> ExplorationCheck:
+    def _check(self, *, reason: str, budget: dict | None = None) -> ExplorationCheck:
         if not self._executed_rows():
             # Nothing has been measured yet, so there is nothing to judge coverage of.
             self._log(f"[explore-check] skipped ({reason}): no executed plans yet")
             return ExplorationCheck(False, "")
 
-        msgs: list[dict] = [{"role": "user", "content": self._build_context(reason)}]
+        msgs: list[dict] = [{"role": "user", "content": self._build_context(reason, budget)}]
         # One reprompt: the contract is a single json block, and a model that missed it once
         # usually gets it on being told. Beyond that, treat the check as inconclusive.
         for attempt in (1, 2):
-            raw = self._llm_step(msgs)
+            raw, reasoning = self._llm_step(msgs)
             msgs.append({"role": "assistant", "content": raw})
-            self._log(f"\n--- [explore-check] reviewer (attempt {attempt}, reason={reason}) ---\n{raw}\n")
+            if reasoning:
+                self._log(
+                    run_log.header("[explore-check] reasoning", f"attempt {attempt}, reason={reason}")
+                    + f"{reasoning}\n"
+                )
+            self._log(
+                run_log.header("[explore-check] reviewer", f"attempt {attempt}, reason={reason}")
+                + f"{raw}\n"
+            )
             try:
                 parsed = _parse_step(raw)
             except ParseError as e:
@@ -248,12 +304,13 @@ class ExplorationCheckerAgent:
                     # rather than sending the main agent back with no instruction.
                     if result.underexplored and not result.suggestion:
                         result = ExplorationCheck(False, "")
-                    self._emit(reason, attempt, raw, result)
+                    self._emit(reason, attempt, raw, reasoning, result)
                     return result
             self._log(f"[explore-check] attempt {attempt}: parse problem — {detail}")
             self.trajectory_steps.append({
                 "agent": "exploration_checker", "event": "parse_error", "check_reason": reason,
-                "checker_step": attempt, "assistant": raw, "observation": detail,
+                "checker_step": attempt, "reasoning": reasoning, "assistant": raw,
+                "observation": detail,
             })
             msgs.append({"role": "user", "content": (
                 f"Could not parse your reply: {detail}. Re-send EXACTLY ONE ```json``` block "
@@ -261,12 +318,14 @@ class ExplorationCheckerAgent:
             )})
         return ExplorationCheck(False, "")
 
-    def _emit(self, reason: str, attempt: int, raw: str, result: ExplorationCheck) -> None:
+    def _emit(
+        self, reason: str, attempt: int, raw: str, reasoning: str | None, result: ExplorationCheck
+    ) -> None:
         verdict = "UNDEREXPLORED" if result.underexplored else "sufficiently explored"
         self._log(f"[explore-check] {reason}: {verdict}")
         self.trajectory_steps.append({
             "agent": "exploration_checker", "event": "check", "check_reason": reason,
-            "checker_step": attempt, "assistant": raw,
+            "checker_step": attempt, "reasoning": reasoning, "assistant": raw,
             "underexplored": result.underexplored,
             "observation": f"{verdict}: {result.suggestion}" if result.suggestion else verdict,
         })
@@ -310,7 +369,7 @@ class ExplorationCheckerAgent:
             return "n/a"
         return "n/a" if f != f else format(f, spec)  # f != f is True only for NaN
 
-    def _plan_block(self, row: dict) -> str:
+    def _plan_block(self, row: dict, search_cost: float | None = None) -> str:
         name = row.get("plan_name", "?")
         per_op = row.get("per_sem_op_quality") or {}
         try:
@@ -325,10 +384,13 @@ class ExplorationCheckerAgent:
             f"quality: {self._fmt_num(row.get('quality'), '.3f')}",
             *([f"quality counts: {json.dumps(row['quality_counts'], default=str)}"]
               if row.get("quality_counts") else []),
-            f"per-operator quality: {per_op_s}",
+            *([f"per-operator quality: {per_op_s}"] if self.per_op_quality else []),
             f"cost_usd: {self._fmt_num(row.get('cost_usd'), '.6f')}",
             f"latency_s (sum of per-operator times): {self._fmt_num(row.get('latency_s'), '.3f')}",
             f"wall_latency_s (wall-clock time of the run): {self._fmt_num(row.get('wall_latency_s'), '.3f')}",
+            *([f"search cost to write + execute this plan: ${search_cost:.4f} "
+               "(includes its cost_usd plus the other optimization costs of writing and executing it)"]
+              if search_cost is not None else []),
         ])
 
     def _per_op_quality_legend(self, rows: list[dict]) -> str:
@@ -339,6 +401,8 @@ class ExplorationCheckerAgent:
         reviewer is reading bare numbers whose definition it can only guess at -- and guessing
         wrong is consequential, because a rag_* per-op score deliberately excludes retrieval
         misses, so a high one is not evidence that the plan's retrieval is working."""
+        if not self.per_op_quality:
+            return ""
         op_types: list[str] = []
         for row in rows:
             entry = self.plans.get(row.get("plan_name"))
@@ -357,17 +421,43 @@ class ExplorationCheckerAgent:
             f"diagnostic, NOT the plan's objective):\n{lines}"
         )
 
-    def _build_context(self, reason: str) -> str:
+    @staticmethod
+    def _budget_section(budget: dict | None, plan_costs: list[float]) -> str:
+        """What the search has spent as of the step that triggered this check.
+
+        `plan_costs` are the search costs of the executed plans shown below; their average is the
+        price of one more plan. The two sizes are given without their ratio on purpose: the subset
+        is relevance-sampled, so that ratio is an upper bound on the real scale factor rather than
+        the scale factor, and the system prompt says so."""
+        if not budget:
+            return ""
+        return "\n".join([
+            "=== Search spend ===",
+            f"spent on the search so far: ${budget['total_usd']:.4f} "
+            "(sunk — a reason neither to continue nor to stop)",
+            *([f"average search cost of one plan (write + execute; per-plan figures are in each "
+               f"plan block below): ${sum(plan_costs) / len(plan_costs):.4f} "
+               "(what one more plan will cost)"] if plan_costs else []),
+            f"optimization subset: {budget['subset_n']} records; "
+            f"full dataset: {budget['dataset_n']} records",
+        ])
+
+    def _build_context(self, reason: str, budget: dict | None = None) -> str:
         rows = self._executed_rows()
+        costs = (budget or {}).get("plan_search_cost") or {}
+        block = lambda r: self._plan_block(r, costs.get(r.get("plan_name")))
         parts = [
             f"=== Exploration review (trigger: {reason}) ===",
             f"The query being answered:\n{self.task}",
             "\n\n".join(
                 s for s in (_quality_metric_section(self.eval_metric),
-                            self._per_op_quality_legend(rows)) if s
+                            self._per_op_quality_legend(rows),
+                            self._budget_section(
+                                budget, [costs[r["plan_name"]] for r in rows if r.get("plan_name") in costs]
+                            )) if s
             ),
             f"Executed plans so far ({len(rows)}), in execution order:",
-            "\n\n".join(self._plan_block(r) for r in rows),
+            "\n\n".join(block(r) for r in rows),
             "Judge whether any optimization these plans have opened is still underexplored. "
             "Reply with exactly one ```json``` block.",
         ]
@@ -376,7 +466,7 @@ class ExplorationCheckerAgent:
             # Keep the head (task + metric) and drop the OLDEST plan blocks: the recent plans
             # carry the gradient the reviewer is being asked to read.
             keep = self.context_budget_chars - len(parts[0]) - len(parts[1]) - len(parts[2]) - 500
-            blocks = [self._plan_block(r) for r in rows]
+            blocks = [block(r) for r in rows]
             kept: list[str] = []
             for block in reversed(blocks):
                 if keep - len(block) < 0:
@@ -390,12 +480,14 @@ class ExplorationCheckerAgent:
         return context
 
     # -- llm ---------------------------------------------------------------
-    def _llm_step(self, msgs: list[dict]) -> str:
-        result = self.llm.generate(self._SYSTEM, msgs)
-        content, meta = result, {}
+    def _llm_step(self, msgs: list[dict]) -> tuple[str, str | None]:
+        result = self.llm.generate(self._system, msgs)
+        content, reasoning, meta = result, None, {}
         if isinstance(result, tuple):
             content = result[0] if result else ""
+            if len(result) >= 2:
+                reasoning = result[1] or None
             if len(result) >= 3 and isinstance(result[2], dict):
                 meta = result[2]
         self.cost_usd += float(meta.get("cost_usd", 0.0) or 0.0)
-        return content
+        return content, reasoning

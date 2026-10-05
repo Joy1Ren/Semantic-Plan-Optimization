@@ -18,8 +18,9 @@ and all implemented in experiments/*/quality_evaluator.py, carry everything benc
 Neither hook is told which ground-truth mode is in effect: `ground_truth_path_in_use()` already
 resolves to the right file for the configured mode, so no adapter branches on it.
 
-Per-operator quality (identical regardless of use_oracle_ground_truth — only needs the plan's own
-execution samples, never a separately-run oracle-substituted pipeline):
+Per-operator quality (skipped entirely when oracle_operator_quality=False; otherwise identical
+regardless of use_oracle_ground_truth — only needs the plan's own execution samples, never a
+separately-run oracle-substituted pipeline):
   sem_filter / sem_join / rag_filter: the oracle directly judges each of the plan's own inputs
     against the operator's condition; per-op quality is the agreement rate between the oracle's
     decisions and the plan's own pass/fail decisions.
@@ -193,14 +194,18 @@ class PlanQualityEvaluator:
 
     def __init__(
         self,
-        oracle_client,
-        oracle_model: str,
         query_id: int,
-        subset_path: str | Path,
-        normalize_df: Callable[[pd.DataFrame], pd.DataFrame],
-        llm_judge_dir: str | Path,
+        # Search-time only: the oracle, the optimization subset and the judge cache. A caller
+        # that only scores a plan's output (normalize / has_ground_truth / score_plan -- the
+        # final evaluation, run_baseline.py) can leave them out.
+        oracle_client=None,
+        oracle_model: str | None = None,
+        subset_path: str | Path | None = None,
+        llm_judge_dir: str | Path | None = None,
+        normalize_df: Callable[[pd.DataFrame], pd.DataFrame] | None = None,
         oracle_reasoning_effort: str | None = None,
         use_oracle_ground_truth: bool = True,
+        oracle_operator_quality: bool = True,
         ground_truth_loader: Callable[[], pd.DataFrame] | None = None,
         ground_truth_path: str | Path | None = None,
         run_dir: str | Path | None = None,
@@ -209,9 +214,11 @@ class PlanQualityEvaluator:
         self._oracle_model = oracle_model          # string, used for OpenRouterClient judge calls
         self._oracle_reasoning_effort = oracle_reasoning_effort
         self._query_id = query_id
-        self._subset_path = Path(subset_path)
-        self._normalize_df_fn = normalize_df
-        self._llm_judge_dir = Path(llm_judge_dir)
+        self._subset_path = Path(subset_path) if subset_path else None
+        # Identity when the adapter supplies none: a benchmark whose scorer already accepts the
+        # plan's natural output has nothing to reshape.
+        self._normalize_df_fn = normalize_df if normalize_df is not None else (lambda df: df)
+        self._llm_judge_dir = Path(llm_judge_dir) if llm_judge_dir else None
         # What scoring this run cost: the oracle run(s) that produced the ground truth, plus every
         # per-operator judge call. Deliberately NOT the oracle runs of later plans -- those are
         # consistency checks, kept separately below so the run's real spend is still recoverable.
@@ -227,6 +234,9 @@ class PlanQualityEvaluator:
         # either way -- it only needs the plan's own execution samples plus per-operator oracle
         # judging -- so this flag does not mean "no oracle LLM calls".
         self._use_oracle_ground_truth = use_oracle_ground_truth
+        # When False, evaluate() skips per-operator oracle judging: per_sem_op_quality stays
+        # empty and no judge call is made.
+        self._oracle_operator_quality = oracle_operator_quality
         self._ground_truth_loader = ground_truth_loader
         self._direct_ground_truth_df: "pd.DataFrame | None" = None
         self._direct_ground_truth_loaded = False
@@ -261,22 +271,16 @@ class PlanQualityEvaluator:
         # concurrent updates -- i.e. under-reports what scoring actually cost.
         self._oracle_cost_lock = threading.Lock()
 
-        # Private RNG for subsampling what a judge call scores down to MAX_JUDGE_RECORDS (see
-        # _cap_judge_items). Fixed seed so two runs of the same query judge the same records and
-        # their per-op quality numbers are comparable; an unseeded global `random` made that
-        # number drift run to run for reasons unrelated to the plan. Not a knob — nothing
-        # benefits from varying it per run.
-        self._op_sample_rng = random.Random(_OP_SAMPLE_SEED)
-
         # Resolve oracle model string → pz.Model enum once at init so make_oracle_copy
         # receives the enum directly (avoids re-resolving on every execute_plan call and
         # surfaces bad model names early).
         self._oracle_pz_model = None
-        try:
-            from agent_cost_model.opt_agent.physical_pipeline import _str_to_pz_model
-            self._oracle_pz_model = _str_to_pz_model(oracle_model)
-        except Exception as e:
-            print(f"[QualityEvaluator] could not resolve oracle pz model '{oracle_model}': {e}")
+        if oracle_model:
+            try:
+                from agent_cost_model.opt_agent.physical_pipeline import _str_to_pz_model
+                self._oracle_pz_model = _str_to_pz_model(oracle_model)
+            except Exception as e:
+                print(f"[QualityEvaluator] could not resolve oracle pz model '{oracle_model}': {e}")
 
 
     # ------------------------------------------------------------------
@@ -331,7 +335,8 @@ class PlanQualityEvaluator:
         # in oracle-ground-truth mode this piggybacks on judging done in the same run rather than
         # comparing against a separately-run oracle-substituted pipeline.
         per_sem_op_quality: dict[str, float] = {}
-        for stage_idx, info in plan_context.per_sem_op_info.items():
+        sem_ops = plan_context.per_sem_op_info if self._oracle_operator_quality else {}
+        for stage_idx, info in sem_ops.items():
             op_name = info["op_name"]
             op_type = info["op_type"]
             try:
@@ -377,6 +382,16 @@ class PlanQualityEvaluator:
 
         return QualityResult(quality=quality, per_sem_op_quality=per_sem_op_quality,
                              quality_note=quality_note, quality_counts=self.last_quality_counts)
+
+    def normalize(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Reshape a plan's raw output into what this benchmark's scorer reads.
+
+        The adapter supplies the reshaping function as `normalize_df` and binds whatever it needs
+        (SemBench's takes the use case and query id); everything that produces a frame to be
+        scored -- a plan's output, the full-dataset run's output, the oracle's output -- goes
+        through here, so there is one reshaping step rather than one per call site.
+        """
+        return self._normalize_df_fn(df)
 
     def ground_truth_path_in_use(self) -> "Path | None":
         """The FILE quality is scored against for this run.
@@ -545,7 +560,7 @@ class PlanQualityEvaluator:
             return None
 
         oracle_df = pd.DataFrame(oracle_context.output_records)
-        oracle_df = self._normalize_df_fn(oracle_df)
+        oracle_df = self.normalize(oracle_df)
         # Cached so a plan re-executed in the same run reuses this oracle output. The frame is
         # all scalar cells (a plan's output columns are the scalar fields its operators
         # generate), so it survives the CSV round trip read back at the top of this method.
@@ -822,17 +837,23 @@ class PlanQualityEvaluator:
             *({"type": "image_url", "image_url": {"url": url}} for url in image_urls),
         ]
 
-    def _cap_judge_items(self, items: list) -> list:
+    def _cap_judge_items(self, items: list, op_name: str) -> list:
         """Subsample what one oracle judge call scores down to MAX_JUDGE_RECORDS.
 
         Random rather than first-N: samples arrive in execution order, which follows the
         datasubset's row order, so a prefix would judge the same handful of records for every
         operator of every plan -- a biased sample, and one that never sees the rest of the
-        subset. Drawn from the run-stable _op_sample_rng so a re-run judges the same records.
+        subset.
+
+        Seeded per OPERATOR, not per run. A single run-level stream would hand an operator a
+        different draw depending on how many operators were judged before it, so two runs of the
+        same query only judged the same records when the agent happened to execute the same plans
+        in the same order -- which is exactly what varies. Keying on the operator's name makes an
+        operator's sample depend on nothing but the operator.
         """
         if len(items) <= MAX_JUDGE_RECORDS:
             return items
-        return self._op_sample_rng.sample(items, MAX_JUDGE_RECORDS)
+        return random.Random(f"{_OP_SAMPLE_SEED}:{op_name}").sample(items, MAX_JUDGE_RECORDS)
 
     def _oracle_judge_filter_join_op(
         self, op_type: str, condition: str, samples: list, op_name: str = "?",
@@ -869,7 +890,7 @@ class PlanQualityEvaluator:
             print(f"[QualityEvaluator] per-op quality skipped for {op_name}: no samples with source_indices")
             return None
 
-        keys = self._cap_judge_items(list(candidates))
+        keys = self._cap_judge_items(list(candidates), op_name)
         contexts = retrieval_contexts or {}
         unit = "pair of records satisfies the join condition" if op_type == "sem_join" else "record satisfies the filter condition"
 
@@ -1117,7 +1138,7 @@ class PlanQualityEvaluator:
         if not valid:
             print(f"[QualityEvaluator] per-op quality skipped for {op_name}: no samples with a non-None output")
             return None
-        valid = self._cap_judge_items(valid)
+        valid = self._cap_judge_items(valid, op_name)
         contexts = info.get("retrieval_contexts") or {}
 
         scored = [

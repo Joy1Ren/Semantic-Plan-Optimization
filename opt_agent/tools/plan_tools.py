@@ -5,7 +5,8 @@ from __future__ import annotations
 import pathlib
 from typing import Any
 
-from agent_cost_model.opt_agent.cost_model_types import ResultsStore, _dump_opt_debug_artifacts, _normalize_plan_df
+from agent_cost_model.opt_agent import run_log
+from agent_cost_model.opt_agent.cost_model_types import ResultsStore, _dump_opt_debug_artifacts
 from agent_cost_model.opt_agent.prompts import _quality_metric_reminder, _sem_op_quality_docs
 
 from .base import Tool
@@ -70,37 +71,48 @@ class GetOpSamplesTool(Tool):
     doc = """\
 ### get_op_samples(plan_name, op_name, n=3)
 Retrieve sample (input, output) pairs for an executed plan from `plan_results`.
-You must scope to a single operator with `op_name`, which is `{plan}_op{idx}_{op_type}`
-(e.g. "p1_op1_rag_map") — the same names `plan_str` and `op_results` use.
+`op_name` is required and names the operator(s) you want — `{plan}_op{idx}_{op_type}`
+(e.g. "p1_op1_rag_map"), the same names `plan_str` and `op_results` use. Pass a list to see
+several at once. Ask only for the operators you actually want to look at: samples are long,
+and a plan's operators often repeat each other's fields.
 Returns at most `n` samples per operator.
 
 ```python
-get_op_samples("p1", "p1_op2_sem_map", n=5)   # up to 5 samples from this operator
+get_op_samples("p1", "p1_op2_sem_map", n=5)                  # up to 5 samples from one operator
+get_op_samples("p1", ["p1_op1_sem_filter", "p1_op2_sem_map"])  # two operators side by side
 ```"""
 
     def __init__(self, plan_results: ResultsStore) -> None:
         self._plan_results = plan_results
 
-    def __call__(self, plan_name: str, op_name: str, n: int = 3) -> str:
+    def __call__(self, plan_name: str, op_name: str | list[str], n: int = 3) -> str:
         if not op_name:
             return "You must specify an operator name (e.g. 'p1_op2_sem_map') to retrieve samples."
-        row = next((r for r in self._plan_results.rows if r.get("plan_name") == plan_name), None)
+        requested = [op_name] if isinstance(op_name, str) else list(op_name)
+        # The LAST row for this plan: re-executing a plan appends another row, and the samples
+        # have to belong to the same execution as the numbers the agent is reading. (The
+        # exploration checker resolves the same duplication the same way.)
+        row = next(
+            (r for r in reversed(self._plan_results.rows) if r.get("plan_name") == plan_name),
+            None,
+        )
         if row is None:
             available = [r.get("plan_name") for r in self._plan_results.rows]
             return f"No executed plan named {plan_name!r}. Available: {available}"
         samples = row.get("op_samples", {})
         if not samples:
             return f"No op_samples recorded for plan {plan_name!r}."
-        if op_name is not None:
-            if op_name not in samples:
-                return f"No operator {op_name!r} in plan {plan_name!r}. Available: {list(samples)}"
-            samples = {op_name: samples[op_name]}
+        missing = [name for name in requested if name not in samples]
+        if missing:
+            return f"No operator {missing} in plan {plan_name!r}. Available: {list(samples)}"
+        samples = {name: samples[name] for name in requested}
 
-        # De-duplication is a whole-plan concern: it collapses values that a downstream operator
-        # merely carries through from an upstream one. Asking for a single operator prints it
-        # in full (subject to the char budget). Keyed by (sample index, field name) so that two
-        # different records of the same operator never collapse into each other.
-        dedup = op_name is None
+        # De-duplication collapses values that a downstream operator merely carries through from
+        # an upstream one, so it only means anything when more than one operator is shown; a
+        # single operator prints in full (subject to the char budget). Keyed by (sample index,
+        # field name) so that two different records of the same operator never collapse into
+        # each other.
+        dedup = len(requested) > 1
         seen: dict[tuple[int, str], str] = {}
 
         lines = [
@@ -290,15 +302,18 @@ and `op_results`, respectively. After execution, `plans[plan_name]["plan"]` hold
 Returns a compact summary dict with plan stats and per-operator stats. Key fields:
 - `quality`: 0–1 overall plan quality evaluated by an oracle. Higher is better.
   Treat oracle quality scores as ground truth.
+<per_op_quality>
 - `per_sem_op_quality`: per-semantic-operator quality (0–1). Use to diagnose
   which operator is the bottleneck. `per_sem_op_quality_metric` states how that
   score is computed for each operator type in this plan — read it before acting on
   a low score, since the definition differs by operator type.
+</per_op_quality>
 - `quality_counts` (only for metrics built from counts): the TP/FP/FN/TN behind `quality`,
   split by reason where a Jaccard gate applies. Use it to tell missed records from wrong ones.
 - `cost_usd`, `latency_s`, `input_tokens`, `output_tokens`: aggregated over all ops.
 To inspect accumulated results use `plan_results.df` and `op_results.df`.
-To view sample input/output pairs use `get_op_samples(plan_name)`.
+To view sample input/output pairs use `get_op_samples(plan_name, op_name)`, where `op_name` is one
+operator name or a list of them.
 ```python
 execute_plan("p1")
 ```"""
@@ -318,11 +333,12 @@ execute_plan("p1")
         results_prefix: str | pathlib.Path,
         eval_metric: str | None = None,
         subset_path: str | pathlib.Path | None = None,
-        normalize_eval_df: Any = None,
         runcount: Any = None,
+        oracle_operator_quality: bool = True,
     ) -> None:
         import pathlib
 
+        self._oracle_operator_quality = oracle_operator_quality
         self._plan_codes = plan_codes
         self._plans = plans
         self._op_results = op_results
@@ -337,7 +353,6 @@ execute_plan("p1")
         self._results_prefix = pathlib.Path(results_prefix)
         self._runcount = runcount
         self._subset_path = pathlib.Path(subset_path) if subset_path else None
-        self._normalize_eval_df = normalize_eval_df or _normalize_plan_df
 
     def __call__(self, plan_name: str) -> dict:
         import pandas as pd
@@ -367,12 +382,19 @@ execute_plan("p1")
         except Exception as e:
             plan_exec_error = e
             print(f"[execute_plan] plan execution failed for {plan_name}: {type(e).__name__}: {e}")
+            run_log.log_error(
+                "plan-exec", f"{type(e).__name__}: {e}", content=f"plan={plan_name}", exc=e
+            )
         entry["plan"] = pipeline
 
         raw_output_df = pd.DataFrame(
             plan_context.output_records if plan_context is not None else []
         )
-        plan_output_df = self._normalize_eval_df(raw_output_df, self._use_case, self._query_id)
+        # The evaluator owns the reshaping: it is the thing that knows what its scorer reads.
+        plan_output_df = (
+            self._quality_evaluator.normalize(raw_output_df)
+            if self._quality_evaluator is not None else raw_output_df
+        )
 
         quality_result = None
         if self._quality_evaluator is not None:
@@ -390,6 +412,9 @@ execute_plan("p1")
                 )
             except Exception as e:
                 print(f"[execute_plan] quality evaluation failed for {plan_name}: {type(e).__name__}: {e}")
+                run_log.log_error(
+                    "quality-eval", f"{type(e).__name__}: {e}", content=f"plan={plan_name}", exc=e
+                )
 
         total_cost = sum(e.get("cost_usd", 0) for e in per_op_list)
         # latency_s: SUM of per-op per-record latencies (serial-equivalent). Kept as the plan's
@@ -419,6 +444,9 @@ execute_plan("p1")
             )
         except Exception as e:
             print(f"[execute_plan] opt_results debug dump failed for {plan_name}: {type(e).__name__}: {e}")
+            run_log.log_error(
+                "debug-dump", f"{type(e).__name__}: {e}", content=f"plan={plan_name}", exc=e
+            )
 
         if plan_exec_error is not None:
             raise RuntimeError(
@@ -451,9 +479,9 @@ execute_plan("p1")
             "input_tokens": total_in_tok,
             "output_tokens": total_out_tok,
             "quality": quality_result.quality if quality_result is not None else float("nan"),
-            "per_sem_op_quality": (
+            **({"per_sem_op_quality": (
                 quality_result.per_sem_op_quality if quality_result is not None else {}
-            ),
+            )} if self._oracle_operator_quality else {}),
             "quality_counts": quality_result.quality_counts if quality_result is not None else None,
             "op_samples": op_samples,
         }
@@ -474,9 +502,14 @@ execute_plan("p1")
         result = {
             "plan_summary": plan_summary,
             "op_summary": per_op_list,
-            "quality_metric": _quality_metric_reminder(self._eval_metric),
+            "quality_metric": _quality_metric_reminder(
+                self._eval_metric, self._oracle_operator_quality
+            ),
         }
-        sem_op_docs = _sem_op_quality_docs(o.get("op_type") for o in per_op_list)
+        sem_op_docs = (
+            _sem_op_quality_docs(o.get("op_type") for o in per_op_list)
+            if self._oracle_operator_quality else {}
+        )
         if sem_op_docs:
             result["per_sem_op_quality_metric"] = sem_op_docs
         return result

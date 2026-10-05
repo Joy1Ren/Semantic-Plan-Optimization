@@ -44,6 +44,8 @@ from palimpzest.constants import Model
 from palimpzest.core.elements.records import DataRecord
 from palimpzest.core.models import GenerationStats
 
+from agent_cost_model.opt_agent.pricing import token_cost
+
 from ..base import _RAG_EMBEDDING_BASE_URL
 
 # Placeholder passed to PZ RAGFilter/RAGConvert's required `embedding_model: Model` param.
@@ -63,7 +65,6 @@ def _rag_embed(model: str, text: str) -> tuple[list[float], GenerationStats]:
         "model": model,
         "input": text or " ",
         "encoding_format": "float",
-        "usage": {"include": True},  # ask OpenRouter to report dollar cost
     }
     start_time = time.time()
     resp = httpx.post(
@@ -84,24 +85,8 @@ def _rag_embed(model: str, text: str) -> tuple[list[float], GenerationStats]:
         raise RuntimeError(f"No embedding data from {model!r}. Response: {json.dumps(payload)[:800]}")
     vec = [float(x) for x in data[0]["embedding"]]
     usage = payload.get("usage") or {}
-    cost = 0.0
-    for key in ("cost", "total_cost", "estimated_cost"):
-        value = usage.get(key)
-        if value is not None:
-            try:
-                cost = float(value)
-                break
-            except (TypeError, ValueError):
-                continue
-    input_tokens = 0.0
-    for key in ("total_tokens", "prompt_tokens"):
-        value = usage.get(key)
-        if value is not None:
-            try:
-                input_tokens = float(value)
-                break
-            except (TypeError, ValueError):
-                continue
+    input_tokens = float(usage.get("prompt_tokens") or usage.get("total_tokens") or 0)
+    cost = token_cost(model, int(input_tokens))
     stats = GenerationStats(
         model_name=model,
         embedding_input_tokens=input_tokens,

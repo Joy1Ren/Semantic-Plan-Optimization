@@ -1,7 +1,6 @@
 """Exact (non-LLM) nested-loops join operator."""
 from __future__ import annotations
 
-import inspect
 import time
 from typing import TYPE_CHECKING, Callable
 
@@ -10,7 +9,7 @@ from palimpzest.core.elements.records import DataRecord, DataRecordSet
 from palimpzest.core.models import OperatorCostEstimates, RecordOpStats
 from palimpzest.query.operators.join import JoinOp
 
-from ..base import Operator, _compute_op_id
+from ..base import Operator, _compute_op_id, _fn_source
 
 if TYPE_CHECKING:
     from ..pipeline import PhysicalPipeline
@@ -41,10 +40,7 @@ class NonLLMJoin(JoinOp):
         self.join_idx = 0
         self._left_input_records: list[DataRecord] = []
         self._right_input_records: list[DataRecord] = []
-        try:
-            self._fn_src = inspect.getsource(join_fn).strip()
-        except (OSError, TypeError):
-            self._fn_src = repr(join_fn)
+        self._fn_src = _fn_source(join_fn)
 
     def is_image_join(self) -> bool:
         return False
@@ -134,10 +130,7 @@ class Join(Operator):
 
     def __init__(self, other: "PhysicalPipeline | None", condition_fn: Callable[[dict, dict], bool], schema, depends_on: list[str] | None = None, self_join: bool = False):
         super().__init__()
-        try:
-            fn_src = inspect.getsource(condition_fn).strip()
-        except (OSError, TypeError):
-            fn_src = repr(condition_fn)
+        fn_src = _fn_source(condition_fn)
         self._pz_op = NonLLMJoin(
             join_fn=condition_fn,
             condition=fn_src,

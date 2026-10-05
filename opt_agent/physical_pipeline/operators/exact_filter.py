@@ -1,13 +1,12 @@
 """Exact (non-LLM) row filter operator."""
 from __future__ import annotations
 
-import inspect
 from typing import Callable
 
 from palimpzest.core.elements.filters import Filter
 from palimpzest.query.operators.filter import NonLLMFilter
 
-from ..base import Operator, _compute_op_id
+from ..base import Operator, _compute_op_id, _fn_source
 
 
 class ExactFilter(Operator):
@@ -23,9 +22,5 @@ class ExactFilter(Operator):
             input_schema=schema,
         )
         self._fn = fn  # preserved for make_oracle_copy
-        try:
-            fn_src = inspect.getsource(fn).strip()
-        except (OSError, TypeError):
-            fn_src = repr(fn)
-        self.attributes = {"condition": fn_src}
+        self.attributes = {"condition": _fn_source(fn)}
         self.params_id = _compute_op_id(self.op_type, self.attributes)
