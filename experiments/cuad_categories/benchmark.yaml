@@ -89,8 +89,8 @@ use_cases:
         Return no row at all for a contract that does not qualify. For one that does,
         output:
           idx         copy the input row's idx unchanged
-          reason      the full sentence(s) from the contract that say when it takes effect, quoted
-                      verbatim
+          reason      a concise verbatim span containing when the contract takes effect: the
+                      contract's own words, copied exactly, with nothing before or after them
       # extract: when the contract's initial term expires
       "7": |-
         You are given the full text of one legal contract.
@@ -122,8 +122,8 @@ use_cases:
         Return no row at all for a contract that does not qualify. For one that does,
         output a single row with:
           idx         copy the input row's idx unchanged
-          reason      the full sentence(s) from the contract that show it has no expiration, quoted
-                      verbatim
+          reason      a concise verbatim span containing what shows it has no expiration: the
+                      contract's own words, copied exactly, with nothing before or after them
       # extract: the renewal term after the initial term expires
       "9": |-
         You are given the full text of one legal contract.
@@ -273,6 +273,36 @@ use_cases:
           idx         copy the input row's idx unchanged
           answer      the number of parties that signed the contract: a single integer and nothing
                       else, e.g. 2
+      # identify: the expiration date of contracts that also restrict volume
+      "21": |-
+        You are given the full text of one legal contract.
+
+        Return this contract only if BOTH of these hold:
+          1. it states its expiration terms: when its initial term ends, or that it has no
+             end at all; a contract that says nothing about its term ending does not qualify;
+          2. contains a Volume Restriction clause: there is a fee increase or consent requirement,
+             etc. if one party's use of the product/services exceeds a certain threshold.
+
+        Return no row at all for a contract that does not qualify. For one that does,
+        output:
+          idx         copy the input row's idx unchanged
+          reason      a concise verbatim span containing the expiration terms: the
+                      contract's own words, copied exactly, with nothing before or after them
+      # identify: the expiration date of contracts that can also be terminated for convenience
+      "22": |-
+        You are given the full text of one legal contract.
+
+        Return this contract only if BOTH of these hold:
+          1. it states its expiration terms: when its initial term ends, or that it has no
+             end at all; a contract that says nothing about its term ending does not qualify;
+          2. contains a Termination for Convenience clause: a party can terminate the contract
+             without cause, solely by giving notice and allowing a waiting period to expire.
+
+        Return no row at all for a contract that does not qualify. For one that does,
+        output:
+          idx         copy the input row's idx unchanged
+          reason      a concise verbatim span containing the expiration terms: the
+                      contract's own words, copied exactly, with nothing before or after them
     query_metrics:  # see queries.py (Query.metric), scoring.py and quality_evaluator.py
       "1": answer_match_span_jaccard  # cuad_parties
       "2": set_f1  # cuad_parties_over_two
@@ -294,6 +324,8 @@ use_cases:
       "18": set_f1  # cuad_perpetual_with_insurance
       "19": set_f1  # cuad_old_with_non_compete
       "20": party_count_relative_error  # cuad_parties_count_error
+      "21": set_f1_reason_jaccard  # cuad_expiration_with_volume_restriction
+      "22": set_f1_reason_jaccard  # cuad_expiration_with_termination_for_convenience
     dataset:
       directory: "{benchmark_dir}/dataset"
       source_csv: "cuad_clean_140.csv"
