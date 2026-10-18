@@ -30,6 +30,10 @@ __all__ = [
     "_RAG_EMBEDDING_BASE_URL",
     "IMAGE_FIELD",
     "MODES",
+    "TOP_ANCHOR",
+    "MIDDLE_ANCHOR",
+    "NEGATIVE_ANCHOR",
+    "FLAT_DECIMALS",
     "DEFAULT_ALPHA",
     "DEFAULT_EMBED_WORKERS",
     "EXPLORE_AUTHORIZED_IMPORTS",
@@ -55,10 +59,11 @@ IMAGE_FIELD = "__image__"
 DEFAULT_EMBED_WORKERS = 10
 
 # Agentic mode's optional pre-sampling exploration: the agent submits one snippet that is run
-# against the dataframe so it can look before it writes a spec. Read-only analysis is the whole
-# point, so the import list stays narrow -- enough to count, group and regex, nothing that
-# reaches the network or filesystem.
-EXPLORE_AUTHORIZED_IMPORTS = ["re", "math", "statistics", "collections", "itertools", "json"]
+# against the dataframe so it can look before it writes a spec. `df` is already a DataFrame in
+# scope, so pandas (and numpy, which pandas is built on) are included -- without them the agent
+# cannot build a boolean mask or Series of its own, which is most of what this snippet is for.
+EXPLORE_AUTHORIZED_IMPORTS = ["re", "math", "statistics", "collections", "itertools", "json",
+                              "pandas", "numpy"]
 # The result is pasted into the next prompt, so it is capped rather than allowed to blow the
 # context on a stray `print(df)`.
 EXPLORE_OUTPUT_CHARS = 6000
@@ -67,7 +72,22 @@ EXPLORE_OUTPUT_CHARS = 6000
 # before the first spec, and every image is a paid vision input.
 EXPLORE_MAX_IMAGES = 8
 
-MODES = ("baseline", "one-shot", "agentic", "random")
+MODES = ("baseline", "one-shot", "agentic", "random", "one-shot-gradient")
+
+# Gradient modes spread each stratum's allocation across the ranking instead of taking its
+# top-m: half the rows from the top, a quarter from the median, a quarter from the ninetieth
+# percentile. The negative band sits at p90 rather than just below the top cutoff on purpose --
+# hard negatives are the most discriminating rows and also the most distorting, since avoiding
+# them is where plan score moves, which pushes the optimizer toward precision at the cost of
+# recall. The aim is a representative subset, not an adversarial one.
+TOP_ANCHOR = 0.0
+MIDDLE_ANCHOR = 0.5
+NEGATIVE_ANCHOR = 0.9
+
+# Two scores count as tied -- and so as one flat run to sample across -- when they agree to
+# this many decimals. `total` is min-maxed into [0,1], so a gap below a thousandth is noise
+# rather than a real difference in relevance.
+FLAT_DECIMALS = 3
 
 DEFAULT_ALPHA = 0.5
 

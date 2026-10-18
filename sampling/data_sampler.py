@@ -1,13 +1,17 @@
 """`DataSampler`: build the optimization subset for one query.
 
-Three modes share one scoring core (see `scoring.py` for the formula); a fourth bypasses it:
+Four modes share one scoring core (see `scoring.py` for the formula); a fifth bypasses it:
 
-  baseline  the raw query text against every column, scored by BM25 + embedding cosine. No LLM
-            call at all.
-  one-shot  one LLM call writes the retrieval spec, which is then scored once.
-  agentic   the same, plus up to two revisions driven by a report of what was retrieved.
-  random    no LLM call, no scoring: a seeded uniform draw of `sample_size` rows, straight out
-            of `_random_ids`. The no-signal floor the other three are measured against.
+  baseline           the raw query text against every column, scored by BM25 + embedding
+                     cosine. No LLM call at all.
+  one-shot           one LLM call writes the retrieval spec, which is then scored once.
+  one-shot-gradient  the same, but each stratum's rows are spread across its ranking rather
+                     than taken from the top of it -- see `_select`.
+  agentic            one-shot, plus up to two revisions driven by a report of what was
+                     retrieved.
+  random             no LLM call, no scoring: a seeded uniform draw of `sample_size` rows,
+                     straight out of `_random_ids`. The no-signal floor the others are
+                     measured against.
 
 `sample()` never raises. Any failure -- transport, parse, scoring -- is logged and falls back
 to that same seeded uniform draw rather than garbage, and the subset CSV and results record are
@@ -59,6 +63,8 @@ from agent_cost_model.sampling.results import (
 )
 from agent_cost_model.sampling.scoring import (
     ScoredPool,
+    gradient_bands,
+    select_band,
     bm25_scores,
     combine,
     cosine_scores,
@@ -95,6 +101,10 @@ class StratumScore:
     # is what the agent has to see to judge whether the spec works. They differ whenever strata
     # overlap: a stratum whose top rows were all taken contributes rows from further down.
     display: list[str] = field(default_factory=list)
+    # id -> band name, in gradient modes. Empty under top-k selection, where every chosen row
+    # came from the same place and the label would say nothing.
+    band_of: dict[str, str] = field(default_factory=dict)
+
 
 # One reprompt: the contract is a single fenced block, and a model that misses it once usually
 # gets it when told. Beyond that, fall back rather than keep paying for retries.
@@ -159,6 +169,10 @@ class DataSampler:
         self.seed = seed
         # Agentic only: one optional data-exploration call before the first spec.
         self.explore = explore and mode == "agentic"
+        # Spread each stratum's allocation across its ranking instead of taking its top-m. Held
+        # as a strategy flag rather than tested against the mode string everywhere, so another
+        # `*-gradient` mode is one name in MODES and nothing else.
+        self.gradient = mode.endswith("-gradient")
         # Off by default; see prompts.PRESELECT_BLOCK for why naming rows is opt-in.
         self.idx_specification = idx_specification
         # What the agent asked the image describer at exploration time. Kept for the rest of
@@ -527,6 +541,30 @@ class DataSampler:
         return pool, filter_info, outside
 
     # ------------------------------------------------------------- selection
+    def _select(
+        self, pool: ScoredPool, m: int, exclude: Sequence[str]
+    ) -> tuple[list[str], dict[str, str]]:
+        """This mode's `m` rows out of one stratum's pool, plus each row's band.
+
+        Top-k takes the head of the ranking. A gradient mode spreads the allocation across it --
+        half from the top, a quarter from the median, a quarter from the ninetieth percentile --
+        so the subset spans what the query means instead of hugging the relevant end of it.
+
+        Bands exclude each other as well as earlier strata, so a row the top band took is not
+        handed back by the middle one.
+        """
+        if not self.gradient:
+            return select_topk(pool, m, exclude=exclude), {}
+        picked: list[str] = []
+        band_of: dict[str, str] = {}
+        claimed = list(exclude)
+        for name, n, anchor in gradient_bands(m):
+            got = select_band(pool, n, anchor=anchor, exclude=claimed, seed=self.seed)
+            picked.extend(got)
+            claimed.extend(got)
+            band_of.update(dict.fromkeys(got, name))
+        return picked, band_of
+
     def _score_plan(
         self, strata: list[Stratum], preselected: Sequence[str] = ()
     ) -> tuple[list[StratumScore], list[str], list[str]]:
@@ -545,12 +583,13 @@ class DataSampler:
         chosen: list[str] = list(dict.fromkeys(preselected))
         for st in strata:
             pool, filter_info, outside = self._score(st.spec)
-            picked = select_topk(pool, st.m, exclude=chosen)
+            picked, band_of = self._select(pool, st.m, chosen)
             chosen.extend(picked)
             scored.append(
                 StratumScore(stratum=st, pool=pool, filter_info=filter_info,
                              chosen=picked, outside=list(outside),
-                             display=select_topk(pool, st.m))
+                             display=self._select(pool, st.m, ())[0],
+                             band_of=band_of)
             )
         # Only rows outside EVERY stratum's filter are candidates for topping up: a row one
         # stratum filtered out may be exactly what another was ranking.
@@ -790,7 +829,7 @@ class DataSampler:
                 exploration=exploration,
             )
             payload, attempts, round_cost, round_latency = self._ask_for_object(
-                prompts.spec_system(self.sample_size, self.idx_specification), user, label="spec"
+                prompts.spec_system(self.sample_size, self.idx_specification, self.gradient), user, label="spec"
             )
             if payload is None:
                 self._log("could not get a usable plan; falling back to the baseline spec")
@@ -847,7 +886,7 @@ class DataSampler:
         for attempt in range(2, self.max_rounds + 1):
             report = self._build_report(scored, chosen, warnings)
             payload, n_attempts, cost, latency = self._ask_for_object(
-                prompts.revise_system(self.sample_size, self.idx_specification),
+                prompts.revise_system(self.sample_size, self.idx_specification, self.gradient),
                 prompts.build_revise_user(report, attempt=attempt - 1, max_attempts=self.max_rounds - 1),
                 label=f"revise-{attempt}",
             )
@@ -983,9 +1022,7 @@ class DataSampler:
         for si, ss in enumerate(plan, 1):
             pool, spec, chosen = ss.pool, ss.stratum.spec, ss.chosen
             selected = set(chosen)
-            order = np.argsort(-pool.total, kind="stable")
-            rank = np.empty(len(pool.ids), dtype=int)
-            rank[order] = np.arange(1, len(pool.ids) + 1)
+            rank = self._ranks(pool)
             frames.append(pd.DataFrame({
                 "round": index,
                 "stratum": si,
@@ -1002,6 +1039,9 @@ class DataSampler:
                 "sparse": pool.sparse,
                 "score": pool.total,
                 "selected": [rid in selected for rid in pool.ids],
+                # Which band put the row in the subset; empty under top-k selection and for
+                # every row that was not selected.
+                "band": [ss.band_of.get(rid, "") for rid in pool.ids],
                 "mode": self.mode,
                 "alpha": spec.alpha,
                 "sample_size": self.sample_size,
@@ -1016,9 +1056,48 @@ class DataSampler:
             }).sort_values("rank", ignore_index=True))
         return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
 
-    def _chosen_scores(self, pool: ScoredPool, chosen: Sequence[str]) -> list[dict]:
+    @staticmethod
+    def _ranks(pool: ScoredPool) -> np.ndarray:
+        """1-based rank of every pool row by descending score."""
+        order = np.argsort(-pool.total, kind="stable")
+        ranks = np.empty(len(pool.ids), dtype=int)
+        ranks[order] = np.arange(1, len(pool.ids) + 1)
+        return ranks
+
+    def _band_summary(self, pool: ScoredPool, band_of: dict[str, str]) -> dict:
+        """Per band: how many rows, the ranks they came from, and the scores they realized.
+
+        This is what says whether the bands actually separated. Sampling across a flat region
+        is honest about a region the score cannot order, but it cannot create resolution that
+        is not there: when the middle and negative anchors land in the same flat run, both bands
+        draw from it and their score ranges coincide. Recording the realized ranges makes that a
+        measurement per query rather than something to be inferred from the subset afterwards.
+        """
+        if not band_of:
+            return {}
+        by_id = {rid: i for i, rid in enumerate(pool.ids)}
+        ranks = self._ranks(pool)
+        out: dict = {}
+        for name in ("top", "middle", "negative"):
+            idx = [by_id[r] for r, b in band_of.items() if b == name and r in by_id]
+            if not idx:
+                continue
+            scores = pool.total[idx]
+            out[name] = {
+                "n": len(idx),
+                "rank_min": int(ranks[idx].min()),
+                "rank_max": int(ranks[idx].max()),
+                "score_min": round(float(scores.min()), 6),
+                "score_max": round(float(scores.max()), 6),
+            }
+        return out
+
+    def _chosen_scores(
+        self, pool: ScoredPool, chosen: Sequence[str], band_of: dict[str, str] | None = None
+    ) -> list[dict]:
         by_id = {rid: i for i, rid in enumerate(pool.ids)}
         configured = set(pool.configured)
+        ranks = self._ranks(pool)
         out: list[dict] = []
         for rid in chosen:
             i = by_id.get(rid)
@@ -1028,6 +1107,11 @@ class DataSampler:
             # Same rule as the summary: a subscore from a component that never ran is a
             # structural zero, not a measurement of this row.
             entry = {"id": rid, "total": round(float(pool.total[i]), 6)}
+            if band_of:
+                # With the rank alongside: a band name is only checkable against where the row
+                # actually sat in the ranking, and dedup can drag a band off its anchor.
+                entry["band"] = band_of.get(rid, "")
+                entry["rank"] = int(ranks[i])
             if "bm25" in configured or "keyphrase" in configured:
                 entry["sparse"] = round(float(pool.sparse[i]), 6)
             if "bm25" in configured:
@@ -1060,9 +1144,11 @@ class DataSampler:
                     label=ss.stratum.label,
                     spec=ss.stratum.spec.to_json(ss.pool.configured),
                     filter_info=ss.filter_info,
-                    scores=summarize(ss.pool),
+                    scores={**summarize(ss.pool),
+                            **({"bands": self._band_summary(ss.pool, ss.band_of)}
+                               if ss.band_of else {})},
                     chosen_ids=ss.chosen,
-                    chosen_scores=self._chosen_scores(ss.pool, ss.chosen),
+                    chosen_scores=self._chosen_scores(ss.pool, ss.chosen, ss.band_of),
                 )
                 for ss in plan
             ],
