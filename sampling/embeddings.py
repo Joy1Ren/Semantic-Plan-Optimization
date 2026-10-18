@@ -26,6 +26,7 @@ from typing import Any, Iterable, Sequence
 import numpy as np
 import pandas as pd
 
+from agent_cost_model.opt_agent.pricing import token_cost
 from agent_cost_model.sampling.constants import DEFAULT_EMBED_WORKERS, _RAG_EMBEDDING_BASE_URL
 from agent_cost_model.sampling.text import column_fingerprint
 
@@ -77,7 +78,6 @@ class EmbeddingClient:
             "model": self.model,
             "input": input_value,
             "encoding_format": "float",
-            "usage": {"include": True},  # ask OpenRouter to report dollar cost
         }
         t0 = time.time()
         resp = self._http.post(
@@ -102,15 +102,7 @@ class EmbeddingClient:
             )
         vec = np.asarray(data[0]["embedding"], dtype=np.float32)
         usage = payload.get("usage") or {}
-        cost = 0.0
-        for key in ("cost", "total_cost", "estimated_cost"):
-            value = usage.get(key)
-            if value is not None:
-                try:
-                    cost = float(value)
-                    break
-                except (TypeError, ValueError):
-                    continue
+        cost = token_cost(self.model, usage.get("prompt_tokens") or usage.get("total_tokens") or 0)
         return vec, cost, latency
 
     def embed_text(self, text: str) -> tuple[np.ndarray, float, float]:
