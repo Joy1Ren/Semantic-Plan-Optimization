@@ -36,8 +36,8 @@ use_cases:
       "2": |-
         You are given the full text of one legal contract.
 
-        Return this contract only if more than two parties signed it. Count the parties to the contract -- the entities that
-        signed it -- not every company it names.
+        Return this contract only if it has more than two Parties.
+        Parties: The two or more parties who signed the contract
 
         Return no row at all for a contract that does not qualify. For one that does,
         output:
@@ -150,8 +150,9 @@ use_cases:
       "10": |-
         You are given the full text of one legal contract.
 
-        Return this contract only if it renews indefinitely: it keeps renewing for one period after another until a party
-        stops it. A contract that renews a set number of times, or not at all, does not qualify.
+        Return this contract only if its Renewal Term is for successive periods.
+        Renewal Term: What is the renewal term after the initial term expires? This includes automatic extensions and
+        unilateral extensions with prior notice.
 
         Return no row at all for a contract that does not qualify. For one that does,
         output a single row with these columns:
@@ -209,7 +210,7 @@ use_cases:
         You are given the full text of one legal contract.
 
         Return this contract only if BOTH of these hold:
-          1. more than two parties signed it, counting the entities that signed the contract;
+          1. it has more than two Parties: the two or more parties who signed the contract;
           2. New York law governs it.
 
         Return no row at all for a contract that does not qualify. For one that does,
@@ -233,8 +234,12 @@ use_cases:
         You are given the full text of one legal contract.
 
         Return this contract only if BOTH of these hold:
-          1. it renews indefinitely, one period after another until a party stops it;
-          2. stopping a renewal takes at least 90 days' notice, counting a month as 30 days.
+          1. its Renewal Term is for successive periods. Renewal Term: What is the renewal term
+             after the initial term expires? This includes automatic extensions and unilateral
+             extensions with prior notice.
+          2. its Notice Period to Terminate Renewal is at least 90 days, counting a month as 30
+             days. Notice Period to Terminate Renewal: What is the notice period required to
+             terminate renewal?
 
         Return no row at all for a contract that does not qualify. For one that does,
         output:
