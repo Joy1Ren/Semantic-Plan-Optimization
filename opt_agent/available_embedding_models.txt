@@ -1,0 +1,16 @@
+Available Embedding Models for RAG Operators
+============================================
+Pass the id as a string to rag_filter/rag_map's embedding_model. Only used when
+similarity_method='embedding'; 'bm25' has no embedding cost.
+Costs are per 1M input tokens (embeddings have no output tokens). Every chunk, plus the
+embedding_query, is embedded once per record. Max input is per chunk, so keep chunk_size
+(in characters) under roughly 4x the token limit.
+Sorted by input cost:
+
+--- Cheap ---
+"openai/text-embedding-3-small"
+  input: $0.020/1M   max input: 8,192 tokens
+
+--- Expensive ---
+"google/gemini-embedding-2"
+  input: $0.200/1M   max input: 8,192 tokens
