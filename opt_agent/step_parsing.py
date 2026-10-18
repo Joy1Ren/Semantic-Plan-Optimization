@@ -1,6 +1,6 @@
 """Parsing of one LLM reply into either a tool-call step or a final-answer step.
 
-Shared by `CostModelAgent` and `CostHelperAgent` — both agents run the same
+Shared by `CostModelAgent` and `ExplorationCheckerAgent` — both agents run the same
 "emit exactly one fenced ```python``` or ```json``` block per turn" protocol.
 """
 

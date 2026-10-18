@@ -267,11 +267,12 @@ def _cols_attribute(cols: list[dict]) -> list[dict]:
     Carrying the description (not just the name) is what makes `attributes` a complete
     identity for the operator, which two things depend on:
 
-      - `params_id` (= `_compute_op_id(op_type, attributes)`) is the `op_id` that
-        SampleBasedCostModel groups per-operator cost/latency/quality rows by. A column's
-        description IS the operator's prompt for that column, so two maps with the same
-        column names but different descriptions run different prompts at different token
-        counts -- pooling their stats under one id attributes one op's cost to the other.
+      - `params_id` (= `_compute_op_id(op_type, attributes)`) is the `op_id` on every
+        per-operator row in `op_results`, which is how one operator's measurements are
+        matched across plans. A column's description IS the operator's prompt for that
+        column, so two maps with the same column names but different descriptions run
+        different prompts at different token counts -- giving them one id would make one
+        op's cost look like the other's.
       - the oracle judge reads these descriptions to learn what each field was asked for
         (see plan_quality_evaluator._score_map_op); with names alone it has to guess the
         output convention, e.g. whether "" means "absent" or "the operator failed".
@@ -326,12 +327,9 @@ class Operator:
          interchangeable up to LLM sampling noise.
       2. `params_id` is ALWAYS `_compute_op_id(self.op_type, self.attributes)` -- the whole
          dict, never a hand-picked subset. Deriving it from a subset makes two operators that
-         behave differently share an id, and `params_id` is the `op_id` SampleBasedCostModel
-         groups measured cost/latency/selectivity rows by: a coarse id silently attributes one
-         operator's measurements to another. Note the consequence of an exact id -- an operator
-         the agent has not executed before finds no sampled stats and falls back to
-         SampleBasedCostModel's naive model-card estimate, rather than borrowing numbers from a
-         differently-configured operator.
+         behave differently share an id, and `params_id` is the `op_id` measured
+         cost/latency/selectivity rows are keyed by: a coarse id silently attributes one
+         operator's measurements to another.
     """
 
     stage_type: str  # filter | convert | project | limit | groupby | join

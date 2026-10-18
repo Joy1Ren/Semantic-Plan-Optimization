@@ -1,4 +1,4 @@
-"""Static briefing text shared by `CostModelAgent` and `CostHelperAgent`: the physical-operator
+"""Static briefing text shared by `CostModelAgent` and `ExplorationCheckerAgent`: the physical-operator
 catalog, the available-models catalog, and the plan-quality-metric documentation."""
 
 from __future__ import annotations
@@ -46,7 +46,7 @@ _PHYSICAL_NONSEMANTIC_OPERATORS = {
              " results.",
     "groupby": "pipeline.groupby(group_by_fields: list[str], agg_funcs: list[str], agg_fields: list[str]) — Group and aggregate. Produces schema name 'agg_func(agg_field)', e.g. 'count(reviewId)' or 'average(score)'.",
 }
-# The model catalog offered to every agent (plan writer, cost helper, exploration checker).
+# The model catalog offered to every agent (plan writer, exploration checker).
 # OpenAI-only by default: those models reach litellm, which patch_litellm_for_openrouter() routes
 # through OpenRouter, so OPENROUTER_API_KEY is the only key a run needs. The Gemini models in the
 # full catalog do NOT work that way -- palimpzest gives them a direct google-genai client that
@@ -297,8 +297,6 @@ example, `filter(lambda row: row["description"].isin(["settee", "sofa", "couch"]
 and `map(lambda row: {{ "red_freq_count": row["description"].str.count("red")}},
     cols=[{{"name": "red_freq_count", "type": str, "description": "Number of times the word 'red' appears in the description"}}])`
 are valid.
-
-{estimate_rule}
 
 ## Tools (already imported into your python sandbox)
 

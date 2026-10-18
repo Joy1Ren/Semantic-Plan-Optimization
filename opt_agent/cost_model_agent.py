@@ -6,19 +6,18 @@ Supporting pieces used to live in this file directly; they are now split out so 
 module can stay focused on `CostModelAgent`'s own setup/loop logic:
   - `errors.py`            — ParseError, StepFailed
   - `llm_client.py`        — LLMClient, OpenRouterClient, patch_litellm_for_openrouter
-  - `cost_model_types.py`  — PlanCostEstimate/CostModel, ResultsStore, CostModelRegistry,
-                              and the duck-typed operator-introspection helpers
+  - `cost_model_types.py`  — ResultsStore, run_key, and the duck-typed
+                              operator-introspection helpers
   - `step_parsing.py`      — the "one fenced block per turn" step parser
   - `run_log.py`           — timestamped step headers and the per-run error log
   - `prompts.py`           — the physical-operator catalog, model catalog, and
                               quality-metric briefing text
-  - `cost_helper_agent.py` — CostHelperAgent, which authors/refits cost models on
-                              this agent's behalf in "customCost" mode
+  - `exploration_checker_agent.py` — ExplorationCheckerAgent, which reviews how far
+                              the search has explored the optimization space
   - `tools/`                — the Tool subclasses exposed to the sandbox
 
-Everything that used to be importable as `agent_cost_model.opt_agent.cost_model_agent.X` is
-re-exported below, so existing `from agent_cost_model.opt_agent.cost_model_agent import X`
-call sites keep working unchanged.
+A few of these (OpenRouterClient, ResultsStore, patch_litellm_for_openrouter) are also
+imported from this module by the experiment runners.
 """
 
 from __future__ import annotations
@@ -31,29 +30,13 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
-# ---------------------------------------------------------------------------
-# Re-exports (see module docstring) — used both by this module's own code below
-# and by external callers importing them from here.
-# ---------------------------------------------------------------------------
 from agent_cost_model.opt_agent import run_log
 from agent_cost_model.opt_agent.errors import ParseError, StepFailed
 from agent_cost_model.opt_agent.llm_client import LLMClient, OpenRouterClient, patch_litellm_for_openrouter
 from agent_cost_model.opt_agent.cost_model_types import (
-    HAVE_PALIMPZEST,
-    OperatorCostEstimates,
-    PhysicalOperator,
-    PhysicalPlan,
-    PlanCost,
-    CostModel,
-    CostModelRegistry,
-    PlanCostEstimate,
     ResultsStore,
-    describe_operator,
-    get_op_id,
-    get_op_model,
     get_op_type,
     iter_operators,
-    make_observed_op_stats,
     run_key,
 )
 from agent_cost_model.opt_agent.step_parsing import _Step, _parse_step
@@ -69,20 +52,15 @@ from agent_cost_model.opt_agent.prompts import (
     _quality_metric_reminder,
     _quality_metric_section,
 )
-from agent_cost_model.opt_agent.cost_helper_agent import CostHelperAgent
 from agent_cost_model.opt_agent.exploration_checker_agent import ExplorationCheckerAgent
 from agent_cost_model.opt_agent.tools import (
-    ComparePlanCostsTool,
-    EstimatePlanCostTool,
     ExecutePlanTool,
     ExploreImagesTool,
     ExploreSampleTool,
     ExploreSchemaT,
     GetOpSamplesTool,
     ListFilesTool,
-    ReviewPlansTool,
     Tool,
-    UpdateCostModelTool,
     WritePlanTool,
 )
 
@@ -92,8 +70,6 @@ class _RunContext:
     """Everything `CostModelAgent._setup_run` wires up for the main loop to consume."""
     executor: Any
     system: str
-    registry: CostModelRegistry
-    cost_helper: "CostHelperAgent | None"
     checker: "ExplorationCheckerAgent | None"
     quality_evaluator: Any
     plan_codes: dict
@@ -101,7 +77,7 @@ class _RunContext:
 
 class CostModelAgent:
     """A bounded tool-loop agent that authors, applies, and refines semantic plans."""
-    execute_briefing = textwrap.dedent("""\
+    briefing = textwrap.dedent("""\
         You are a query plan engineer optimizing physical plans for an optimized deep-research query system.
         Physical query plans are trees of operators (semantic filters, maps, joins,
         aggregations, scans, projects). Some operators call LLMs and cost real
@@ -190,170 +166,7 @@ class CostModelAgent:
              marginal, or you run low on steps.
         """)
 
-    sampleCost_briefing = textwrap.dedent("""\
-        You are a query plan engineer optimizing physical plans for an optimized deep-research query system.
-        Physical query plans are trees of operators (semantic filters, maps, joins,
-        aggregations, scans, projects). Some operators call LLMs and cost real
-        dollars and seconds. A sample-based cost model (SampleBasedCostModel) is
-        pre-installed and re-fits automatically on every `estimate_plan_cost` call —
-        use it to compare plan variants before deciding which ones to execute.
-
-        Your goal is to write physical plans, observe cost/latency/quality,
-        and converge on the best cost-quality trade-off. Do not hard code the plan.
-
-        Suggested workflow:
-        To get initial data and performance traces:
-        1. Explore the data: call `list_files()` to see available CSVs and folders,
-           `explore_schema(filename)` and `explore_sample(filename)` to understand each table's
-           columns and format. You ALSO have direct access to the full CSVs via `explore_data(filename)`,
-           which returns the whole table as a DataFrame. Use it to compute AGGREGATE statistics —
-           e.g. how many rows contain a keyword/keyphrase, or `value_counts()` on a column — to gauge
-           how common an item or attribute is (if "plastic" appears in 60% of rows but "marble" in
-           2%, plastic items are far more common). This informs the selectivity of your filters, the
-           size of the tables feeding a join, and the class distribution of a classification/search
-           task (a rare target vs. common groups) — let it GUIDE how you design plans. Keep
-           exploration lightweight: do NOT run excessive regex/brute-force scans, and never use the
-           data to solve the query and reverse-engineer a plan; the plan must remain a general solution.
-           If the dataset has an `images/` folder, you can SEE a few product images with
-           `explore_images(ids, question=None)` (up to 5, selected by the dataset's image id column) — useful to
-           judge what a vision operator would work with. Pass `question` to ask the describer a natural-language
-           question it must address for every image, on top of its default description. Images are shown once
-           and are costly, so inspect just a couple.
-        2. Write a plan with `write_plan(code, name, description, optimizations)`.
-           - `code` builds a PhysicalPipeline instance and returns it as the last expression.
-           - `name` is a string identifier you choose, e.g. "p1", "p2", "p3", ...
-             Use a NEW unique name for each new plan — never reuse a name for a different plan.
-           - ALWAYS pass `optimizations`, recording which optimizations this plan uses and how far
-             each one is pushed (see the write_plan tool description). This is how the record of
-             what you have and have not tried stays legible across plans.
-           - NEVER hardcode row IDs, indexes, or values copied from `explore_sample`/`explore_data`
-             output to identify specific records (e.g. `filter(lambda row: row["id"] in [3, 17, 42])`
-             is cheating and invalid). What you learn from exploration may only shape HOW you build a
-             general plan, not which records it targets.
-           - DO use `sem_filter` / `sem_map` for conditions that need semantic judgment, and prefer
-             deterministic, free Python/regex functions in plain `filter` / `map` when a condition
-             can be expressed that way — e.g. `filter(lambda row: row["score"] >= 4)`,
-             `filter(lambda row: row["description"].isin(["settee", "sofa", "couch"]))`, or
-             `map(lambda row: {"red_freq_count": row["description"].str.count("red")}, ...)`.
-             These are general (they don't depend on which specific rows exist) and cost nothing to
-             run, unlike a semantic op.
-           - `plans[name]["plan"]` is populated immediately — call `estimate_plan_cost(plans[name]["plan"])`
-             right after `write_plan` to get a pre-execution cost estimate.
-        3. Execute with `execute_plan(name)`:
-           - Runs on a reproducible sample of records (same records across all plans).
-           - Appends plan-level stats to `plan_results` (cost_usd, latency_s, tokens, quality).
-           - Appends per-operator stats to `op_results` (cost_usd, latency_s, tokens, num_records per op).
-           - After execution, `plans[name]["plan"]` is updated with the executed PhysicalPipeline.
-        4. Evaluate with `plan_results.df` and `op_results.df`:
-           - `quality`: 0–1 overall plan quality evaluated by an oracle. Higher is better.
-             Treat oracle quality scores as ground truth — do not try to replicate or
-             reverse-engineer the oracle; simply observe and optimize.
-           - `quality_counts`: the TP/FP/FN/TN counts behind `quality`, for metrics built from counts.
-           <per_op_quality>
-           - `per_sem_op_quality`: per-semantic-operator quality (0–1). Use to diagnose
-             which operator is the bottleneck.
-           </per_op_quality>
-
-        Then, iteratively write new plans, estimate their cost, and execute the most promising ones:
-        - Use `plan_results.df` and `op_results.df` to identify quality and cost/latency trade-offs
-            -- `plan_results.df` includes operator descriptions; use `get_op_samples(plan_name, op_name)`
-               (one operator name, or a list of them) to view input/output pairs
-            -- `op_results.df` includes per-operator performances, operators are named by `name_op1`, `name_op2`, ...
-        - Always use `estimate_plan_cost(plans[name]["plan"])` to get cost/latency estimates BEFORE executing promising plans.
-            -- the cost model averages past execution to get per-operator cost/latency estimates
-            -- thus, only changing a few operators for each plan writing will produce more comparable estimations
-        """)
-
-    customCost_briefing = textwrap.dedent("""\
-        You are a query plan engineer optimizing physical plans for an optimized deep-research query system.
-        Physical query plans are trees of operators (semantic filters, maps, joins,
-        aggregations, scans, projects). Some operators call LLMs and cost real
-        dollars and seconds.
-
-        Your goal is to search for the physical plan with the best cost/latency-quality trade-off.
-        Do not hard code the plan.
-
-        You do NOT build or run a cost model. A separate cost helper maintains it for you:
-        after each `execute_plan` it refreshes cost/latency ESTIMATES for all your plans and shows
-        them to you automatically; you can also request them anytime with `review_plans()`. Treat
-        estimates as RELATIVE signals for ranking candidate plans — absolute values may be inaccurate.
-        Focus entirely on writing and choosing good plans.
-
-        === Bootstrap ===
-        1. Explore the data: call `list_files()` to see available CSVs and folders,
-           `explore_schema(filename)` and `explore_sample(filename)` to understand each table's
-           columns and format. You ALSO have direct access to the full CSVs via `explore_data(filename)`,
-           which returns the whole table as a DataFrame. Use it to compute AGGREGATE statistics —
-           e.g. how many rows contain a keyword/keyphrase, or `value_counts()` on a column — to gauge
-           how common an item or attribute is (if "plastic" appears in 60% of rows but "marble" in
-           2%, plastic items are far more common). This informs the selectivity of your filters, the
-           size of the tables feeding a join, and the class distribution of a classification/search
-           task (a rare target vs. common groups) — let it GUIDE how you design plans. Keep
-           exploration lightweight: do NOT run excessive regex/brute-force scans, and never use the
-           data to solve the query and reverse-engineer a plan; the plan must remain a general solution.
-           If the dataset has an `images/` folder, you can SEE a few product images with
-           `explore_images(ids, question=None)` (up to 5, selected by the dataset's image id column) — useful to
-           judge what a vision operator would work with. Pass `question` to ask the describer a natural-language
-           question it must address for every image, on top of its default description. Images are shown once
-           and are costly, so inspect just a couple.
-        2. Write 1–2 baseline plans with `write_plan(code, name, description, optimizations)` that
-           capture meaningfully different design approaches (e.g., one with a strong early filter, one
-           without; one using a capable model, one using a cheaper model). Give each a short
-           `description` of its approach/optimizations — it appears in the estimate tables.
-           - `code` builds a PhysicalPipeline instance and returns it as the last expression.
-           - `name` is a NEW unique string identifier (e.g. "p1", "p2", ...) — never reuse a name.
-           - ALWAYS pass `optimizations`, recording which optimizations this plan uses and how far
-             each one is pushed (see the write_plan tool description). This is how the record of
-             what you have and have not tried stays legible across plans.
-           - NEVER hardcode row IDs, indexes, or values copied from `explore_sample`/`explore_data`
-             output to identify specific records (e.g. `filter(lambda row: row["id"] in [3, 17, 42])`
-             is cheating and invalid). What you learn from exploration may only shape HOW you build a
-             general plan, not which records it targets.
-           - DO use `sem_filter` / `sem_map` for conditions that need semantic judgment, and prefer
-             deterministic, free Python/regex functions in plain `filter` / `map` when a condition
-             can be expressed that way — e.g. `filter(lambda row: row["score"] >= 4)`,
-             `filter(lambda row: row["description"].isin(["settee", "sofa", "couch"]))`, or
-             `map(lambda row: {"red_freq_count": row["description"].str.count("red")}, ...)`.
-             These are general (they don't depend on which specific rows exist) and cost nothing to
-             run, unlike a semantic op.
-        3. Execute the baseline plans with `execute_plan(name)`:
-           - Runs on a reproducible sample of records (same records across all plans).
-           - Appends plan-level stats to `plan_results` and per-operator stats to `op_results`.
-           - After the first execution, the cost helper builds a cost model and an estimate table
-             appears — use it to guide the rest of your search.
-        4. Evaluate with `plan_results.df` and `op_results.df`:
-           - `quality`: 0–1 overall plan quality evaluated by an oracle. Higher is better.
-             Treat oracle quality scores as ground truth — do not try to replicate or
-             reverse-engineer the oracle; simply observe and optimize.
-           - `quality_counts`: the TP/FP/FN/TN counts behind `quality`, for metrics built from counts.
-           <per_op_quality>
-           - `per_sem_op_quality`: per-semantic-operator quality (0–1). Use to diagnose
-             which operator is the bottleneck.
-           </per_op_quality>
-           - Use `get_op_samples(plan_name, op_name)` — one operator name, or a list of them — to
-             inspect input/output pairs.
-
-        === Iterate (flexible) ===
-        Work in whatever order the estimates suggest — there is no fixed cycle. In general:
-        - Write candidate plans that embody DIFFERENT optimization ideas AND their COMBINATIONS,
-          each with a clear `description`. Levers include: swapping to a cheaper/faster model,
-          narrowing `depends_on` to fewer columns, truncating long text with a `map` before a
-          semantic op, reordering to push selective filters earlier, removing images, or changing
-          the logical structure.
-        - Use `review_plans()` (or the auto-refreshed table) to compare candidates against each
-          other and against your executed plans, then execute the 1–2 most promising. You may
-          execute any earlier written-but-unexecuted plan at any time when the estimates now
-          favor it (keep a backlog of ideas rather than discarding them).
-        - Do NOT rabbit-hole on fine-tuning a single knob (e.g. the exact truncation length):
-          we run on a small subsample and micro-tuning is inefficient and prone to overfitting.
-        - When a candidate uses an operator/model with no observed data yet, its estimate is
-          marked `extrap?=yes` — lean toward executing such a plan to gather real data rather
-          than fully trusting the estimate.
-        - Stop and give your final answer when the estimated gains over your current best plan
-          are marginal, or you run low on steps.
-    """)
-
-    execute_final_answer_doc = textwrap.dedent("""\
+    final_answer_doc = textwrap.dedent("""\
         Emit a JSON object summarizing the best plan:
           {
             "best_plan": {
@@ -362,19 +175,6 @@ class CostModelAgent:
             }
           }
         Use plain JSON literals only (no python expressions, no trailing commas).""")
-
-    sampleCost_final_answer_doc = textwrap.dedent("""\
-        Emit a JSON object with the best plan and a cost-model explanation:
-          {
-            "best_plan": {
-              "name": "p1",
-              "rationale": "why this plan wins (cost/quality trade-off)"
-            },
-            "cost_model_explanation": "1-4 sentences on how the cost model guided your plan design. Which operators or models were cheapest/fastest?"
-          }
-        Use plain JSON literals only (no python expressions, no trailing commas).""")
-
-    customCost_final_answer_doc = sampleCost_final_answer_doc
 
     def __init__(
         self,
@@ -394,8 +194,6 @@ class CostModelAgent:
         use_oracle_ground_truth: bool = True,
         oracle_operator_quality: bool = True,
         per_operator_info: bool = True,
-        helper_model: str | None = None,
-        helper_reasoning_effort: str | None = "medium",
         use_checker: bool = True,
         checker_model: str | None = None,
         checker_reasoning_effort: str | None = "high",
@@ -424,11 +222,6 @@ class CostModelAgent:
                 "quality is per-operator information."
             )
         self.per_operator_info = per_operator_info
-        # customCost mode offloads cost-model authoring to a CostHelperAgent that
-        # ALWAYS runs on its own OpenRouterClient (never the main llm). Defaults to
-        # the main model id if none is given; run() errors if neither is resolvable.
-        self.helper_model = helper_model
-        self.helper_reasoning_effort = helper_reasoning_effort
         # The exploration checker reviews how well the optimization space has been explored:
         # after every `checker_every` executions, and once when the agent tries to finish. Its
         # model defaults to the main agent's. `max_checker_vetoes` bounds how many times it may
@@ -468,7 +261,6 @@ class CostModelAgent:
         self.opt_latency: float = 0.0
         self.execution_cost_usd: float = 0.0
         self.oracle_cost_usd: float = 0.0
-        self.helper_cost_usd: float = 0.0
         self.checker_cost_usd: float = 0.0
         self.checker_checks: list[dict] = []
         self.checker_vetoes: int = 0
@@ -532,15 +324,6 @@ class CostModelAgent:
         out.write_text(json.dumps(self.checker_checks, indent=2, default=str))
         self._log(f"[run] exploration checks → {out}")
 
-    def _save_cost_model_codes(self, codes: dict, query_info: dict) -> None:
-        """Save all versioned cost model code strings to
-        {results_prefix}/costModel/Q{id}_{rc}.json."""
-        if not codes:
-            return
-        out = self._run_artifact("costModel", query_info, ".json")
-        out.write_text(json.dumps(codes, indent=2, default=str))
-        self._log(f"[run] cost model codes → {out}")
-
     def _save_results_df(
         self, results: ResultsStore, query_info: dict, final_answer: dict | None = None
     ) -> None:
@@ -562,33 +345,9 @@ class CostModelAgent:
         self._log(f"[run] results table → {out}")
 
     # -- prompt assembly ---------------------------------------------------
-    def _system_prompt(
-        self,
-        tools: list[Tool],
-        briefing: str | None = None,
-        final_answer_doc: str | None = None,
-        mode: str = "",
-        eval_metric: str | None = None,
-    ) -> str:
-        if "customCost" in mode:
-            estimate_rule = (
-                "### Cost estimates\n"
-                "You do NOT build or run the cost model — a cost helper does. Call `review_plans()` to get\n"
-                "estimated cost/latency for your candidate plans (with actuals for executed ones); the same\n"
-                "table is also refreshed automatically after each `execute_plan`. Use these as RELATIVE\n"
-                "signals to decide which plans are worth executing — check them before executing."
-            )
-        elif "sampleCost" in mode:
-            estimate_rule = (
-                "### Estimate before executing\n"
-                "Once a cost model is installed, you MUST call `compare_plan_costs` on all new candidate plans\n"
-                "before executing any of them. Executing a plan without first consulting cost estimates wastes\n"
-                "budget steps and defeats the purpose of the cost model."
-            )
-        else:
-            estimate_rule = ""
+    def _system_prompt(self, tools: list[Tool], eval_metric: str | None = None) -> str:
         return _per_op_info_text(_per_op_quality_text(_SYSTEM_TEMPLATE.format(
-            briefing=briefing if briefing is not None else self.briefing,
+            briefing=self.briefing,
             quality_metric=_quality_metric_section(eval_metric),
             tools_doc="\n\n".join(t.doc for t in tools),
             physical_sem_ops="\n".join(f"- {d}" for d in _PHYSICAL_SEMANTIC_OPERATORS.values()),
@@ -596,8 +355,7 @@ class CostModelAgent:
             available_models=_AVAILABLE_MODELS_TEXT,
             max_steps=self.max_steps,
             cost_awareness=_COST_AWARENESS if self.cost_aware_opt else "",
-            final_answer_doc=final_answer_doc if final_answer_doc is not None else self.final_answer_doc,
-            estimate_rule=estimate_rule,
+            final_answer_doc=self.final_answer_doc,
         ), self.oracle_operator_quality), self.per_operator_info)
 
     def _opening_message(self, task: str, plans: dict, results: ResultsStore) -> str:
@@ -654,26 +412,19 @@ class CostModelAgent:
         plans: dict,
         plan_results: ResultsStore,
         op_results: ResultsStore,
-        mode: str,
         query_info: dict,
     ) -> _RunContext:
         """Wire up everything the loop needs and reset per-run state.
 
         Patches litellm→OpenRouter, builds the oracle/quality evaluator, seeds the sandbox
-        variables + mode-specific tools, constructs the cost helper (customCost only), builds
-        the system prompt, and resets `self.messages`/cost accumulators. Returns the handful of
-        objects `run`'s loop consumes.
+        variables + tools, constructs the exploration checker, builds the system prompt, and
+        resets `self.messages`/cost accumulators. Returns the handful of objects `run`'s loop
+        consumes.
         """
-        if not self.per_operator_info and ("customCost" in mode or "sampleCost" in mode):
-            raise ValueError(
-                f"per_operator_info=False is not supported in mode {mode!r}: its cost model is "
-                "fit on per-operator results."
-            )
         patch_litellm_for_openrouter()
 
         from agent_cost_model.opt_agent.local_python_executor import LocalPythonExecutor
 
-        registry = CostModelRegistry()
         plan_codes: dict = {}  # populated by WritePlanTool; shared with ExecutePlanTool
         data_dir = query_info["data_dir"]
         # The dataset's row-identifier column, declared by the benchmark (see run_opt.py).
@@ -774,8 +525,8 @@ class CostModelAgent:
             # query plans can never depend on directly scanning the dataset.
             return pd.read_csv(os.path.join(data_dir, filename))
 
-        # Main-loop sandbox variables: inspection stores + operator/cost introspection + direct
-        # CSV access for data exploration (explore_data). Intentionally EXCLUDES the plan-building
+        # Main-loop sandbox variables: inspection stores + operator introspection + direct CSV
+        # access for data exploration (explore_data). Intentionally EXCLUDES the plan-building
         # helpers (load_data/add_image_data/PhysicalPipeline/pz) — those live only in the minimal
         # plan-construction sandbox below.
         variables = {
@@ -785,20 +536,14 @@ class CostModelAgent:
             "plan_results": plan_results,
             "iter_operators": iter_operators,
             "get_op_type": get_op_type,
-            "get_op_id": get_op_id,
-            "get_op_model": get_op_model,
-            "describe_operator": describe_operator,
         }
         if self.per_operator_info:
-            variables.update({
-                "op_results": op_results,
-                "observed_op_stats": make_observed_op_stats(op_results),
-            })
+            variables["op_results"] = op_results
 
         # Minimal sandbox variables for WritePlanTool: only what plan CODE needs to construct a
         # PhysicalPipeline — the source-table reader (required by PhysicalPipeline.__init__ for
         # schema inference), the image helper, the pipeline class, and palimpzest (pz.Model /
-        # pz.ImageFilepath). No results stores, no cost-model introspection, no explore_data.
+        # pz.ImageFilepath). No results stores, no operator introspection, no explore_data.
         plan_variables = {
             "load_data": load_data,
             "add_image_data": add_image_data,
@@ -843,48 +588,6 @@ class CostModelAgent:
             ),
         ]
 
-        cost_helper: CostHelperAgent | None = None
-        if "customCost" in mode:
-            # Cost-model authoring + estimation is fully offloaded to the helper.
-            # The main agent gets NO estimate/compare/update tools and no registry.
-            helper_model = self.helper_model or getattr(self.llm, "model", None)
-            if not helper_model:
-                raise ValueError(
-                    "customCost mode requires a helper LLM model id: pass helper_model=... "
-                    "to CostModelAgent, or use an OpenRouterClient main llm exposing `.model`."
-                )
-            helper_llm = OpenRouterClient(helper_model, reasoning_effort=self.helper_reasoning_effort)
-            cost_helper = CostHelperAgent(
-                helper_llm,
-                registry=registry,
-                plans=plans,
-                plan_results=plan_results,
-                op_results=op_results,
-                task=task,
-                use_case=query_info["use_case"],
-                agent_dir=self.agent_dir,
-                verbose=self.verbose,
-            )
-            base_tools += [ReviewPlansTool(cost_helper)]
-            briefing = self.customCost_briefing
-            final_answer_doc = self.customCost_final_answer_doc
-        elif "execute" in mode:
-            briefing = self.execute_briefing
-            final_answer_doc = self.execute_final_answer_doc
-        elif "sampleCost" in mode:
-            try:
-                from agent_cost_model.sample_based_cost_model import SampleBasedCostModel
-            except ImportError:
-                from agent_cost_model.sample_based_cost_model import SampleBasedCostModel  # type: ignore
-            registry.install(SampleBasedCostModel(op_results), notes="v0: SampleBasedCostModel pre-installed")
-            base_tools += [EstimatePlanCostTool(registry)]
-            variables.update({
-                "PlanCostEstimate": PlanCostEstimate,
-                "SampleBasedCostModel": SampleBasedCostModel,
-            })
-            briefing = self.sampleCost_briefing
-            final_answer_doc = self.sampleCost_final_answer_doc
-
         # Main-loop sandbox: the agent's step-by-step python blocks run here.
         executor = LocalPythonExecutor(additional_authorized_imports=self.authorized_imports)
         executor.send_variables(variables)
@@ -908,8 +611,8 @@ class CostModelAgent:
         # has_ground_truth) instead of the engine reassembling the steps itself.
         self._quality_evaluator = quality_evaluator
 
-        # The exploration checker is orthogonal to cost modelling — it reviews the SEARCH, not
-        # the plans' estimated cost — so it is wired up the same way in every mode.
+        # The exploration checker reviews the SEARCH -- which optimizations have been tried --
+        # not any individual plan.
         checker: ExplorationCheckerAgent | None = None
         if self.use_checker:
             checker_model = self.checker_model or getattr(self.llm, "model", None)
@@ -932,9 +635,7 @@ class CostModelAgent:
         tools = base_tools + [write_plan_tool]
         executor.send_tools({t.name: t for t in tools})
 
-        system = self._system_prompt(
-            tools, briefing, final_answer_doc, mode=mode, eval_metric=query_info.get("eval_metric")
-        )
+        system = self._system_prompt(tools, eval_metric=query_info.get("eval_metric"))
         opening = self._opening_message(task, plans, plan_results)
         self.messages = [{"role": "user", "content": opening}]
         self.reasoning_steps = []
@@ -945,7 +646,6 @@ class CostModelAgent:
         self.opt_latency = 0.0
         self.execution_cost_usd = 0.0
         self.oracle_cost_usd = 0.0
-        self.helper_cost_usd = 0.0
         self.checker_cost_usd = 0.0
         self.checker_checks = []
         self.checker_vetoes = 0
@@ -962,8 +662,7 @@ class CostModelAgent:
         self._log(f"=== task ===\n{opening}\n")
 
         self._ctx = _RunContext(
-            executor=executor, system=system, registry=registry,
-            cost_helper=cost_helper, checker=checker,
+            executor=executor, system=system, checker=checker,
             quality_evaluator=quality_evaluator, plan_codes=plan_codes,
         )
         return self._ctx
@@ -972,18 +671,15 @@ class CostModelAgent:
         self,
         plan_results: ResultsStore,
         quality_evaluator: Any,
-        cost_helper: "CostHelperAgent | None",
         checker: "ExplorationCheckerAgent | None" = None,
     ) -> None:
-        """Roll up the per-run cost totals (subset execution, oracle, helper, checker) onto the
+        """Roll up the per-run cost totals (subset execution, oracle, checker) onto the
         instance."""
         self.execution_cost_usd = sum(float(r.get("cost_usd", 0.0) or 0.0) for r in plan_results.rows)
         self.oracle_cost_usd = (
             float(getattr(quality_evaluator, "total_oracle_cost_usd", 0.0) or 0.0)
             if quality_evaluator is not None else 0.0
         )
-        if cost_helper is not None:
-            self.helper_cost_usd = cost_helper.cost_usd
         if checker is not None:
             self.checker_cost_usd = checker.cost_usd
             self.checker_checks = list(checker.checks)
@@ -1057,7 +753,7 @@ class CostModelAgent:
         `commit=False` reads without closing the step, for a sub-agent that is about to run and
         so cannot be shown its own cost: the step stays open and whatever that sub-agent spends
         still lands in this step's delta when the step is finally committed."""
-        self._account_costs(plan_results, ctx.quality_evaluator, ctx.cost_helper, ctx.checker)
+        self._account_costs(plan_results, ctx.quality_evaluator, ctx.checker)
         self._attribute_plan_costs(plan_results)
         total = self._total_opt_cost()
         step_cost = total - self._prev_opt_cost
@@ -1083,7 +779,7 @@ class CostModelAgent:
     def _attribute_plan_costs(self, plan_results: ResultsStore) -> None:
         """Bill the core agent, oracle and subset-execution spend since the last call to the plans
         this step wrote (write_plan stores a new entry) or executed, split evenly. A step that
-        touched no plan bills nothing; checker and cost-helper spend is never billed to a plan."""
+        touched no plan bills nothing; checker spend is never billed to a plan."""
         base = self.agent_cost_usd + self.oracle_cost_usd + self.execution_cost_usd
         delta = base - self._prev_plan_cost_base
         self._prev_plan_cost_base = base
@@ -1127,11 +823,11 @@ class CostModelAgent:
         """Close the step with the budget line, as the LAST thing the agent sees before its next
         turn.
 
-        Last, not folded into the observation, because the cost helper and the exploration
-        checker run AFTER the observation is handed over: closing the step here is what bills
-        their spend to the step that actually triggered them, instead of to the next one. The
-        step is committed either way -- when the run is not cost-aware, only the trajectory
-        columns are written and the agent is shown nothing."""
+        Last, not folded into the observation, because the exploration checker runs AFTER the
+        observation is handed over: closing the step here is what bills its spend to the step
+        that actually triggered it, instead of to the next one. The step is committed either
+        way -- when the run is not cost-aware, only the trajectory columns are written and the
+        agent is shown nothing."""
         budget = self._cost_snapshot(ctx, plan_results)
         footer = self._cost_footer(budget)
         if not footer:
@@ -1150,7 +846,6 @@ class CostModelAgent:
         plan_results: ResultsStore,
         op_results: ResultsStore,
         *,
-        mode: str,
         query_info: dict | None = None,
     ) -> Any:
         """Search for the best plan and return the JSON final answer.
@@ -1176,7 +871,7 @@ class CostModelAgent:
         query_info = query_info if query_info is not None else {}
         try:
             return self._run_search(
-                task, plans, plan_results, op_results, mode=mode, query_info=query_info
+                task, plans, plan_results, op_results, query_info=query_info
             )
         except Exception as exc:
             run_log.log_error("fatal", f"{type(exc).__name__}: {exc}", exc=exc)
@@ -1217,7 +912,6 @@ class CostModelAgent:
         plan_results: ResultsStore,
         op_results: ResultsStore,
         *,
-        mode: str,
         query_info: dict,
     ) -> Any:
         """Bounded tool loop over `plans`/`plan_results`/`op_results`, returning the JSON final
@@ -1227,22 +921,19 @@ class CostModelAgent:
         optimization_start = run_log.start_run(
             self._run_artifact("error_logs", query_info, ".txt"),
             f"Q{query_info.get('query_id')} rc={query_info.get('runcount')} "
-            f"{self.use_case} {mode}",
+            f"{self.use_case} {self.agent_dir}",
         )
         self._optimization_start = optimization_start
         # Cleared before setup, not after: a run whose setup fails has nothing to save, and a
         # previous run's context must never be mistaken for this one's.
         self._ctx, self._run_saved, self._current_step = None, False, 0
 
-        ctx = self._setup_run(task, plans, plan_results, op_results, mode, query_info)
+        ctx = self._setup_run(task, plans, plan_results, op_results, query_info)
         # Only what the loop itself touches is unpacked; everything the teardown needs
         # (quality_evaluator, plan_codes) is read off `ctx` in `_finish_run`.
-        executor, system, registry = ctx.executor, ctx.system, ctx.registry
-        cost_helper, checker = ctx.cost_helper, ctx.checker
+        executor, system, checker = ctx.executor, ctx.system, ctx.checker
 
-        prev_plan_rows = len(plan_results.rows)  # detect execution batches to trigger the helper
-        helper_consumed = 0  # cost-helper trajectory rows already merged into the main trajectory
-        checker_consumed = 0  # same, for the exploration checker
+        checker_consumed = 0  # exploration-checker trajectory rows already merged into the main one
         checked_plan_rows = len(plan_results.rows)  # executions as of the last exploration check
         step = 0
         while step < self.max_steps:
@@ -1322,7 +1013,7 @@ class CostModelAgent:
                 self.trajectory_steps[-1]["observation"] = f"[final answer] {parsed.result}"
                 return self._finish_run(
                     parsed.result, ctx, plans, plan_results, query_info, step,
-                    helper_consumed=helper_consumed, checker_consumed=checker_consumed,
+                    checker_consumed=checker_consumed,
                 )
 
             # execute the python tool-call block
@@ -1352,26 +1043,6 @@ class CostModelAgent:
                 obs = f"{obs}\n\nImage descriptions (auto-generated) for ids {shown_ids}:\n{description}"
             self._observe(obs)
 
-            # After an execution batch (plan_results grew — only ExecutePlanTool appends
-            # there), auto-invoke the cost helper: it decides whether to (re)fit the cost
-            # model and returns fresh estimate-vs-actual signal for the main agent.
-            if cost_helper is not None and len(plan_results.rows) > prev_plan_rows:
-                prev_plan_rows = len(plan_results.rows)
-                reason = "bootstrap" if registry.version == 0 else "post-batch"
-                try:
-                    table = cost_helper.review(reason=reason)
-                except Exception as e:
-                    run_log.log_error(
-                        "cost-helper", f"{type(e).__name__}: {e}", content=f"reason={reason}", exc=e
-                    )
-                    table = f"[cost-helper error: {type(e).__name__}: {e}]"
-                helper_obs = f"[cost estimates refreshed after execution]\n{table}"
-                self.messages.append({"role": "user", "content": helper_obs})
-                self.trajectory_steps[-1]["observation"] = (
-                    (self.trajectory_steps[-1]["observation"] or "") + "\n\n" + helper_obs
-                )
-                self._log(helper_obs)
-
             # Every `checker_every` executions, review how well the optimization space has been
             # explored and pass any gap back to the agent as ordinary feedback. Counted in
             # EXECUTIONS, not steps: exploring the space means running plans, not writing them.
@@ -1394,15 +1065,12 @@ class CostModelAgent:
                     )
                     self._log(check_obs)
 
-            # Close the step only now: the cost helper and the exploration check above both
-            # spend, and both were triggered by THIS step.
+            # Close the step only now: the exploration check above spends, and was triggered by
+            # THIS step.
             self._budget_turn(ctx, plan_results)
 
-            # interleave any sub-agent rows generated during this step (via review_plans, the
-            # post-execution auto-invoke, or the exploration check) into the shared trajectory
-            helper_consumed = self._merge_sub_agent_trajectory(
-                cost_helper, "cost_helper", step, helper_consumed
-            )
+            # interleave any exploration-checker rows generated during this step into the shared
+            # trajectory
             checker_consumed = self._merge_sub_agent_trajectory(
                 checker, "exploration_checker", step, checker_consumed
             )
@@ -1413,7 +1081,7 @@ class CostModelAgent:
         self.opt_latency = time.time() - optimization_start
         return self._finish_run(
             result, ctx, plans, plan_results, query_info, step,
-            helper_consumed=helper_consumed, checker_consumed=checker_consumed,
+            checker_consumed=checker_consumed,
         )
 
     def _finish_run(
@@ -1425,7 +1093,6 @@ class CostModelAgent:
         query_info: dict,
         step: int,
         *,
-        helper_consumed: int = 0,
         checker_consumed: int = 0,
     ) -> Any:
         """Roll up costs, annotate the final answer, and save everything the run produced.
@@ -1438,7 +1105,7 @@ class CostModelAgent:
         `self.opt_latency` is set by the caller: it ends at the accepted answer, not here.
         """
         self._run_saved = True
-        self._account_costs(plan_results, ctx.quality_evaluator, ctx.cost_helper, ctx.checker)
+        self._account_costs(plan_results, ctx.quality_evaluator, ctx.checker)
         if isinstance(result, dict):
             result["plan_codes"] = ctx.plan_codes
             result["plan_descriptions"] = {name: entry.get("description", "") for name, entry in plans.items()}
@@ -1446,12 +1113,9 @@ class CostModelAgent:
             # Model settings and spend for every actor, including the core agent's own.
             result.update(self._run_config())
         self._save_results_df(plan_results, query_info, final_answer=result)
-        self._merge_sub_agent_trajectory(ctx.cost_helper, "cost_helper", step, helper_consumed)
         self._merge_sub_agent_trajectory(ctx.checker, "exploration_checker", step, checker_consumed)
         self._save_trajectory_df(query_info)
         self._save_exploration_checks(query_info)
-        if ctx.cost_helper is not None:
-            self._save_cost_model_codes(ctx.cost_helper.model_versions, query_info)
         self._run_final_evaluation(result, plans, query_info, ctx.plan_codes, plan_results)
         return result
 

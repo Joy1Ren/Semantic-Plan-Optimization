@@ -450,7 +450,7 @@ class PhysicalPipeline:
         return self
 
     # ------------------------------------------------------------------
-    # Plan introspection (compatible with cost_model_agent inspect_plan)
+    # Plan introspection (used by iter_operators in cost_model_types)
     # ------------------------------------------------------------------
 
     def __iter__(self):
@@ -888,7 +888,7 @@ class PhysicalPipeline:
 
         num_records: number of input records the operator processed.
         num_passed:  number that passed (equal to num_records for non-filter ops).
-        op_id:       alias for params_id; used by SampleBasedCostModel for lookup.
+        op_id:       alias for params_id.
 
         plan_dict keys (each value is a single scalar):
             cost_usd, latency_s, input_tokens, output_tokens
@@ -1007,7 +1007,7 @@ class PhysicalPipeline:
 
         Returns (per_op_list, SubsetExecutionContext, plan_dict).
         per_op_list: same schema as run() but stats are from the subset; each op's
-          latency_s is a SUM of per-record times (serial-equivalent; used by the cost model).
+          latency_s is a SUM of per-record times (serial-equivalent).
         SubsetExecutionContext: sampled records, output records, and per-op samples
           (all operators, semantic and non-semantic) for use by QualityEvaluator and get_op_samples.
         plan_dict: plan-level totals; plan_dict["latency_s"] is the WALL-CLOCK time of the
@@ -1169,7 +1169,7 @@ class PhysicalPipeline:
         # plan_dict mirrors run(): latency_s is the WALL-CLOCK time of the subset
         # _execute_core (real elapsed time, reflecting parallelism), as opposed to the
         # per-op latency_s in per_op_list, which is a SUM of per-record times (serial-
-        # equivalent, used by the cost model). Callers that want to report the real
+        # equivalent). Callers that want to report the real
         # subset execution time should use plan_dict["latency_s"].
         plan_dict = {
             "plan_name": self.plan_name,
