@@ -150,7 +150,7 @@ use_cases:
       "10": |-
         You are given the full text of one legal contract.
 
-        Return this contract only if its Renewal Term is for successive periods.
+        Return this contract only if its Renewal Term is for successive periods, with no limit on the number of renewals.
         Renewal Term: What is the renewal term after the initial term expires? This includes automatic extensions and
         unilateral extensions with prior notice.
 
@@ -234,9 +234,9 @@ use_cases:
         You are given the full text of one legal contract.
 
         Return this contract only if BOTH of these hold:
-          1. its Renewal Term is for successive periods. Renewal Term: What is the renewal term
-             after the initial term expires? This includes automatic extensions and unilateral
-             extensions with prior notice.
+          1. its Renewal Term is for successive periods, with no limit on the number of renewals.
+             Renewal Term: What is the renewal term after the initial term expires? This includes
+             automatic extensions and unilateral extensions with prior notice.
           2. its Notice Period to Terminate Renewal is at least 90 days, counting a month as 30
              days. Notice Period to Terminate Renewal: What is the notice period required to
              terminate renewal?

@@ -12,7 +12,7 @@
 "1": |
   pipe = PhysicalPipeline(plan_name, "contracts", load_data(source_csv))
   pipe.sem_map(
-      cols=[{"name": "answer", "type": int, "description": "The number of parties that signed the contract (the entities with signature blocks, not every company the contract names). A single integer, e.g. 2."}],
+      cols=[{"name": "answer", "type": int, "description": "The number of Parties: the two or more parties who signed the contract. A single integer, e.g. 2."}],
       model=pz.Model.GPT_4o_MINI,
       depends_on=["document"],
   )
@@ -23,7 +23,7 @@
 "2": |
   pipe = PhysicalPipeline(plan_name, "contracts", load_data(source_csv))
   pipe.sem_filter(
-      "More than two parties signed this contract. Count the entities that signed it, not every company it names.",
+      "This contract has more than two Parties. Parties: the two or more parties who signed the contract.",
       model=pz.Model.GPT_4o_MINI,
       depends_on=["document"],
   )
@@ -131,7 +131,7 @@
   pipe = PhysicalPipeline(plan_name, "contracts", load_data(source_csv))
   pipe.sem_map(
       cols=[
-          {"name": "qualifies", "type": bool, "description": "True if this contract renews indefinitely: it keeps renewing for one period after another until a party stops it. A contract that renews a set number of times, or not at all, does not qualify."},
+          {"name": "qualifies", "type": bool, "description": "True if this contract's Renewal Term is for successive periods, with no limit on the number of renewals. Renewal Term: What is the renewal term after the initial term expires? This includes automatic extensions and unilateral extensions with prior notice."},
           {"name": "reason", "type": str, "description": "If it qualifies, the full sentence(s) from the contract that say it renews, quoted verbatim. Otherwise empty."},
       ],
       model=pz.Model.GPT_4o_MINI,
@@ -192,7 +192,7 @@
 "15": |
   pipe = PhysicalPipeline(plan_name, "contracts", load_data(source_csv))
   pipe.sem_filter(
-      "Both hold: (1) more than two parties signed this contract, counting the entities that signed it; (2) New York law governs it.",
+      "Both hold: (1) the contract has more than two Parties: the two or more parties who signed the contract; (2) New York law governs it.",
       model=pz.Model.GPT_4o_MINI,
       depends_on=["document"],
   )
@@ -214,7 +214,7 @@
 "17": |
   pipe = PhysicalPipeline(plan_name, "contracts", load_data(source_csv))
   pipe.sem_filter(
-      "Both hold: (1) the contract renews indefinitely, one period after another until a party stops it; (2) stopping a renewal takes at least 90 days' notice, counting a month as 30 days.",
+      "Both hold: (1) the contract's Renewal Term is for successive periods, with no limit on the number of renewals (Renewal Term: What is the renewal term after the initial term expires? This includes automatic extensions and unilateral extensions with prior notice); (2) its Notice Period to Terminate Renewal is at least 90 days, counting a month as 30 days (Notice Period to Terminate Renewal: What is the notice period required to terminate renewal?).",
       model=pz.Model.GPT_4o_MINI,
       depends_on=["document"],
   )
@@ -247,7 +247,7 @@
 "20": |
   pipe = PhysicalPipeline(plan_name, "contracts", load_data(source_csv))
   pipe.sem_map(
-      cols=[{"name": "answer", "type": int, "description": "The number of parties that signed the contract (the entities with signature blocks, not every company the contract names). A single integer, e.g. 2."}],
+      cols=[{"name": "answer", "type": int, "description": "The number of Parties: the two or more parties who signed the contract. A single integer, e.g. 2."}],
       model=pz.Model.GPT_4o_MINI,
       depends_on=["document"],
   )
