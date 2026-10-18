@@ -93,14 +93,18 @@ def main() -> None:
         raise FileNotFoundError(f"SemBench source data not found: {source_path}")
     destination_dir = DATASET_DIR / "ecomm" / f"sf_{args.scale_factor}"
     destination_dir.mkdir(parents=True, exist_ok=True)
+    # Everything goes to the shared folder; config.expose_query_data copies what a run's query
+    # may see into destination_dir.
+    shared_dir = destination_dir.with_name(f"{destination_dir.name}_shared")
+    shared_dir.mkdir(exist_ok=True)
 
     full_df = pd.read_parquet(source_path).rename(columns={"id": "idx"})
     if not args.no_images:
-        _copy_images(source_dir / "images", destination_dir / "images")
+        _copy_images(source_dir / "images", shared_dir / "images")
     for query_id in args.queries:
         columns = _output_columns(query_id)
         subset = _query_subset(full_df, query_id)[columns]
-        subset.to_csv(destination_dir / f"styles_details_{args.scale_factor}_Q{query_id}.csv", index=False)
+        subset.to_csv(shared_dir / f"styles_details_{args.scale_factor}_Q{query_id}.csv", index=False)
         print(f"Q{query_id}: wrote {len(subset)} rows, columns={columns}")
 
 

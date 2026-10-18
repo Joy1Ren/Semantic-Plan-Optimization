@@ -7,6 +7,7 @@ reader together instead of leaving one behind.
 
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -67,6 +68,11 @@ def load_query(config: dict[str, Any], context: dict[str, Any]) -> tuple[str, st
     Lives here rather than in the runner because the sampler CLI resolves the same query the
     same way -- a subset built from a different prompt than the one the optimizer later runs
     would be silently wrong.
+
+    The PROMPT always comes from `task_prompts`, whatever the source type; `query_source` only
+    says where the query's MODALITIES are declared. So `path` is read for type "toml" (the
+    modalities live in the file's `metadata.modalities`) and is meaningless for type "text",
+    which declares them inline -- do not add one to a text source, since nothing would read it.
     """
     import tomllib
 
@@ -89,6 +95,30 @@ def load_query(config: dict[str, Any], context: dict[str, Any]) -> tuple[str, st
     raise ValueError(f"Unsupported query source type: {source['type']!r}")
 
 
+
+def expose_query_data(config: dict[str, Any], context: dict[str, Any]) -> None:
+    """Make a use case's dataset directory hold only what this query may see.
+
+    Applies to a dataset with a sibling `<directory>_shared` folder, which keeps every query's
+    CSV and the image folder. The dataset directory -- all the agent can see -- gets a copy of
+    this query's CSV, plus the images only if the query's modalities include "image".
+    """
+    dataset = config["dataset"]
+    data_dir = format_path(dataset["directory"], context)
+    shared_dir = data_dir.with_name(f"{data_dir.name}_shared")
+    if not shared_dir.exists():
+        return
+    for csv in data_dir.glob("*.csv"):
+        csv.unlink()
+    source_csv = dataset["source_csv"].format(**context)
+    shutil.copy2(shared_dir / source_csv, data_dir / source_csv)
+    image_subdir = dataset.get("image_subdir", "images")
+    if (shared_dir / image_subdir).exists():
+        shutil.rmtree(data_dir / image_subdir, ignore_errors=True)
+        if "image" in load_query(config, context)[2]:
+            shutil.copytree(shared_dir / image_subdir, data_dir / image_subdir)
+
+
 def results_prefix(
     benchmark: str | Path,
     runner: str,
@@ -99,8 +129,8 @@ def results_prefix(
 ) -> Path:
     """Where one (benchmark, use case, scale factor, query, runner) writes everything it produces.
 
-    The benchmark decides which of use_case/scale_factor/query_id appear: SemBench keys on the
-    first two, CUAD Categories on query_id, CUAD on none. The runner owns the layout below the
+    The benchmark decides which of use_case/scale_factor/query_id appear: SemBench keys on all
+    three, CUAD Categories on query_id, CUAD on none. The runner owns the layout below the
     returned prefix.
     """
     config = load_benchmark(benchmark)
