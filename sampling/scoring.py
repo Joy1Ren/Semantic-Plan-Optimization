@@ -16,6 +16,12 @@ from typing import Sequence
 
 import numpy as np
 
+from agent_cost_model.sampling.constants import (
+    FLAT_DECIMALS,
+    MIDDLE_ANCHOR,
+    NEGATIVE_ANCHOR,
+    TOP_ANCHOR,
+)
 from agent_cost_model.sampling.text import bm25_tokenize, normalize_phrase
 
 __all__ = [
@@ -27,6 +33,8 @@ __all__ = [
     "cosine_scores",
     "combine",
     "select_topk",
+    "select_band",
+    "gradient_bands",
     "percentiles",
 ]
 
@@ -235,6 +243,107 @@ def select_topk(pool: ScoredPool, k: int, exclude: Sequence[str] = ()) -> list[s
         out.append(rid)
         if len(out) == k:
             break
+    return out
+
+
+def gradient_bands(m: int) -> list[tuple[str, int, float]]:
+    """Split an allocation of `m` rows into (band name, count, anchor) triples.
+
+    Half the rows come from the top of the ranking, a quarter from the middle, a quarter from
+    near the bottom. The halving is the policy: the subset should be representative of what the
+    query means, with a slight priority on true hits because those are what give plan quality a
+    gradient to move along.
+
+    The top band is filled first and never emptied, so small allocations degrade to something
+    still usable: m=3 -> 2/1/0, m=1 -> 1/0/0.
+    """
+    if m <= 0:
+        return []
+    top = -(-m // 2)          # ceil
+    rest = m - top
+    middle = -(-rest // 2)
+    negative = rest - middle
+    return [
+        ("top", top, TOP_ANCHOR),
+        ("middle", middle, MIDDLE_ANCHOR),
+        ("negative", negative, NEGATIVE_ANCHOR),
+    ]
+
+
+def _flat_runs(sorted_scores: np.ndarray) -> np.ndarray:
+    """Run index for each position in a descending-sorted score array.
+
+    Two rows belong to the same run when their scores agree to `FLAT_DECIMALS`. `total` is
+    min-maxed into [0,1], so a gap below a thousandth is not a real difference in relevance and
+    the ranking between them is noise rather than signal. Rounding is monotonic, so runs never
+    reorder what `argsort` produced -- it decides only which rows count as tied.
+    """
+    if sorted_scores.size == 0:
+        return np.zeros(0, dtype=int)
+    rounded = np.round(sorted_scores, FLAT_DECIMALS)
+    # A new run starts wherever the rounded score changes.
+    return np.concatenate(([0], np.cumsum(rounded[1:] != rounded[:-1])))
+
+
+def select_band(
+    pool: ScoredPool,
+    n: int,
+    *,
+    anchor: float,
+    exclude: Sequence[str] = (),
+    seed: int = 0,
+) -> list[str]:
+    """`n` ids drawn from around `anchor`, a fraction of the way down the ranking.
+
+    `anchor` is 0.0 for the top of the ranking, 0.5 for the median, 0.9 for the ninetieth
+    percentile. Selection walks DOWN from the anchor, skipping ids in `exclude`, so a row an
+    earlier stratum already claimed hands the slot to the next row down. Running off the bottom
+    continues upward from the anchor rather than returning short.
+
+    When the anchor lands inside a flat run -- rows whose scores are equal to a thousandth --
+    the band is drawn uniformly at random from across that WHOLE run instead. Inside a flat run
+    `argsort` order is just source-CSV order, so walking down would return rows that are
+    neighbours in the file and frequently correlated. This is the common case, not the rare one:
+    a BM25-only stratum leaves most rows at exactly 0.0 after `minmax`, so the bottom third of
+    the ranking can be a single run. Drawing across it samples the region honestly; it does not
+    manufacture resolution the score does not have.
+    """
+    if n <= 0 or not pool.ids:
+        return []
+    order = np.argsort(-pool.total, kind="stable")
+    skip = set(exclude)
+    runs = _flat_runs(pool.total[order])
+    start = int(round(float(anchor) * (len(order) - 1)))
+    start = max(0, min(start, len(order) - 1))
+
+    out: list[str] = []
+    taken: set[int] = set()
+
+    # The run the anchor sits in, sampled as a whole rather than walked.
+    run_positions = np.flatnonzero(runs == runs[start])
+    if run_positions.size > 1:
+        rng = np.random.default_rng(seed)
+        for pos in rng.permutation(run_positions):
+            rid = pool.ids[order[int(pos)]]
+            if rid in skip:
+                continue
+            out.append(rid)
+            taken.add(int(pos))
+            if len(out) == n:
+                return out
+    # Either the anchor was not in a flat run, or its run could not fill the band. Walk down
+    # from the anchor for the rest, then back up if the bottom runs out.
+    for positions in (range(start, len(order)), range(start - 1, -1, -1)):
+        for pos in positions:
+            if pos in taken:
+                continue
+            rid = pool.ids[order[pos]]
+            if rid in skip:
+                continue
+            out.append(rid)
+            taken.add(pos)
+            if len(out) == n:
+                return out
     return out
 
 

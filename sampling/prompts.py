@@ -63,7 +63,15 @@ _SPEC_FIELDS = """\
                        "row[\\"price\\"] <= 500", or null. Use ONLY deterministic column
                        predicates -- comparisons, membership. Never anything requiring an
                        image or free text to be understood; that is what the other fields
-                       are for. The filter runs FIRST and narrows everything after it.
+                       are for.
+                       Its job is to DROP ROWS THAT CARRY NO USABLE SIGNAL for this query:
+                       rows the query's own stated precondition excludes, or rows that cannot
+                       be judged at all because the field the query is about is missing or
+                       empty. It is NOT a relevance filter. Do not use it to narrow the table
+                       to rows you expect to match -- ranking relevance is what the three
+                       scorers are for, and a row that clearly does not match is useful
+                       evidence, not noise. Filtered rows are deleted from the pool outright
+                       and can never be selected or scored. Prefer null when unsure.
   "bm25_query":        a phrase of the distinct, discriminative KEYWORDS to match on. Lexical,
                        not grammatical -- no query framing, no instructions. "" turns BM25 off.
   "keyphrases":        up to a few exact phrases. Each one that appears in a row adds a full
@@ -97,14 +105,18 @@ on any random subset. When that is the case, return every field empty:
 You are NOT expected to always find something to target, and an empty spec is not a failure or
 a non-answer.
 
-Write dense_query as PURELY POSITIVE -- only what you want. Embedding similarity has no notion
-of negation: "a bag that is not green" sits close to green bags, because the embedder still
-keys on "green bag". Drop the excluded thing entirely, or express it as a `filter` instead.
-  good: "a black leather handbag"      bad: "a handbag that is not green"
+Write dense_query as PURELY POSITIVE -- only what you want.Drop the excluded thing entirely, or
+express it as a `filter` instead.
+  good: "a black leather couch"      bad: "a couch that is not green"
   good: "a coffee table"               bad: "a table, excluding desks"
 
 BM25 scores are relative to the rows being ranked, so a term that appears in every row carries
-almost no weight, and a term in no row carries none at all. Prefer distinctive words."""
+almost no weight, and a term in no row carries none at all. Prefer distinctive words.
+
+FILTER NARROWLY OR NOT AT ALL. The sampled subset is what a downstream optimizer measures candidate
+query plans on. A filter that pre-narrows to likely matches throws away useful signal from ambiguous
+rows or clearly negative rows. Only use a filter to remove irrelevant rows (e.g., not the type of
+datapoint that the query is about)."""
 
 
 _STRATA_GUIDANCE = """\
@@ -357,20 +369,55 @@ def render_explore_images(
     return "\n".join(lines)
 
 
-def spec_system(sample_size: int, idx_specification: bool = False) -> str:
-    """SPEC_SYSTEM with the subset size filled in, plus preselection when it is enabled.
+GRADIENT_BLOCK = """
+
+HOW THIS SUBSET IS DRAWN FROM YOUR RANKING. The k highest-scoring rows do NOT become the
+subset. Each stratum's allocation is spread across its own ranking instead:
+
+  half of m   from the TOP of the ranking          -- the rows you are targeting
+  a quarter   from the MIDDLE (median) of it       -- the middle of the decision surface
+  a quarter   from the 90th percentile of it       -- rows that clearly do not match
+
+This is deliberate. The subset is what a downstream optimizer measures candidate plans on, and
+a subset made only of matches cannot show which plans wrongly accept things: every plan looks
+equally good. Spreading the draw makes the subset representative of what the query means, while
+still weighting it toward matches, which are the rows that make plan quality move at all.
+
+WHAT THIS MEANS FOR YOUR ALLOCATIONS. A stratum of m yields only about m/2 rows from the top of
+its ranking. Prefer FEWER, LARGER strata than you otherwise would: a stratum of 4 contributes
+just 2 targeted rows, so splitting k across many small strata leaves the subset with almost no
+coverage of anything. Two strata of 10 beat five of 4.
+
+Where a stratum's ranking is flat -- many rows sharing the same score, which is what happens
+when a scorer either matches or does not -- the band is drawn at random from across that whole
+flat region rather than from one spot in it. You do not need to do anything about this; it just
+means a flat ranking yields a spread-out sample instead of an arbitrary slice of one."""
+
+
+def spec_system(
+    sample_size: int, idx_specification: bool = False, gradient: bool = False
+) -> str:
+    """SPEC_SYSTEM with the subset size filled in, plus the blocks this run enables.
 
     The allocation constraint has to name a real number -- "the m values must sum to 10" is a
     rule a model can check itself against, while "must sum to k" is one it can only guess at.
     Preselection is the one case where it cannot be filled in ahead of time: the target is k
     minus a count the agent has not chosen yet, so that rule stays stated in terms of k.
+
+    `gradient` matters because SCORING_EXPLAINER otherwise tells the agent the top k rows become
+    the subset, which is false under a gradient mode -- and the halved top-of-ranking yield
+    changes how it should size its strata.
     """
     base = SPEC_SYSTEM + (PRESELECT_BLOCK if idx_specification else "")
+    base += GRADIENT_BLOCK if gradient else ""
     return base.replace("{k}", str(sample_size))
 
 
-def revise_system(sample_size: int, idx_specification: bool = False) -> str:
+def revise_system(
+    sample_size: int, idx_specification: bool = False, gradient: bool = False
+) -> str:
     base = REVISE_SYSTEM + (PRESELECT_BLOCK if idx_specification else "")
+    base += GRADIENT_BLOCK if gradient else ""
     return base.replace("{k}", str(sample_size))
 
 
@@ -380,7 +427,8 @@ REPROMPT = (
 )
 
 
-# Copied verbatim from CostModelAgent._IMAGE_DESCRIBE_SYSTEM
+# The one definition, used by the sampler and by CostModelAgent._describe_images, so an image
+# reads the same way whether it is being scored for the subset or shown to the plan-writing agent.
 IMAGE_DESCRIBE_SYSTEM = (
     "You are a vision assistant helping a query-planning agent explore a dataset's images. "
     "For each attached image, write ONE concise, factual line describing what it shows — main "
