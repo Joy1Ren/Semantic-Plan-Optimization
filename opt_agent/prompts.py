@@ -182,15 +182,28 @@ def _sem_op_quality_docs(op_types) -> dict[str, str]:
     return {op_type: _SEM_OP_QUALITY_DOCS[op_type] for op_type in sorted(present)}
 
 
+def _tagged_text(text: str, tag: str, enabled: bool) -> str:
+    """Resolve a prompt's `<tag>` ... `</tag>` blocks: keep their content when `enabled`, drop it
+    otherwise. The tag lines themselves never survive."""
+    return re.sub(
+        rf"^[ \t]*<{tag}>\n(.*?)^[ \t]*</{tag}>\n",
+        lambda m: m.group(1) if enabled else "",
+        text, flags=re.M | re.S,
+    )
+
+
 def _per_op_quality_text(text: str, enabled: bool) -> str:
     """Resolve a prompt's `<per_op_quality>` ... `</per_op_quality>` blocks: keep their content
     when the oracle judges per-operator quality, drop it when it does not (run_opt's
     --no-oracle-operator-quality), so nobody is told about a score they will never be shown."""
-    return re.sub(
-        r"^[ \t]*<per_op_quality>\n(.*?)^[ \t]*</per_op_quality>\n",
-        lambda m: m.group(1) if enabled else "",
-        text, flags=re.M | re.S,
-    )
+    return _tagged_text(text, "per_op_quality", enabled)
+
+
+def _per_op_info_text(text: str, enabled: bool) -> str:
+    """Resolve a prompt's `<per_op_info>` and `<no_per_op_info>` blocks. The first holds text
+    about per-operator stats and samples, kept when the agent is shown them; the second holds
+    the wording that replaces it when it is not (run_opt's --no-per-operator-info)."""
+    return _tagged_text(_tagged_text(text, "per_op_info", enabled), "no_per_op_info", not enabled)
 
 
 def _quality_metric_reminder(eval_metric: str | None, per_op_quality: bool = True) -> str:
@@ -329,7 +342,9 @@ separate minimal sandbox — see the write_plan tool description).
 - `plans`           : dict[str, dict] — {{name: {{"plan": PhysicalPipeline, "description": str, "optimizations": ...}}}}; populated by write_plan (updated by execute_plan)
 - `plan_codes`      : dict[str, str] — code strings stored by write_plan (keys = plan names)
 - `plan_results`    : the observed-execution store (`plan_results.rows`, `plan_results.df`)
+<per_op_info>
 - `op_results`      : the observed-execution store (`op_results.rows`, `op_results.df`, `op_results.summary()`)
+</per_op_info>
 - `pandas`, `numpy`, plus stdlib: `math`, `statistics`, `random`, `re`, `collections`, `itertools`, `json`
 {cost_awareness}
 You have <= {max_steps} steps. On each step output EXACTLY ONE fenced block:

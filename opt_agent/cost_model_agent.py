@@ -9,6 +9,7 @@ module can stay focused on `CostModelAgent`'s own setup/loop logic:
   - `cost_model_types.py`  — PlanCostEstimate/CostModel, ResultsStore, CostModelRegistry,
                               and the duck-typed operator-introspection helpers
   - `step_parsing.py`      — the "one fenced block per turn" step parser
+  - `run_log.py`           — timestamped step headers and the per-run error log
   - `prompts.py`           — the physical-operator catalog, model catalog, and
                               quality-metric briefing text
   - `cost_helper_agent.py` — CostHelperAgent, which authors/refits cost models on
@@ -34,6 +35,7 @@ from typing import Any
 # Re-exports (see module docstring) — used both by this module's own code below
 # and by external callers importing them from here.
 # ---------------------------------------------------------------------------
+from agent_cost_model.opt_agent import run_log
 from agent_cost_model.opt_agent.errors import ParseError, StepFailed
 from agent_cost_model.opt_agent.llm_client import LLMClient, OpenRouterClient, patch_litellm_for_openrouter
 from agent_cost_model.opt_agent.cost_model_types import (
@@ -46,21 +48,24 @@ from agent_cost_model.opt_agent.cost_model_types import (
     CostModelRegistry,
     PlanCostEstimate,
     ResultsStore,
-    _normalize_plan_df,
     describe_operator,
     get_op_id,
     get_op_model,
     get_op_type,
     iter_operators,
     make_observed_op_stats,
+    run_key,
 )
 from agent_cost_model.opt_agent.step_parsing import _Step, _parse_step
 from agent_cost_model.opt_agent.prompts import (
     _AVAILABLE_MODELS_TEXT,
+    _COST_AWARENESS,
     _PHYSICAL_NONSEMANTIC_OPERATORS,
     _PHYSICAL_SEMANTIC_OPERATORS,
     _QUALITY_METRIC_DOCS,
     _SYSTEM_TEMPLATE,
+    _per_op_info_text,
+    _per_op_quality_text,
     _quality_metric_reminder,
     _quality_metric_section,
 )
@@ -142,15 +147,32 @@ class CostModelAgent:
         3. Execute with `execute_plan(name)`:
            - Runs on a reproducible sample of records (same records across all plans).
            - Appends plan-level stats to `plan_results` (cost_usd, latency_s, tokens, quality).
+           <per_op_info>
            - Appends per-operator stats to `op_results` (cost_usd, latency_s, tokens, num_records per op).
+           </per_op_info>
            - After execution, `plans[name]["plan"]` is updated with the executed PhysicalPipeline.
+        <per_op_info>
         4. Evaluate with `plan_results.df` and `op_results.df`:
+        </per_op_info>
+        <no_per_op_info>
+        4. Evaluate with `plan_results.df`:
+        </no_per_op_info>
            - `quality`: 0–1 overall plan quality.
            - `quality_counts`: the TP/FP/FN/TN counts behind `quality`, for metrics built from counts.
+           <per_op_quality>
            - `per_sem_op_quality`: per-semantic-operator quality (0–1). Use to diagnose
-             which operator is the bottleneck. Use `get_op_samples(plan_name)` to inspect
-             input/output pairs for an operator.
+             which operator is the bottleneck.
+           </per_op_quality>
+           <per_op_info>
+           - Use `get_op_samples(plan_name, op_name)` — one operator name, or a list of them — to
+             inspect input/output pairs.
+           </per_op_info>
+        <per_op_info>
         5. Based on `plan_results.df` and `op_results.df`, write ONE new plan and execute it,
+        </per_op_info>
+        <no_per_op_info>
+        5. Based on `plan_results.df`, write ONE new plan and execute it,
+        </no_per_op_info>
            then repeat from step 2. Each new plan should embody a NEW optimization idea
            or a COMBINATION of ideas that worked. Make sure to write baseline plans and explore different
            optimization strategies. Levers for lowering cost and latency include:
@@ -227,12 +249,15 @@ class CostModelAgent:
              Treat oracle quality scores as ground truth — do not try to replicate or
              reverse-engineer the oracle; simply observe and optimize.
            - `quality_counts`: the TP/FP/FN/TN counts behind `quality`, for metrics built from counts.
+           <per_op_quality>
            - `per_sem_op_quality`: per-semantic-operator quality (0–1). Use to diagnose
              which operator is the bottleneck.
+           </per_op_quality>
 
         Then, iteratively write new plans, estimate their cost, and execute the most promising ones:
         - Use `plan_results.df` and `op_results.df` to identify quality and cost/latency trade-offs
-            -- `plan_results.df` includes operator descriptions; use `get_op_samples(plan_name)` to view input/output pairs
+            -- `plan_results.df` includes operator descriptions; use `get_op_samples(plan_name, op_name)`
+               (one operator name, or a list of them) to view input/output pairs
             -- `op_results.df` includes per-operator performances, operators are named by `name_op1`, `name_op2`, ...
         - Always use `estimate_plan_cost(plans[name]["plan"])` to get cost/latency estimates BEFORE executing promising plans.
             -- the cost model averages past execution to get per-operator cost/latency estimates
@@ -301,9 +326,12 @@ class CostModelAgent:
              Treat oracle quality scores as ground truth — do not try to replicate or
              reverse-engineer the oracle; simply observe and optimize.
            - `quality_counts`: the TP/FP/FN/TN counts behind `quality`, for metrics built from counts.
+           <per_op_quality>
            - `per_sem_op_quality`: per-semantic-operator quality (0–1). Use to diagnose
-             which operator is the bottleneck. Use `get_op_samples(plan_name)` to inspect
-             input/output pairs for an operator.
+             which operator is the bottleneck.
+           </per_op_quality>
+           - Use `get_op_samples(plan_name, op_name)` — one operator name, or a list of them — to
+             inspect input/output pairs.
 
         === Iterate (flexible) ===
         Work in whatever order the estimates suggest — there is no fixed cycle. In general:
@@ -364,6 +392,8 @@ class CostModelAgent:
         oracle_model: str = "openai/o4-mini",
         oracle_reasoning_effort: str | None = "high",
         use_oracle_ground_truth: bool = True,
+        oracle_operator_quality: bool = True,
+        per_operator_info: bool = True,
         helper_model: str | None = None,
         helper_reasoning_effort: str | None = "medium",
         use_checker: bool = True,
@@ -371,6 +401,7 @@ class CostModelAgent:
         checker_reasoning_effort: str | None = "high",
         checker_every: int = 3,
         max_checker_vetoes: int = 2,
+        cost_aware_opt: bool = False,
     ) -> None:
         self.llm = llm
         self.agent_dir = agent_dir
@@ -380,9 +411,19 @@ class CostModelAgent:
         self.oracle_model = oracle_model
         self.oracle_reasoning_effort = oracle_reasoning_effort
         # When False, quality is scored against the benchmark's real ground truth instead of
-        # an oracle-substituted plan — skips all oracle LLM calls (and per-op oracle quality,
-        # which depends on running that oracle-substituted plan).
+        # an oracle-substituted plan. Per-op oracle judging is a separate switch, below.
         self.use_oracle_ground_truth = use_oracle_ground_truth
+        # When False, the oracle does not judge per-operator quality: no `per_sem_op_quality`
+        # is computed or shown to the agent or the exploration checker.
+        self.oracle_operator_quality = oracle_operator_quality
+        # When False, the agent is shown plan-level results only: no per-operator stats
+        # (`op_summary`, `op_results`) and no per-operator samples (`get_op_samples`).
+        if oracle_operator_quality and not per_operator_info:
+            raise ValueError(
+                "per_operator_info=False requires oracle_operator_quality=False: per-operator "
+                "quality is per-operator information."
+            )
+        self.per_operator_info = per_operator_info
         # customCost mode offloads cost-model authoring to a CostHelperAgent that
         # ALWAYS runs on its own OpenRouterClient (never the main llm). Defaults to
         # the main model id if none is given; run() errors if neither is resolvable.
@@ -397,12 +438,18 @@ class CostModelAgent:
         self.checker_reasoning_effort = checker_reasoning_effort
         self.checker_every = checker_every
         self.max_checker_vetoes = max_checker_vetoes
+        # Cost-aware search: the agent and the exploration checker are shown what the search is
+        # spending and the two dataset sizes, and are told to weigh the cost of ONE more plan
+        # against the full-dataset saving it would buy. Off by default so runs stay comparable.
+        self.cost_aware_opt = cost_aware_opt
         self.max_steps = max_steps
         self.max_recover_retries = max_recover_retries
         self.context_budget_chars = context_budget_chars
+        # Only what BASE_BUILTIN_MODULES (local_python_executor) does not already grant --
+        # the executor unions the two, so re/random/datetime/time/collections/itertools/math/
+        # statistics are available to plan code without being listed here.
         self.authorized_imports = authorized_imports or [
-            "math", "statistics", "json", "collections", "itertools",
-            "palimpzest", "pandas"
+            "json", "palimpzest", "pandas", "numpy"
         ]
         self.verbose = verbose
         # Rebuilt per run(); kept on the instance so callers can read it after.
@@ -410,6 +457,13 @@ class CostModelAgent:
         self.reasoning_steps: list[str | None] = []
         self.trajectory_steps: list[dict] = []
         self._pending_images: list[dict] = []  # base64 images staged by explore_images
+        # Per-run bookkeeping the teardown needs when the search dies mid-loop (see
+        # _save_unfinished_run). `_ctx` is what `_setup_run` wired up; `_run_saved` records
+        # whether the teardown has already run, so it happens exactly once either way.
+        self._ctx: "_RunContext | None" = None
+        self._run_saved: bool = False
+        self._current_step: int = 0
+        self._optimization_start: float = 0.0
         self.agent_cost_usd: float = 0.0
         self.opt_latency: float = 0.0
         self.execution_cost_usd: float = 0.0
@@ -418,22 +472,37 @@ class CostModelAgent:
         self.checker_cost_usd: float = 0.0
         self.checker_checks: list[dict] = []
         self.checker_vetoes: int = 0
+        # Total opt cost as of the end of the previous step, so each step's own cost is a delta.
+        self._prev_opt_cost: float = 0.0
+        # What each plan cost the search to write and execute (see `_attribute_plan_costs`).
+        self.plan_search_cost: dict[str, float] = {}
+        self._prev_plan_cost_base: float = 0.0
+        self._step_plans: dict = {}
+        self._step_plans_before: dict = {}
+        self._step_rows_before: int = 0
+        self._subset_n: int = 0
+        self._dataset_n: int = 0
 
     # -- logging -----------------------------------------------------------
     def _log(self, msg: str) -> None:
         if self.verbose:
             print(msg)
 
+    def _run_artifact(self, subdir: str, query_info: dict, suffix: str) -> pathlib.Path:
+        """`{results_prefix}/{subdir}/Q{id}_{runcount}{suffix}`, with the directory created.
+
+        Every per-run artifact is one of these, so the layout is stated once rather than
+        re-derived by each writer."""
+        out_dir = self.results_prefix / subdir
+        out_dir.mkdir(parents=True, exist_ok=True)
+        return out_dir / f"{run_key(query_info['query_id'], query_info.get('runcount'))}{suffix}"
+
     def _save_trajectory_df(self, query_info: dict) -> None:
         """Dump per-step reasoning and assistant responses to CSV."""
         if not self.trajectory_steps:
             return
         import pandas as pd
-        out_dir = self.results_prefix / "trajectory"
-        out_dir.mkdir(parents=True, exist_ok=True)
-        rc = query_info.get("runcount")
-        qkey = f"Q{query_info['query_id']}_{rc}" if rc is not None else f"Q{query_info['query_id']}"
-        out = out_dir / f"{qkey}.csv"
+        out = self._run_artifact("trajectory", query_info, ".csv")
         pd.DataFrame(self.trajectory_steps).to_csv(out, index=False)
         self._log(f"[run] trajectory → {out}")
 
@@ -459,11 +528,7 @@ class CostModelAgent:
         it asked for can be read back without parsing the trajectory."""
         if not self.checker_checks:
             return
-        out_dir = self.results_prefix / "exploration_check"
-        out_dir.mkdir(parents=True, exist_ok=True)
-        rc = query_info.get("runcount")
-        qkey = f"Q{query_info['query_id']}_{rc}" if rc is not None else f"Q{query_info['query_id']}"
-        out = out_dir / f"{qkey}.json"
+        out = self._run_artifact("exploration_check", query_info, ".json")
         out.write_text(json.dumps(self.checker_checks, indent=2, default=str))
         self._log(f"[run] exploration checks → {out}")
 
@@ -472,14 +537,8 @@ class CostModelAgent:
         {results_prefix}/costModel/Q{id}_{rc}.json."""
         if not codes:
             return
-        import json
-        out_dir = self.results_prefix / "costModel"
-        out_dir.mkdir(parents=True, exist_ok=True)
-        rc = query_info.get("runcount")
-        qkey = f"Q{query_info['query_id']}_{rc}" if rc is not None else f"Q{query_info['query_id']}"
-        out = out_dir / f"{qkey}.json"
-        with open(out, "w") as f:
-            json.dump(codes, f, indent=2)
+        out = self._run_artifact("costModel", query_info, ".json")
+        out.write_text(json.dumps(codes, indent=2, default=str))
         self._log(f"[run] cost model codes → {out}")
 
     def _save_results_df(
@@ -488,11 +547,7 @@ class CostModelAgent:
         """Dump the accumulated plan-level results table to CSV."""
         if not results.rows:
             return
-        metrics_dir = self.results_prefix / "metrics"
-        metrics_dir.mkdir(parents=True, exist_ok=True)
-        rc = query_info.get("runcount")
-        qkey = f"Q{query_info['query_id']}_{rc}" if rc is not None else f"Q{query_info['query_id']}"
-        out = metrics_dir / f"{qkey}_results.csv"
+        out = self._run_artifact("metrics", query_info, "_results.csv")
         df = results.df
         df["use_case"] = query_info["use_case"]
         df["query_id"] = query_info["query_id"]
@@ -532,7 +587,7 @@ class CostModelAgent:
             )
         else:
             estimate_rule = ""
-        return _SYSTEM_TEMPLATE.format(
+        return _per_op_info_text(_per_op_quality_text(_SYSTEM_TEMPLATE.format(
             briefing=briefing if briefing is not None else self.briefing,
             quality_metric=_quality_metric_section(eval_metric),
             tools_doc="\n\n".join(t.doc for t in tools),
@@ -540,9 +595,10 @@ class CostModelAgent:
             physical_nonsem_ops="\n".join(f"- {d}" for d in _PHYSICAL_NONSEMANTIC_OPERATORS.values()),
             available_models=_AVAILABLE_MODELS_TEXT,
             max_steps=self.max_steps,
+            cost_awareness=_COST_AWARENESS if self.cost_aware_opt else "",
             final_answer_doc=final_answer_doc if final_answer_doc is not None else self.final_answer_doc,
             estimate_rule=estimate_rule,
-        )
+        ), self.oracle_operator_quality), self.per_operator_info)
 
     def _opening_message(self, task: str, plans: dict, results: ResultsStore) -> str:
         plan_lines = []
@@ -557,11 +613,14 @@ class CostModelAgent:
             plans_section = "Available plans (`plans` dict):\n" + "\n".join(plan_lines)
         else:
             plans_section = "No plans yet — use write_plan to create the first one."
+        summary = results.summary()
+        if not self.per_operator_info:
+            del summary["by_op_type"]
         return (
             f"{task}\n\n"
             f"{plans_section}\n\n"
             f"Observed-results store summary:\n"
-            f"{json.dumps(results.summary(), indent=2)}\n\n"
+            f"{json.dumps(summary, indent=2)}\n\n"
             f"Begin. Output exactly ONE ```python``` block for your first step — "
             f"a single tool call (e.g. list_files()). Do not write multiple blocks, "
             f"plan ahead in prose, or produce a final answer yet."
@@ -605,6 +664,11 @@ class CostModelAgent:
         the system prompt, and resets `self.messages`/cost accumulators. Returns the handful of
         objects `run`'s loop consumes.
         """
+        if not self.per_operator_info and ("customCost" in mode or "sampleCost" in mode):
+            raise ValueError(
+                f"per_operator_info=False is not supported in mode {mode!r}: its cost model is "
+                "fit on per-operator results."
+            )
         patch_litellm_for_openrouter()
 
         from agent_cost_model.opt_agent.local_python_executor import LocalPythonExecutor
@@ -639,9 +703,8 @@ class CostModelAgent:
 
         # This run's opt_results directory. The evaluator writes the run's single shared ground
         # truth here; ExecutePlanTool writes one subdirectory of debug artifacts per plan.
-        _rc = query_info.get("runcount")
-        opt_run_dir = self.results_prefix / "opt_results" / (
-            f"Q{query_info['query_id']}_{_rc}" if _rc is not None else f"Q{query_info['query_id']}"
+        opt_run_dir = self.results_prefix / "opt_results" / run_key(
+            query_info["query_id"], query_info.get("runcount")
         )
         # Start each run without a ground truth, for the same reason llm_judge is wiped above:
         # the evaluator persists it on the first plan and reads it back for every later plan, so
@@ -653,6 +716,9 @@ class CostModelAgent:
         quality_evaluator = None
         quality_evaluator_cls = query_info.get("quality_evaluator_cls")
         if quality_evaluator_cls is not None:
+            # Fatal on purpose. Without an evaluator every plan scores NaN and the full-dataset
+            # evaluation skips itself, so the run would spend its whole budget and produce no
+            # quality number anywhere -- better to stop here than to find that out afterwards.
             try:
                 quality_evaluator = quality_evaluator_cls(
                     oracle_client=oracle_client,
@@ -668,9 +734,14 @@ class CostModelAgent:
                     run_dir=opt_run_dir,
                     oracle_reasoning_effort=self.oracle_reasoning_effort,
                     use_oracle_ground_truth=self.use_oracle_ground_truth,
+                    oracle_operator_quality=self.oracle_operator_quality,
                 )
             except Exception as e:
-                print(f"[run] QualityEvaluator init failed: {e}")
+                raise RuntimeError(
+                    f"{quality_evaluator_cls.__module__}.{quality_evaluator_cls.__name__} could "
+                    f"not be constructed for query {query_info['query_id']}: "
+                    f"{type(e).__name__}: {e}"
+                ) from e
 
         import pandas as pd
         from agent_cost_model.opt_agent.physical_pipeline import PhysicalPipeline
@@ -712,14 +783,17 @@ class CostModelAgent:
             "plans": plans,
             "plan_codes": plan_codes,
             "plan_results": plan_results,
-            "op_results": op_results,
             "iter_operators": iter_operators,
             "get_op_type": get_op_type,
             "get_op_id": get_op_id,
             "get_op_model": get_op_model,
             "describe_operator": describe_operator,
-            "observed_op_stats": make_observed_op_stats(op_results),
         }
+        if self.per_operator_info:
+            variables.update({
+                "op_results": op_results,
+                "observed_op_stats": make_observed_op_stats(op_results),
+            })
 
         # Minimal sandbox variables for WritePlanTool: only what plan CODE needs to construct a
         # PhysicalPipeline — the source-table reader (required by PhysicalPipeline.__init__ for
@@ -748,7 +822,7 @@ class CostModelAgent:
                 data_dir, self._pending_images,
                 subdir=image_subdir, id_col=id_col,
             ),
-            GetOpSamplesTool(plan_results),
+            *([GetOpSamplesTool(plan_results)] if self.per_operator_info else []),
             ExecutePlanTool(
                 plan_codes=plan_codes,
                 plans=plans,
@@ -764,7 +838,8 @@ class CostModelAgent:
                 runcount=query_info.get("runcount"),
                 eval_metric=query_info.get("eval_metric"),
                 subset_path=query_info.get("subset_path"),
-                normalize_eval_df=query_info.get("normalize_eval_df"),
+                oracle_operator_quality=self.oracle_operator_quality,
+                per_operator_info=self.per_operator_info,
             ),
         ]
 
@@ -850,6 +925,8 @@ class CostModelAgent:
                 task=task,
                 eval_metric=query_info.get("eval_metric"),
                 verbose=self.verbose,
+                cost_aware=self.cost_aware_opt,
+                per_op_quality=self.oracle_operator_quality,
             )
 
         tools = base_tools + [write_plan_tool]
@@ -858,10 +935,12 @@ class CostModelAgent:
         system = self._system_prompt(
             tools, briefing, final_answer_doc, mode=mode, eval_metric=query_info.get("eval_metric")
         )
-        opening = self._opening_message(task, plans, op_results)
+        opening = self._opening_message(task, plans, plan_results)
         self.messages = [{"role": "user", "content": opening}]
         self.reasoning_steps = []
         self.trajectory_steps = []
+        self._run_saved = False
+        self._current_step = 0
         self.agent_cost_usd = 0.0
         self.opt_latency = 0.0
         self.execution_cost_usd = 0.0
@@ -870,14 +949,24 @@ class CostModelAgent:
         self.checker_cost_usd = 0.0
         self.checker_checks = []
         self.checker_vetoes = 0
+        self._prev_opt_cost = 0.0
+        self.plan_search_cost = {}
+        self._prev_plan_cost_base = 0.0
+        self._step_plans, self._step_plans_before, self._step_rows_before = {}, {}, 0
+        # Row counts, not line counts: CUAD contract text carries embedded newlines. Both feed
+        # the per-step budget footer, which is what lets the agent scale a subset saving to the
+        # full dataset it will finally run on.
+        self._subset_n = len(pd.read_csv(query_info["subset_path"]))
+        self._dataset_n = len(pd.read_csv(query_info["dataset_path"]))
         self._log(f"\n=== system prompt ({len(system)} chars) ===\n{system}\n")
         self._log(f"=== task ===\n{opening}\n")
 
-        return _RunContext(
+        self._ctx = _RunContext(
             executor=executor, system=system, registry=registry,
             cost_helper=cost_helper, checker=checker,
             quality_evaluator=quality_evaluator, plan_codes=plan_codes,
         )
+        return self._ctx
 
     def _account_costs(
         self,
@@ -919,6 +1008,8 @@ class CostModelAgent:
             "core_agent": {
                 "model": getattr(self.llm, "model", None),
                 "reasoning_effort": getattr(self.llm, "reasoning_effort", None),
+                "cost_aware_opt": self.cost_aware_opt,
+                "per_operator_info": self.per_operator_info,
                 "cost": round(self.agent_cost_usd, 6),
             },
             "optimization_checker": {
@@ -932,6 +1023,7 @@ class CostModelAgent:
             },
             "oracle": {
                 "oracle_ground_truth": self.use_oracle_ground_truth,
+                "oracle_operator_quality": self.oracle_operator_quality,
                 "oracle_model": self.oracle_model,
                 "oracle_reasoning_effort": self.oracle_reasoning_effort,
                 "cost": round(self.oracle_cost_usd, 6),
@@ -952,6 +1044,104 @@ class CostModelAgent:
             6,
         )
 
+    def _cost_snapshot(
+        self, ctx: "_RunContext", plan_results: ResultsStore, *, commit: bool = True
+    ) -> dict:
+        """What the search has spent as of right now, and what the step just finished cost.
+
+        `_account_costs` assigns rather than accumulates, so calling it every step is just a
+        re-read of the same live counters the teardown reads -- there is no second accumulator
+        to keep in sync, and the total here is the same `_total_opt_cost` that lands in
+        metrics/final_eval.json.
+
+        `commit=False` reads without closing the step, for a sub-agent that is about to run and
+        so cannot be shown its own cost: the step stays open and whatever that sub-agent spends
+        still lands in this step's delta when the step is finally committed."""
+        self._account_costs(plan_results, ctx.quality_evaluator, ctx.cost_helper, ctx.checker)
+        self._attribute_plan_costs(plan_results)
+        total = self._total_opt_cost()
+        step_cost = total - self._prev_opt_cost
+        if commit:
+            self._prev_opt_cost = total
+            # Recorded whether or not the run is cost-aware: this is what makes the two arms of
+            # a cost-aware/not comparison readable step by step, after the fact.
+            self.trajectory_steps[-1]["step_cost_usd"] = round(step_cost, 6)
+            self.trajectory_steps[-1]["total_opt_cost_usd"] = total
+        return {
+            "total_usd": total, "step_usd": step_cost,
+            "subset_n": self._subset_n, "dataset_n": self._dataset_n,
+            "plan_search_cost": dict(self.plan_search_cost),
+        }
+
+    def _start_step_attribution(self, plans: dict, plan_results: ResultsStore) -> None:
+        """Remember which plans exist and how many executions there are as this step begins, so
+        `_attribute_plan_costs` can tell which plans the step wrote or executed."""
+        self._step_plans = plans
+        self._step_plans_before = dict(plans)
+        self._step_rows_before = len(plan_results.rows)
+
+    def _attribute_plan_costs(self, plan_results: ResultsStore) -> None:
+        """Bill the core agent, oracle and subset-execution spend since the last call to the plans
+        this step wrote (write_plan stores a new entry) or executed, split evenly. A step that
+        touched no plan bills nothing; checker and cost-helper spend is never billed to a plan."""
+        base = self.agent_cost_usd + self.oracle_cost_usd + self.execution_cost_usd
+        delta = base - self._prev_plan_cost_base
+        self._prev_plan_cost_base = base
+        touched = {n for n, e in self._step_plans.items() if self._step_plans_before.get(n) is not e}
+        touched |= {
+            r["plan_name"] for r in plan_results.rows[self._step_rows_before:] if r.get("plan_name")
+        }
+        for name in touched:
+            self.plan_search_cost[name] = self.plan_search_cost.get(name, 0.0) + delta / len(touched)
+
+    def _cost_footer(self, budget: dict) -> str:
+        """The budget line appended to every observation in a cost-aware run.
+
+        The two sizes appear without their ratio on purpose: the subset is relevance-sampled, so
+        (dataset_n / subset_n) is an UPPER BOUND on the real scale factor, and printing it would
+        invite the very multiplication the system prompt tells the agent not to do."""
+        if not self.cost_aware_opt:
+            return ""
+        return (
+            f"[optimization budget] this step: ${budget['step_usd']:.4f} | "
+            f"total search spend so far: ${budget['total_usd']:.4f} (sunk) | "
+            f"optimization subset: {budget['subset_n']} records | "
+            f"full dataset: {budget['dataset_n']} records"
+        )
+
+    def _observe(self, obs: str, log_prefix: str = "") -> None:
+        """Hand one observation to the agent: message history, trajectory row, and the log.
+
+        The console gets the stamped header instead of the observation's own
+        "Observation (step N):" first line; what the agent sees is untouched.
+        """
+        self.messages.append({"role": "user", "content": obs})
+        self.trajectory_steps[-1]["observation"] = obs
+        marker = f"Observation (step {self._current_step}):"
+        shown = obs[len(marker):].lstrip() if obs.startswith(marker) else obs
+        self._log(
+            run_log.header("observation", f"step {self._current_step}") + f"{log_prefix}{shown}"
+        )
+
+    def _budget_turn(self, ctx: "_RunContext", plan_results: ResultsStore) -> None:
+        """Close the step with the budget line, as the LAST thing the agent sees before its next
+        turn.
+
+        Last, not folded into the observation, because the cost helper and the exploration
+        checker run AFTER the observation is handed over: closing the step here is what bills
+        their spend to the step that actually triggered them, instead of to the next one. The
+        step is committed either way -- when the run is not cost-aware, only the trajectory
+        columns are written and the agent is shown nothing."""
+        budget = self._cost_snapshot(ctx, plan_results)
+        footer = self._cost_footer(budget)
+        if not footer:
+            return
+        self.messages.append({"role": "user", "content": footer})
+        self.trajectory_steps[-1]["observation"] = (
+            (self.trajectory_steps[-1]["observation"] or "") + "\n\n" + footer
+        )
+        self._log(footer)
+
     # -- main loop ---------------------------------------------------------
     def run(
         self,
@@ -961,26 +1151,94 @@ class CostModelAgent:
         op_results: ResultsStore,
         *,
         mode: str,
-        query_info: dict = {
-            "use_case": "use_case",
-            "scale_factor": 0,
-            "query_id": 0,
-            "eval_metric": None,  # e.g. "f1-score" / "adjusted-rand-index"; explains the quality metric in the briefing
-            "run_final_eval": True,  # execute the chosen plan on the FULL dataset at the end; False = search only
-            "num_final_eval_runs": 1,  # times to re-run the chosen plan on the full dataset (fresh pipeline each)
-            "data_dir": "experiments/dataset/use_case",
-            "gt_path": "files/use_case/raw_results/ground_truth/sf_0/Q0.csv",
-            "image_subdir": "images",
-        },
+        query_info: dict | None = None,
+    ) -> Any:
+        """Search for the best plan and return the JSON final answer.
+
+        `query_info` carries everything benchmark-specific the run needs; run_opt.py assembles it.
+        The keys read here:
+            use_case, query_id, scale_factor  identify the query
+            runcount                          which repeat of it this is; keys every artifact
+            eval_metric                       e.g. "f1-score"; explains the metric in the briefing
+            data_dir, dataset_path, subset_path, gt_path, id_col, image_subdir
+            quality_evaluator_cls             the benchmark's QualityEvaluator subclass
+            run_final_eval                    execute the chosen plan on the FULL dataset at the
+                                              end (default True); False = search only
+            num_final_eval_runs               how many times, fresh pipeline each
+
+        An ERROR inside the search is re-raised, but only after what the run already did is
+        written to disk: a run that spent money on plans should leave a record of it either way.
+        An INTERRUPT is not -- Ctrl-C (KeyboardInterrupt) and SystemExit derive from
+        BaseException rather than Exception, so the `except` below does not see them and they
+        propagate with nothing written. Stopping a run by hand means abandoning it, and a
+        half-run left in results/ next to real ones is worse than no record at all.
+        """
+        query_info = query_info if query_info is not None else {}
+        try:
+            return self._run_search(
+                task, plans, plan_results, op_results, mode=mode, query_info=query_info
+            )
+        except Exception as exc:
+            run_log.log_error("fatal", f"{type(exc).__name__}: {exc}", exc=exc)
+            self._save_unfinished_run(exc, plans, plan_results, query_info)
+            raise
+
+    def _save_unfinished_run(
+        self, exc: Exception, plans: dict, plan_results: ResultsStore, query_info: dict
+    ) -> None:
+        """Run the normal teardown for a search that failed part-way through.
+
+        Reached only from `run`'s except branch, and so only for a real error -- never for a
+        Ctrl-C. Both ordinary exits return through `_finish_run` themselves, and `_run_saved`
+        keeps a teardown that raised from being retried here. Nothing in here may raise -- the
+        original exception is what the caller needs to see.
+        """
+        ctx = self._ctx
+        if ctx is None or self._run_saved:
+            return
+        try:
+            if not self.opt_latency:
+                self.opt_latency = time.time() - self._optimization_start
+            self._finish_run(
+                {"error": f"{type(exc).__name__}: {exc}"},
+                ctx, plans, plan_results, query_info, self._current_step,
+            )
+            self._log(f"[run] search failed at step {self._current_step}; partial results saved")
+        except Exception as save_error:
+            print(f"[run] could not save the unfinished run: {type(save_error).__name__}: {save_error}")
+            run_log.log_error(
+                "teardown", f"{type(save_error).__name__}: {save_error}", exc=save_error
+            )
+
+    def _run_search(
+        self,
+        task: str,
+        plans: dict,
+        plan_results: ResultsStore,
+        op_results: ResultsStore,
+        *,
+        mode: str,
+        query_info: dict,
     ) -> Any:
         """Bounded tool loop over `plans`/`plan_results`/`op_results`, returning the JSON final
         answer. `_setup_run` does all the wiring; this method is just the step loop."""
-        optimization_start = time.time()
+        # Opened before setup so a setup failure is logged too. `start_run` is also what sets
+        # the elapsed-time origin every agent's step headers are stamped against.
+        optimization_start = run_log.start_run(
+            self._run_artifact("error_logs", query_info, ".txt"),
+            f"Q{query_info.get('query_id')} rc={query_info.get('runcount')} "
+            f"{self.use_case} {mode}",
+        )
+        self._optimization_start = optimization_start
+        # Cleared before setup, not after: a run whose setup fails has nothing to save, and a
+        # previous run's context must never be mistaken for this one's.
+        self._ctx, self._run_saved, self._current_step = None, False, 0
 
         ctx = self._setup_run(task, plans, plan_results, op_results, mode, query_info)
+        # Only what the loop itself touches is unpacked; everything the teardown needs
+        # (quality_evaluator, plan_codes) is read off `ctx` in `_finish_run`.
         executor, system, registry = ctx.executor, ctx.system, ctx.registry
-        cost_helper, quality_evaluator, plan_codes = ctx.cost_helper, ctx.quality_evaluator, ctx.plan_codes
-        checker = ctx.checker
+        cost_helper, checker = ctx.cost_helper, ctx.checker
 
         prev_plan_rows = len(plan_results.rows)  # detect execution batches to trigger the helper
         helper_consumed = 0  # cost-helper trajectory rows already merged into the main trajectory
@@ -989,10 +1247,14 @@ class CostModelAgent:
         step = 0
         while step < self.max_steps:
             step += 1
+            self._current_step = step
+            run_log.set_step(step)
+            self._start_step_attribution(plans, plan_results)
             try:
                 raw = self._llm_step(system)
             except Exception as e:  # LLM transport failure
                 self._log(f"[step {step}] LLM error: {e}")
+                run_log.log_error("llm", f"{type(e).__name__}: {e}", exc=e)
                 raise
             self.messages.append({"role": "assistant", "content": raw})
             reasoning = self.reasoning_steps[-1]
@@ -1000,17 +1262,17 @@ class CostModelAgent:
                 {"step": step, "reasoning": reasoning, "assistant": raw, "observation": None}
             )
             if reasoning:
-                self._log(f"\n--- reasoning (step {step}) ---\n{reasoning}\n")
-            self._log(f"\n--- assistant (step {step}) ---\n{raw}\n")
+                self._log(run_log.header("reasoning", f"step {step}") + f"{reasoning}\n")
+            self._log(run_log.header("assistant", f"step {step}") + f"{raw}\n")
 
             # parse (with a couple of format-error retries)
             try:
                 parsed = self._parse_with_retries(system, raw)
             except ParseError as e:
+                run_log.log_error("parse", e.detail, content=e.raw)
                 obs = self._clip_observation(f"Observation (step {step}): {e.detail}")
-                self.messages.append({"role": "user", "content": obs})
-                self.trajectory_steps[-1]["observation"] = obs
-                self._log(f"[parse error] {obs}")
+                self._observe(obs, "[parse error] ")
+                self._budget_turn(ctx, plan_results)
                 continue
 
             if parsed.code is None:  # final answer
@@ -1024,7 +1286,11 @@ class CostModelAgent:
                     and self.checker_vetoes < self.max_checker_vetoes
                     and steps_left >= 3
                 ):
-                    check = checker.check(reason="final-answer")
+                    check = checker.check(
+                        reason="final-answer",
+                        budget=self._cost_snapshot(ctx, plan_results, commit=False)
+                        if self.cost_aware_opt else None,
+                    )
                     self.checker_checks = list(checker.checks)
                     if check.underexplored:
                         self.checker_vetoes += 1
@@ -1040,6 +1306,9 @@ class CostModelAgent:
                             f"{self.max_checker_vetoes}]\n{veto}"
                         )
                         self._log(veto)
+                        # Being sent back to search is exactly when the price of one more plan
+                        # matters, so a vetoed step closes with the budget line like any other.
+                        self._budget_turn(ctx, plan_results)
                         # Merge only AFTER this step's own row has been written: merging appends
                         # the checker's rows, which would otherwise occupy the [-1] slot.
                         checker_consumed = self._merge_sub_agent_trajectory(
@@ -1048,39 +1317,28 @@ class CostModelAgent:
                         continue
 
                 self.opt_latency = time.time()-optimization_start
+                self._cost_snapshot(ctx, plan_results)  # close the step for the record
                 self._log(f"[final answer] {parsed.result}")
                 self.trajectory_steps[-1]["observation"] = f"[final answer] {parsed.result}"
-                self._account_costs(plan_results, quality_evaluator, cost_helper, checker)
-                if isinstance(parsed.result, dict):
-                    parsed.result["plan_codes"] = plan_codes
-                    parsed.result["plan_descriptions"] = {name: entry.get("description", "") for name, entry in plans.items()}
-                    parsed.result["plan_optimizations"] = {name: entry.get("optimizations") for name, entry in plans.items()}
-                    # Model settings and spend for every actor, including the core agent's own.
-                    parsed.result.update(self._run_config())
-                self._save_results_df(plan_results, query_info, final_answer=parsed.result)
-                helper_consumed = self._merge_sub_agent_trajectory(
-                    cost_helper, "cost_helper", step, helper_consumed
+                return self._finish_run(
+                    parsed.result, ctx, plans, plan_results, query_info, step,
+                    helper_consumed=helper_consumed, checker_consumed=checker_consumed,
                 )
-                checker_consumed = self._merge_sub_agent_trajectory(
-                    checker, "exploration_checker", step, checker_consumed
-                )
-                self._save_trajectory_df(query_info)
-                self._save_exploration_checks(query_info)
-                if cost_helper is not None:
-                    self._save_cost_model_codes(cost_helper.model_versions, query_info)
-                self._run_final_evaluation(parsed.result, plans, query_info, plan_codes, plan_results)
-                return parsed.result
 
             # execute the python tool-call block
             try:
                 out = executor(parsed.code)
             except Exception as e:
+                # The observation the agent sees is clipped; the log keeps the whole thing,
+                # plus the traceback and the code block, neither of which survives otherwise.
+                run_log.log_error(
+                    "exec", f"{type(e).__name__}: {e}", content=parsed.code, exc=e
+                )
                 obs = self._clip_observation(
                     f"Observation (step {step}): exec failed — {type(e).__name__}: {e}"
                 )
-                self.messages.append({"role": "user", "content": obs})
-                self.trajectory_steps[-1]["observation"] = obs
-                self._log(obs)
+                self._observe(obs)
+                self._budget_turn(ctx, plan_results)
                 continue
 
             obs = self._format_observation(step, out)
@@ -1092,9 +1350,7 @@ class CostModelAgent:
                 description = self._describe_images(self._pending_images)
                 self._pending_images.clear()
                 obs = f"{obs}\n\nImage descriptions (auto-generated) for ids {shown_ids}:\n{description}"
-            self.messages.append({"role": "user", "content": obs})
-            self.trajectory_steps[-1]["observation"] = obs
-            self._log(obs)
+            self._observe(obs)
 
             # After an execution batch (plan_results grew — only ExecutePlanTool appends
             # there), auto-invoke the cost helper: it decides whether to (re)fit the cost
@@ -1105,6 +1361,9 @@ class CostModelAgent:
                 try:
                     table = cost_helper.review(reason=reason)
                 except Exception as e:
+                    run_log.log_error(
+                        "cost-helper", f"{type(e).__name__}: {e}", content=f"reason={reason}", exc=e
+                    )
                     table = f"[cost-helper error: {type(e).__name__}: {e}]"
                 helper_obs = f"[cost estimates refreshed after execution]\n{table}"
                 self.messages.append({"role": "user", "content": helper_obs})
@@ -1118,7 +1377,11 @@ class CostModelAgent:
             # EXECUTIONS, not steps: exploring the space means running plans, not writing them.
             if checker is not None and len(plan_results.rows) - checked_plan_rows >= self.checker_every:
                 checked_plan_rows = len(plan_results.rows)
-                check = checker.check(reason="periodic")
+                check = checker.check(
+                    reason="periodic",
+                    budget=self._cost_snapshot(ctx, plan_results, commit=False)
+                    if self.cost_aware_opt else None,
+                )
                 self.checker_checks = list(checker.checks)
                 if check.underexplored:
                     check_obs = (
@@ -1130,6 +1393,10 @@ class CostModelAgent:
                         (self.trajectory_steps[-1]["observation"] or "") + "\n\n" + check_obs
                     )
                     self._log(check_obs)
+
+            # Close the step only now: the cost helper and the exploration check above both
+            # spend, and both were triggered by THIS step.
+            self._budget_turn(ctx, plan_results)
 
             # interleave any sub-agent rows generated during this step (via review_plans, the
             # post-execution auto-invoke, or the exploration check) into the shared trajectory
@@ -1144,42 +1411,63 @@ class CostModelAgent:
         # consulted here: there are no steps left to act on anything it might ask for.
         result = self._terminal_turn(system)
         self.opt_latency = time.time() - optimization_start
-        self._account_costs(plan_results, quality_evaluator, cost_helper, checker)
-        self._save_results_df(plan_results, query_info)
-        helper_consumed = self._merge_sub_agent_trajectory(
-            cost_helper, "cost_helper", step, helper_consumed
+        return self._finish_run(
+            result, ctx, plans, plan_results, query_info, step,
+            helper_consumed=helper_consumed, checker_consumed=checker_consumed,
         )
-        checker_consumed = self._merge_sub_agent_trajectory(
-            checker, "exploration_checker", step, checker_consumed
-        )
-        self._save_trajectory_df(query_info)
-        self._save_exploration_checks(query_info)
-        if cost_helper is not None:
-            self._save_cost_model_codes(cost_helper.model_versions, query_info)
+
+    def _finish_run(
+        self,
+        result: Any,
+        ctx: _RunContext,
+        plans: dict,
+        plan_results: ResultsStore,
+        query_info: dict,
+        step: int,
+        *,
+        helper_consumed: int = 0,
+        checker_consumed: int = 0,
+    ) -> Any:
+        """Roll up costs, annotate the final answer, and save everything the run produced.
+
+        Both ways out of the loop -- an accepted final answer, or the forced terminal turn after
+        the step budget runs out -- end here, so a run that ran out of steps is recorded exactly
+        like one that finished on its own. That includes `final_selected` in the results table,
+        which needs the final answer and so was previously missing from every out-of-steps run.
+
+        `self.opt_latency` is set by the caller: it ends at the accepted answer, not here.
+        """
+        self._run_saved = True
+        self._account_costs(plan_results, ctx.quality_evaluator, ctx.cost_helper, ctx.checker)
         if isinstance(result, dict):
-            result["plan_codes"] = plan_codes
+            result["plan_codes"] = ctx.plan_codes
             result["plan_descriptions"] = {name: entry.get("description", "") for name, entry in plans.items()}
             result["plan_optimizations"] = {name: entry.get("optimizations") for name, entry in plans.items()}
+            # Model settings and spend for every actor, including the core agent's own.
             result.update(self._run_config())
-        self._run_final_evaluation(result, plans, query_info, plan_codes, plan_results)
+        self._save_results_df(plan_results, query_info, final_answer=result)
+        self._merge_sub_agent_trajectory(ctx.cost_helper, "cost_helper", step, helper_consumed)
+        self._merge_sub_agent_trajectory(ctx.checker, "exploration_checker", step, checker_consumed)
+        self._save_trajectory_df(query_info)
+        self._save_exploration_checks(query_info)
+        if ctx.cost_helper is not None:
+            self._save_cost_model_codes(ctx.cost_helper.model_versions, query_info)
+        self._run_final_evaluation(result, plans, query_info, ctx.plan_codes, plan_results)
         return result
 
     # -- helpers -----------------------------------------------------------
-    IMAGE_DESCRIBE_SYSTEM = (
-        "You are a vision assistant helping a query-planning agent explore a dataset's images. "
-        "For each attached image, write ONE concise, factual line describing what it shows — main "
-        "object/subject, dominant colors, and any attributes useful for filtering (item type, "
-        "composition, visible text). Prefix each line with the image's id. No preamble, no summary."
-    )
-
-
     def _describe_images(self, images: list[dict]) -> str:
         """Generate a textual description of the staged explore_images pictures.
 
         Uses a dedicated cheap vision model (`_image_describer`, gemini-2.5-flash-lite) so image
         exploration stays inexpensive regardless of the main-agent model. The description is shown in
         THIS step's observation and persisted in the trajectory; the pixels themselves are not
-        forwarded to the main agent. Cost is billed to agent_cost_usd, matching normal LLM steps."""
+        forwarded to the main agent. Cost is billed to agent_cost_usd, matching normal LLM steps.
+
+        The describer's system prompt is `sampling.prompts.image_describe_system` — the same one the
+        data sampler describes images with, so an image reads the same way to both."""
+        from agent_cost_model.sampling.prompts import image_describe_system
+
         content: list[dict] = [{
             "type": "text",
             "text": f"Describe each of these {len(images)} image(s), one short line each, prefixed with its id:",
@@ -1187,13 +1475,8 @@ class CostModelAgent:
         for img in images:
             content.append({"type": "text", "text": f"id {img['id']}:"})
             content.append({"type": "image_url", "image_url": {"url": img["url"]}})
-        system = self._IMAGE_DESCRIBE_SYSTEM
         question = next((img.get("question") for img in images if img.get("question")), None)
-        if question:
-            system += (
-                " In addition, make sure to address the following in every line: "
-                f"{question}"
-            )
+        system = image_describe_system(question)
         try:
             result = self._image_describer.generate(system, [{"role": "user", "content": content}])
         except Exception as e:
@@ -1246,8 +1529,7 @@ class CostModelAgent:
 
     _OBS_CHAR_LIMIT = 10_000
 
-    @staticmethod
-    def _format_observation(step: int, out: Any) -> str:
+    def _format_observation(self, step: int, out: Any) -> str:
         parts = [f"Observation (step {step}):"]
         logs = (getattr(out, "logs", "") or "").strip()
         if logs:
@@ -1258,19 +1540,19 @@ class CostModelAgent:
             parts.append(f"[result]\n{result_s}")
         if len(parts) == 1:
             parts.append("[no output]")
-        return CostModelAgent._clip_observation("\n\n".join(parts))
+        return self._clip_observation("\n\n".join(parts))
 
-    @staticmethod
-    def _clip_observation(obs: str) -> str:
+    def _clip_observation(self, obs: str) -> str:
         """Cap any observation — successful output OR an error message — at the context budget.
         Error text interpolates offending values, so it can be just as large as a result."""
-        limit = CostModelAgent._OBS_CHAR_LIMIT
+        limit = self._OBS_CHAR_LIMIT
         if len(obs) <= limit:
             return obs
-        return obs[:limit] + (
-            f"\n\n[output truncated — {len(obs) - limit} chars omitted. "
-            "Use get_op_samples(plan_name, op_name) to inspect specific input/output pairs.]"
+        hint = (
+            " Use get_op_samples(plan_name, op_name) to inspect specific input/output pairs."
+            if self.per_operator_info else ""
         )
+        return obs[:limit] + f"\n\n[output truncated — {len(obs) - limit} chars omitted.{hint}]"
 
     def _fresh_pipeline(self, plan_name: str, plan_codes: dict | None):
         """Re-instantiate a FRESH PhysicalPipeline from a plan's source code via the plan-construction
@@ -1285,6 +1567,9 @@ class CostModelAgent:
             result = executor(code)
         except Exception as e:
             self._log(f"[final_eval] could not rebuild {plan_name!r} from code: {type(e).__name__}: {e}")
+            run_log.log_error(
+                "final-eval-rebuild", f"{plan_name}: {type(e).__name__}: {e}", content=code, exc=e
+            )
             return None
         return getattr(result, "output", None)
 
@@ -1305,27 +1590,31 @@ class CostModelAgent:
 
         `query_info["run_final_eval"]` (default True) gates only the full-dataset EXECUTION — the
         expensive half. With it False the search still records its metrics entry (agent cost/latency,
-        plans written/executed, run config), just with no runK blocks."""
-        if not isinstance(final_answer, dict):
-            return
-        best_name = final_answer.get("best_plan", {}).get("name")
-        if not best_name or best_name not in plans:
-            self._log(f"[final_eval] plan {best_name!r} not in plans — skipping final evaluation")
-            return
+        plans written/executed, run config), just with no runK blocks.
 
+        Everything that can go wrong here concerns the full-dataset runs only, so none of it
+        returns early: the metrics entry is written either way, carrying the search-level fields
+        with no runK blocks. The search is what cost the money, and losing its record because the
+        agent named a plan that does not exist -- or because a ground-truth file is missing --
+        leaves no trace of a run that really happened."""
         query_id = query_info["query_id"]
         scale_factor = query_info.get("scale_factor")
         runcount = query_info.get("runcount")
-        run_suffix = f"Q{query_id}_{runcount}" if runcount is not None else f"Q{query_id}"
+        run_suffix = run_key(query_id, runcount)
 
-        if query_info.get("run_final_eval", True):
-            outcome = self._full_dataset_runs(best_name, plans, query_info, plan_codes, run_suffix)
-            if outcome is None:  # could not be set up at all — write nothing
-                return
-            runs, metric_type, n_runs = outcome
-        else:
+        runs, metric_type, n_runs = {}, "unknown", 0
+        best_name = final_answer.get("best_plan", {}).get("name") if isinstance(final_answer, dict) else None
+        if not best_name or best_name not in plans:
+            self._log(
+                f"[final_eval] plan {best_name!r} not in plans — recording the search, "
+                "with no full-dataset evaluation"
+            )
+        elif not query_info.get("run_final_eval", True):
             self._log("[final_eval] run_final_eval=False — skipping the full-dataset evaluation")
-            runs, metric_type, n_runs = {}, "unknown", 0
+        else:
+            outcome = self._full_dataset_runs(best_name, plans, query_info, plan_codes, run_suffix)
+            if outcome is not None:
+                runs, metric_type, n_runs = outcome
 
         self._write_final_eval_metrics(
             query_id=query_id, runcount=runcount, scale_factor=scale_factor,
@@ -1346,9 +1635,7 @@ class CostModelAgent:
 
         Returns (per-run metrics keyed run1/run2/…, metric type, number of runs attempted), or None
         when the evaluation cannot be set up at all (no gt_path, no ground-truth file, no quality
-        evaluator) — the caller then writes no metrics entry."""
-        query_id = query_info["query_id"]
-        use_case = query_info["use_case"]
+        evaluator). The caller still records the run either way — only the runK blocks are lost."""
         gt_path_str = query_info.get("gt_path")
         if not gt_path_str:
             self._log("[final_eval] no gt_path in query_info — skipping")
@@ -1414,8 +1701,7 @@ class CostModelAgent:
             raw_name = f"{run_suffix}_{final_run}"
             results_df.to_csv(raw_results_dir / f"{raw_name}.csv", index=False)
             self._log(f"[final_eval] raw results (run {final_run}) → {raw_results_dir / f'{raw_name}.csv'}")
-            normalize_eval_df = query_info.get("normalize_eval_df", _normalize_plan_df)
-            eval_df = normalize_eval_df(results_df, use_case, query_id)
+            eval_df = evaluator.normalize(results_df)
 
             # Wall-clock latency of the full run. plan_dict["latency_s"] is time.time()-based
             # (see PhysicalPipeline.run), so it reflects real elapsed time with the join/convert
@@ -1474,7 +1760,7 @@ class CostModelAgent:
         _executed_rows = [r.get("plan_name") for r in (plan_results.rows if plan_results is not None else []) if r.get("plan_name")]
         plans_executed = len(_executed_rows)
         unique_plans_executed = len(set(_executed_rows))
-        metrics_key = f"{query_id}_{runcount}" if runcount is not None else str(query_id)
+        metrics_key = run_key(query_id, runcount).removeprefix("Q")
         # Agent-search-level fields once, then per-run full-dataset execution metrics nested under runK.
         entry[metrics_key] = {
             "query_id": str(query_id),

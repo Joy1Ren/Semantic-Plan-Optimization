@@ -295,11 +295,20 @@ class ExecutePlanTool(Tool):
     name = "execute_plan"
     doc = """\
 ### execute_plan(plan_name)
+<per_op_info>
 Execute the stored plan `plan_name` on a reproducible sample of records. Plan-level and
 operator-level quality, latency, cost, and token usage are appended to `plan_results`
 and `op_results`, respectively. After execution, `plans[plan_name]["plan"]` holds the PhysicalPipeline.
 
 Returns a compact summary dict with plan stats and per-operator stats. Key fields:
+</per_op_info>
+<no_per_op_info>
+Execute the stored plan `plan_name` on a reproducible sample of records. Plan-level quality,
+latency, cost, and token usage are appended to `plan_results`. After execution,
+`plans[plan_name]["plan"]` holds the PhysicalPipeline.
+
+Returns a compact summary dict with plan stats. Key fields:
+</no_per_op_info>
 - `quality`: 0–1 overall plan quality evaluated by an oracle. Higher is better.
   Treat oracle quality scores as ground truth.
 <per_op_quality>
@@ -311,9 +320,14 @@ Returns a compact summary dict with plan stats and per-operator stats. Key field
 - `quality_counts` (only for metrics built from counts): the TP/FP/FN/TN behind `quality`,
   split by reason where a Jaccard gate applies. Use it to tell missed records from wrong ones.
 - `cost_usd`, `latency_s`, `input_tokens`, `output_tokens`: aggregated over all ops.
+<per_op_info>
 To inspect accumulated results use `plan_results.df` and `op_results.df`.
 To view sample input/output pairs use `get_op_samples(plan_name, op_name)`, where `op_name` is one
 operator name or a list of them.
+</per_op_info>
+<no_per_op_info>
+To inspect accumulated results use `plan_results.df`.
+</no_per_op_info>
 ```python
 execute_plan("p1")
 ```"""
@@ -335,10 +349,12 @@ execute_plan("p1")
         subset_path: str | pathlib.Path | None = None,
         runcount: Any = None,
         oracle_operator_quality: bool = True,
+        per_operator_info: bool = True,
     ) -> None:
         import pathlib
 
         self._oracle_operator_quality = oracle_operator_quality
+        self._per_operator_info = per_operator_info
         self._plan_codes = plan_codes
         self._plans = plans
         self._op_results = op_results
@@ -434,6 +450,7 @@ execute_plan("p1")
                     "cost_usd": total_cost,
                     "latency_s": total_latency,
                     "wall_latency_s": wall_latency_s,
+                    "op_summary": per_op_list,
                 },
                 runcount=self._runcount,
                 # Set by PlanQualityEvaluator.evaluate on the call just above; absent when
@@ -483,10 +500,11 @@ execute_plan("p1")
                 quality_result.per_sem_op_quality if quality_result is not None else {}
             )} if self._oracle_operator_quality else {}),
             "quality_counts": quality_result.quality_counts if quality_result is not None else None,
-            "op_samples": op_samples,
+            **({"op_samples": op_samples} if self._per_operator_info else {}),
         }
         self._plan_results.append([plan_row])
-        self._op_results.append(per_op_list)
+        if self._per_operator_info:
+            self._op_results.append(per_op_list)
 
         plan_summary = {k: v for k, v in plan_row.items() if k not in ("op_samples", "plan_str")}
         if plan_summary["quality_counts"] is None:
@@ -501,7 +519,7 @@ execute_plan("p1")
         # particular measures only the LLM step, not retrieval.
         result = {
             "plan_summary": plan_summary,
-            "op_summary": per_op_list,
+            **({"op_summary": per_op_list} if self._per_operator_info else {}),
             "quality_metric": _quality_metric_reminder(
                 self._eval_metric, self._oracle_operator_quality
             ),
