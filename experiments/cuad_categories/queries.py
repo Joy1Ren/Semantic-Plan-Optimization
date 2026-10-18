@@ -49,6 +49,14 @@ def _has_clause(row: pd.Series, category: str) -> bool:
     return row[f"{category} Answer"] == "Yes"
 
 
+def _has_expiration(row: pd.Series) -> bool:
+    """Whether the contract says anything about the end of its initial term -- a date, a term
+    length, "perpetual", or a term that ends on an event with no stated length. This is exactly
+    the rule query 7 is scored by (a non-empty Expiration Date answer), so the two agree on which
+    contracts have the clause at all."""
+    return bool(answer(row, "Expiration Date"))
+
+
 @dataclass(frozen=True)
 class Query:
     id: int
@@ -150,6 +158,21 @@ QUERIES = [
                lambda r: (_latest_year(r, "Agreement Date") or 9999) < 2010),
               ("has a non-compete clause", "Non-Compete",
                lambda r: _has_clause(r, "Non-Compete"))),
+
+    # The expiration date again, but asked only of the contracts that also carry another clause,
+    # and graded on the quoted expiration sentence rather than on a parsed answer.
+    _identify(21, "cuad_expiration_with_volume_restriction",
+              "the expiration date of contracts that also restrict volume",
+              ("states its expiration terms", "Expiration Date", _has_expiration),
+              ("has a volume restriction clause", "Volume Restriction",
+               lambda r: _has_clause(r, "Volume Restriction")),
+              evidence="Expiration Date"),
+    _identify(22, "cuad_expiration_with_termination_for_convenience",
+              "the expiration date of contracts that can also be terminated for convenience",
+              ("states its expiration terms", "Expiration Date", _has_expiration),
+              ("has a termination for convenience clause", "Termination for Convenience",
+               lambda r: _has_clause(r, "Termination for Convenience")),
+              evidence="Expiration Date"),
 
     # Query 1's question again, scored by how far the count is off rather than exact.
     _extract(20, "Parties", "how many parties signed the contract, scored by relative error",
