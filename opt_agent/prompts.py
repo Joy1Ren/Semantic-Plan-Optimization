@@ -47,22 +47,12 @@ _PHYSICAL_NONSEMANTIC_OPERATORS = {
     "groupby": "pipeline.groupby(group_by_fields: list[str], agg_funcs: list[str], agg_fields: list[str]) — Group and aggregate. Produces schema name 'agg_func(agg_field)', e.g. 'count(reviewId)' or 'average(score)'.",
 }
 # The model catalog offered to every agent (plan writer, exploration checker).
-# OpenAI-only by default: those models reach litellm, which patch_litellm_for_openrouter() routes
-# through OpenRouter, so OPENROUTER_API_KEY is the only key a run needs. The Gemini models in the
-# full catalog do NOT work that way -- palimpzest gives them a direct google-genai client that
-# bypasses litellm (query/generators/gemini_client.py), so picking one raises "No API key was
-# provided" at PLAN-CONSTRUCTION time unless GEMINI_API_KEY is also set. Set
-# AGENT_MODEL_CATALOG=available_models.txt (with that key exported) to offer them again.
 _MODEL_CATALOG_FILE = os.environ.get("AGENT_MODEL_CATALOG", "available_models_openai.txt")
 # _MODEL_CATALOG_FILE = os.environ.get("AGENT_MODEL_CATALOG", "available_models.txt")
 _AVAILABLE_MODELS_TEXT = (pathlib.Path(__file__).parent / _MODEL_CATALOG_FILE).read_text()
 
-# A compact restatement of the two catalogs above: operator names and the knobs each one exposes,
-# with none of the call-signature detail the plan-WRITING agent needs. Written for a reader that
-# only has to judge COVERAGE -- "has anything ever varied this?" -- not write code against the API.
-# Kept here, next to the full catalogs, so adding an operator or a knob updates both in one place.
-# Consumed by ExplorationCheckerAgent; see its module docstring for why the reviewer is shown the
-# space that exists rather than only the parts the plan-writing agent happened to report using.
+# A compact restatement of the two catalogs above: operator names and the knobs each one exposes
+# Consumed by ExplorationCheckerAgent (for exploration coverage)
 _OPERATOR_CATALOG_BRIEF = """\
 LLM-executed operators (these are what cost dollars and seconds):
   sem_filter  — LLM filter over the whole field.
@@ -89,7 +79,7 @@ Free operators (ordinary code, no LLM cost): filter, map, join, project, limit, 
   responsible for, and what order they run in -- is itself a dimension.
 """
 
-# Human-readable explanation of the overall plan-quality metric, keyed by a query's `accuracy_metric`
+# Natural language explanation of the overall plan-quality metric, keyed by a query's `accuracy_metric`
 # (see files/<use_case>/queries/q<id>.toml and QualityEvaluator.evaluate). Rendered into the briefing
 # so the agent knows exactly how the 0–1 `quality` score it optimizes is computed.
 _QUALITY_METRIC_DOCS = {
@@ -135,17 +125,8 @@ _QUALITY_METRIC_DOCS = {
 
 
 # How each semantic operator's entry in `per_sem_op_quality` is computed, keyed by op_type. Shown
-# on every execute_plan result for the operator types that plan actually contains, so the agent can
-# read a per-op score correctly instead of guessing what "0.6 on a rag_map" means.
-#
-# Two distinctions these definitions have to carry, because acting on either one backwards sends the
-# search the wrong way:
-#   - RAG operators are scored on the input they ACTUALLY received (the retrieved chunks), not the
-#     full source field. A low rag_map/rag_filter score therefore blames the LLM step, and says
-#     nothing about whether retrieval surfaced the right chunks -- that shows up in plan `quality`.
-#   - For maps, an output schema the operator returned NO value for is scored incorrect, while a
-#     deliberate empty value is judged on its merits like any other answer (often correct, when the
-#     description says to return empty for absent information).
+# on every execute_plan result for the operator types that plan actually contains
+
 _SEM_OP_QUALITY_DOCS = {
     "sem_map": (
         "fraction of output schemas that are correct under each schema's description, over the "

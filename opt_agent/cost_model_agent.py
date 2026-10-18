@@ -1,23 +1,6 @@
 """The main optimization agent: a bounded tool-loop agent that writes, executes, and
 compares physical query plans in a sandboxed environment, converging on the best
 cost/latency-quality trade-off.
-
-Supporting pieces used to live in this file directly; they are now split out so this
-module can stay focused on `CostModelAgent`'s own setup/loop logic:
-  - `errors.py`            — ParseError, StepFailed
-  - `llm_client.py`        — LLMClient, OpenRouterClient, patch_litellm_for_openrouter
-  - `cost_model_types.py`  — ResultsStore, run_key, and the duck-typed
-                              operator-introspection helpers
-  - `step_parsing.py`      — the "one fenced block per turn" step parser
-  - `run_log.py`           — timestamped step headers and the per-run error log
-  - `prompts.py`           — the physical-operator catalog, model catalog, and
-                              quality-metric briefing text
-  - `exploration_checker_agent.py` — ExplorationCheckerAgent, which reviews how far
-                              the search has explored the optimization space
-  - `tools/`                — the Tool subclasses exposed to the sandbox
-
-A few of these (OpenRouterClient, ResultsStore, patch_litellm_for_openrouter) are also
-imported from this module by the experiment runners.
 """
 
 from __future__ import annotations
@@ -78,13 +61,15 @@ class _RunContext:
 class CostModelAgent:
     """A bounded tool-loop agent that authors, applies, and refines semantic plans."""
     briefing = textwrap.dedent("""\
-        You are a query plan engineer optimizing physical plans for an optimized deep-research query system.
+        You are a query plan engineer optimizing physical plans for an optimized query system.
         Physical query plans are trees of operators (semantic filters, maps, joins,
         aggregations, scans, projects). Some operators call LLMs and cost real
         dollars and seconds.
 
-        Your goal is to write physical plans, observe cost/latency/quality,
-        and converge on the best cost-quality trade-off. Do not hard code the plan.
+        Your goal is to write physical plans, observe cost/latency/quality on a optimization SUBSET
+        of the dataset, and iterate to converge on the best cost-quality trade-off that will generalize well
+        onto the full dataset. Do not overfit optimizations on to the subset and do not hard code the plan.
+
 
         Suggested workflow:
         1. Explore the data: call `list_files()` to see available CSVs and folders,
@@ -108,7 +93,7 @@ class CostModelAgent:
            - ALWAYS pass `optimizations`, recording which optimizations this plan uses and how far
              each one is pushed (see the write_plan tool description). This is how the record of
              what you have and have not tried stays legible across plans.
-           - NEVER hardcode row IDs to identify specific records (e.g. `filter(lambda row: row["id"] in [3, 17, 42])`
+           - NEVER hardcode row IDs to identify specific records (e.g. `filter(lambda row: row["id"].isin([3, 17, 42]))`
              is cheating and invalid). What you learn from exploration may only shape HOW you build a
              general plan, not which records it targets.
            - DO use semantic operators for conditions that need semantic judgment, and prefer
