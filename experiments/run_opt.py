@@ -1,4 +1,4 @@
-"""Run cost-model optimization from a benchmark configuration file.
+"""Run the optimizer agent from a benchmark configuration file.
 
 Benchmark YAML owns query/data/evaluation details and, via `results_prefix`, the segments
 of the results path that are benchmark-specific (SemBench keys on use case and scale factor;
@@ -6,9 +6,9 @@ CUAD on neither). The constants below own the optimization policy, so the same r
 reused for another benchmark by pointing --config elsewhere.
 
 The runner name (--agent_type) is the axis you compare across: it names one optimizer/variant
--- `execute_oracle_sampler`, `customCost`, ... alongside external ones like `MOAR` -- and
-occupies the last segment of `results_prefix`. Everything below that is this runner's own
-layout (trajectory/, metrics/, final_answer/, ...).
+-- `execute_optimizer_agentic`, `execute_optimizer_random`, ... alongside external ones like
+`MOAR` -- and occupies the last segment of `results_prefix`. Everything below that is this
+runner's own layout (trajectory/, metrics/, final_answer/, ...).
 """
 from __future__ import annotations
 
@@ -36,20 +36,20 @@ from agent_cost_model.sampling.constants import (
 )
 
 # Optimization policy: intentionally kept in code rather than benchmark YAML.
-# MODEL = "openai/gpt-5.4"
-MODEL = "openai/gpt-5" # for matching docetl
+# MODEL = 'openai/gpt-5.6-terra'
+# MODEL = "openai/gpt-5" # for matching docetl
+DATA_SAMPLER_MODEL = "openai/gpt-5"
 MAX_STEPS = 40
 # How many times the chosen plan is executed on the FULL dataset once the search ends.
 # Whether that happens at all is per-invocation: --final-eval/--no-final-eval.
 NUM_FINAL_EVAL_RUNS = 2
-USE_CHECKER = True
-CHECKER_MODEL = None
 CHECKER_REASONING_EFFORT = "high"
 CHECKER_EVERY = 3
 
 
 def _report_reused_subset(
-    benchmark: dict[str, Any], context: dict[str, Any], subset_path: Path, query_id: int
+    benchmark: dict[str, Any], context: dict[str, Any], subset_path: Path, query_id: int,
+    mode: str,
 ) -> None:
     """Say where the pre-existing subset came from, when this run did not build one.
 
@@ -74,10 +74,9 @@ def _report_reused_subset(
             # so report it rather than claiming there is nothing here.
             record = {**entry, "mode": f"{entry.get('sample_method', 'legacy')} (legacy record)"}
         elif isinstance(entry, dict):
-            # {query_id: {mode: record}} -- pick the most recently written mode we can identify.
-            modes = [m for m, r in entry.items() if isinstance(r, dict)]
-            if modes:
-                record = entry[modes[-1]]
+            # {query_id: {mode: record}} -- the subset file is per mode, so is its record.
+            if isinstance(entry.get(mode), dict):
+                record = entry[mode]
     if record:
         cost = record.get("cost", {})
         print(
@@ -90,17 +89,19 @@ def _report_reused_subset(
     else:
         print(
             f"Reusing existing subset: {subset_path}\n"
-            f"  no sampling record for query {query_id} in {results_path} — it predates "
+            f"  no {mode} sampling record for query {query_id} in {results_path} — it predates "
             "DataSampler recording every mode, random included."
         )
 
 
 def _load_adapter(module_name: str):
-    """The benchmark's adapter: its QualityEvaluator subclass, plus the output-reshaping function
-    the engine applies before scoring. Scoring itself is reached only through the evaluator, so
-    no scorer is exported here."""
+    """The benchmark's QualityEvaluator subclass.
+
+    Everything else the engine needs from an adapter -- reshaping a plan's output
+    (`evaluator.normalize`), deciding whether a ground truth exists, and scoring -- is reached
+    through the evaluator, which is the object that knows its own benchmark."""
     module = importlib.import_module(module_name)
-    return module.QualityEvaluator, module.normalize_eval_df
+    return module.QualityEvaluator
 
 
 def main() -> None:
@@ -131,16 +132,35 @@ def main() -> None:
         help="embedding model; required for every --sample-method except random",
     )
     parser.add_argument(
+        "--core-model",
+        default = None,
+        help = "model for core optimizer agent"
+    )
+    parser.add_argument(
+        "--use-exploration-checker",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help = "whether exploration checker is used to guide optimization"
+    )
+    parser.add_argument(
+        "--exploration-checker-model",
+        default = None,
+        help = "model for exploration checker"
+    )
+    parser.add_argument(
         "--sample-method",
         # Every mode, random included, goes through DataSampler -- there is no bypass, so every
         # subset on disk was actually built by a sampler and has a sampling_results.json record.
         choices=list(SAMPLER_MODES),
         required=True,
         help=(
-            "subset method used with --opt-subsample (default: random). "
+            "subset method used with --opt-subsample. "
             "random = uniform draw; baseline = BM25 + embedding over the raw query, no LLM call; "
             "one-shot = one LLM call writes the retrieval spec; "
-            "agentic = the same, then up to two revisions after inspecting what was retrieved"
+            "one-shot-gradient = the same spec, but each stratum is spread across its ranking "
+            "(half top, a quarter median, a quarter 90th percentile) instead of taking its "
+            "top-m; "
+            "agentic = one-shot, then up to two revisions after inspecting what was retrieved"
         ),
     )
     parser.add_argument(
@@ -198,7 +218,36 @@ def main() -> None:
             "need an oracle-generated pseudo-ground-truth)."
         ),
     )
+    parser.add_argument(
+        "--no-oracle-operator-quality",
+        action="store_true",
+        help=(
+            "skip the oracle's per-operator quality judging: no `per_sem_op_quality` is computed "
+            "or shown to the agent or the exploration checker. Off by default (the oracle judges)."
+        ),
+    )
+    parser.add_argument(
+        "--no-per-operator-info",
+        action="store_true",
+        help=(
+            "show the agent plan-level results only: no per-operator stats (`op_summary`, "
+            "`op_results`) and no per-operator samples (`get_op_samples`). Requires "
+            "--no-oracle-operator-quality. Off by default (the agent sees per-operator info)."
+        ),
+    )
+    parser.add_argument(
+        "--cost-aware-opt",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help=(
+            "show the agent and the exploration checker what the search is spending, plus the "
+            "optimization subset and full dataset sizes, and tell them to weigh the cost of "
+            "one more plan against the full-dataset saving it would buy. Off by default."
+        ),
+    )
     args = parser.parse_args()
+    if args.no_per_operator_info and not args.no_oracle_operator_quality:
+        parser.error("--no-per-operator-info requires --no-oracle-operator-quality.")
 
     config_path = args.config.resolve()
     benchmark = load_benchmark(config_path)
@@ -258,8 +307,8 @@ def main() -> None:
     # `reviewId` instead. Read as str so ids never round-trip through float.
     id_col = dataset_config.get("id_col", "idx")
     source_df = pd.read_csv(source_csv, dtype={id_col: str})
-    quality_evaluator_cls, normalize_eval_df = _load_adapter(benchmark["quality_adapter"])
-    llm = OpenRouterClient(MODEL, reasoning_effort="medium")
+    quality_evaluator_cls = _load_adapter(benchmark["quality_adapter"])
+    llm = OpenRouterClient(args.core_model, reasoning_effort="medium")
     if args.opt_subsample:
         image_dir = dataset_dir / dataset_config.get("image_subdir", "images")
         # baseline needs no chat model, only embeddings; random needs neither; the two LLM
@@ -283,24 +332,27 @@ def main() -> None:
             results_path=str(format_path(benchmark["sampling_results_path"], context)),
             sample_size=args.sample_size,
             alpha=args.sample_alpha,
-            llm_model=None if no_llm else MODEL,
+            llm_model=None if no_llm else DATA_SAMPLER_MODEL,
             embed_workers=args.embed_workers,
             no_image_emb=args.no_image_emb,
             idx_specification=args.idx_specification,
         ).sample()
     else:
-        _report_reused_subset(benchmark, context, subset_path, args.query_id)
+        _report_reused_subset(benchmark, context, subset_path, args.query_id, args.sample_method)
 
     agent = CostModelAgent(
         llm, max_steps=MAX_STEPS, verbose=True,
         agent_dir=args.agent_type, results_prefix=results_prefix,
         use_case=args.use_case,
         use_oracle_ground_truth=args.use_oracle_ground_truth,
-        use_checker=USE_CHECKER, checker_model=CHECKER_MODEL,
+        oracle_operator_quality=not args.no_oracle_operator_quality,
+        per_operator_info=not args.no_per_operator_info,
+        use_checker=args.use_exploration_checker, checker_model=args.exploration_checker_model,
         checker_reasoning_effort=CHECKER_REASONING_EFFORT, checker_every=CHECKER_EVERY,
+        cost_aware_opt=args.cost_aware_opt,
     )
     answer = agent.run(
-        task, plans={}, plan_results=ResultsStore([]), op_results=ResultsStore([]), mode=args.agent_type,
+        task, plans={}, plan_results=ResultsStore([]), op_results=ResultsStore([]),
         query_info={
             "use_case": args.use_case,
             "scale_factor": args.scale_factor,
@@ -314,7 +366,6 @@ def main() -> None:
             "dataset_path": str(source_csv),
             "id_col": id_col,
             "quality_evaluator_cls": quality_evaluator_cls,
-            "normalize_eval_df": normalize_eval_df,
             "image_subdir": dataset_config.get("image_subdir", "images"),
             "runcount": args.runcount,
         },
