@@ -18,7 +18,6 @@ import builtins
 import difflib
 import inspect
 import logging
-import math
 import re
 from collections.abc import Callable, Generator, Mapping
 from dataclasses import dataclass
@@ -150,21 +149,9 @@ BASE_PYTHON_TOOLS = {
     "dict": dict,
     "tuple": tuple,
     "round": round,
-    "ceil": math.ceil,
-    "floor": math.floor,
-    "log": math.log,
-    "exp": math.exp,
-    "sin": math.sin,
-    "cos": math.cos,
-    "tan": math.tan,
-    "asin": math.asin,
-    "acos": math.acos,
-    "atan": math.atan,
-    "atan2": math.atan2,
-    "degrees": math.degrees,
-    "radians": math.radians,
+    # No math functions under bare names (exp, log, sqrt, ...): every tool name is reserved, so
+    # they made ordinary variables like `exp = ...` fail. Plan code imports `math` instead.
     "pow": pow,
-    "sqrt": math.sqrt,
     "len": len,
     "sum": sum,
     "max": max,
