@@ -32,6 +32,7 @@ from agent_cost_model.opt_agent.llm_client import LLMClient
 from agent_cost_model.opt_agent.prompts import (
     _AVAILABLE_MODELS_TEXT,
     _OPERATOR_CATALOG_BRIEF,
+    _lower_variance_text,
     _per_op_quality_text,
     _quality_metric_section,
     _sem_op_quality_docs,
@@ -156,6 +157,18 @@ class ExplorationCheckerAgent:
           Plan `quality` is the objective. Never recommend a direction on per-operator scores
           alone when plan quality points the other way.
         </per_op_quality>
+        <lower_variance>
+        - EACH PLAN WAS EXECUTED {{n_executions}} TIMES. Its block shows every execution's quality,
+          the mean and std, and how many records' output differed between executions. Read the
+          frontier from the means, and weigh the gap between two plans' means against their stds:
+          a gap is significant only when it is large relative to the std. Lower variance is an
+          objective in its own right: a plan with a similar mean and clearly lower std improves
+          the frontier. If the strongest plans have high variance, a variance-reduction move is a
+          valid suggestion; suggest the simplest one first (a more precise condition or column
+          description, a different model) before added structure (verifiers, extra filters,
+          ensembles). An added operator advances the frontier only if it beats the simpler plan
+          by more than the noise; if it does not, point the agent back to the simpler plan.
+        </lower_variance>
 
         HOW TO JUDGE (guidance, not rules — weigh the whole picture):
         - Make sure to also execute BASELINE plans to understand the range of possible quality/cost.
@@ -207,6 +220,9 @@ class ExplorationCheckerAgent:
         context_budget_chars: int = 80_000,
         cost_aware: bool = False,
         per_op_quality: bool = True,
+        lower_variance: bool = False,
+        n_executions: int = 1,
+        plan_results_agg: ResultsStore | None = None,
     ) -> None:
         self.llm = llm
         self.plans = plans
@@ -220,11 +236,16 @@ class ExplorationCheckerAgent:
         # hold the JSON output contract.
         self.cost_aware = cost_aware
         self.per_op_quality = per_op_quality
-        self._system = _per_op_quality_text(self._SYSTEM_TEMPLATE.format(
+        # Lower-variance run: each plan was executed `n_executions` times, and the reviewer
+        # reads one aggregate row per plan alongside that plan's individual executions.
+        self.lower_variance = lower_variance
+        self.n_executions = n_executions
+        self.plan_results_agg = plan_results_agg
+        self._system = _lower_variance_text(_per_op_quality_text(self._SYSTEM_TEMPLATE.format(
             operator_catalog=_OPERATOR_CATALOG_BRIEF.rstrip(),
             model_catalog=_AVAILABLE_MODELS_TEXT.strip(),
             cost_budget=self._COST_BUDGET if cost_aware else "",
-        ), per_op_quality)
+        ), per_op_quality), lower_variance, n_executions)
 
         self.cost_usd: float = 0.0
         # Every verdict this run produced — saved to exploration_check/Q{id}_{rc}.json so a run
@@ -332,10 +353,12 @@ class ExplorationCheckerAgent:
 
     # -- context -----------------------------------------------------------
     def _executed_rows(self) -> list[dict]:
-        """One row per executed plan, most recent execution of a name winning. Written-but-never
-        -executed plans are deliberately absent: they measured nothing."""
+        """One row per executed plan, most recent execution of a name winning -- in a
+        lower-variance run, the plan's aggregate row. Written-but-never-executed plans are
+        deliberately absent: they measured nothing."""
         by_name: dict[str, dict] = {}
-        for row in self.plan_results.rows:
+        rows = self.plan_results_agg.rows if self.lower_variance else self.plan_results.rows
+        for row in rows:
             name = row.get("plan_name")
             if name:
                 by_name[name] = row
@@ -369,18 +392,14 @@ class ExplorationCheckerAgent:
             return "n/a"
         return "n/a" if f != f else format(f, spec)  # f != f is True only for NaN
 
-    def _plan_block(self, row: dict, search_cost: float | None = None) -> str:
-        name = row.get("plan_name", "?")
+    def _measured_lines(self, row: dict) -> list[str]:
+        """What one execution of the plan measured."""
         per_op = row.get("per_sem_op_quality") or {}
         try:
             per_op_s = json.dumps(per_op, default=str)
         except Exception:
             per_op_s = str(per_op)
-        return "\n".join([
-            f"--- plan {name} ---",
-            f"description: {row.get('description', '') or '(none)'}",
-            f"operators: ({self._op_chain(name)})",
-            f"optimizations (recorded by the plan-writing agent):\n{self._fmt_optimizations(row.get('optimizations'))}",
+        return [
             f"quality: {self._fmt_num(row.get('quality'), '.3f')}",
             *([f"quality counts: {json.dumps(row['quality_counts'], default=str)}"]
               if row.get("quality_counts") else []),
@@ -388,6 +407,50 @@ class ExplorationCheckerAgent:
             f"cost_usd: {self._fmt_num(row.get('cost_usd'), '.6f')}",
             f"latency_s (sum of per-operator times): {self._fmt_num(row.get('latency_s'), '.3f')}",
             f"wall_latency_s (wall-clock time of the run): {self._fmt_num(row.get('wall_latency_s'), '.3f')}",
+        ]
+
+    def _aggregate_lines(self, agg: dict, executions: list[dict]) -> list[str]:
+        """What the plan's executions measured, each one and their mean/std."""
+        f = self._fmt_num
+        qualities = ", ".join(f(r.get("quality"), ".3f") for r in executions)
+        return [
+            f"quality per execution: {qualities} "
+            f"(mean {f(agg.get('quality_avg'), '.3f')}, std {f(agg.get('quality_std'), '.3f')})",
+            *(["quality counts per execution: " + "; ".join(
+                json.dumps(r.get("quality_counts"), default=str) for r in executions)]
+              if any(r.get("quality_counts") for r in executions) else []),
+            *([f"records whose output differed between executions: {agg['n_unstable_records']}"]
+              if agg.get("n_unstable_records") is not None else []),
+            f"cost_usd: mean {f(agg.get('cost_avg'), '.6f')} (std {f(agg.get('cost_std'), '.6f')})",
+            f"wall_latency_s: mean {f(agg.get('latency_wallclock_avg'), '.3f')} "
+            f"(std {f(agg.get('latency_wallclock_std'), '.3f')})",
+        ]
+
+    def _plan_block(self, row: dict, search_cost: float | None = None) -> str:
+        name = row.get("plan_name", "?")
+        if self.lower_variance:
+            # `row` is the plan's aggregate; its executions are the last n_executions rows
+            # recorded under its name (execute_plan appends them together).
+            executions = [
+                r for r in self.plan_results.rows if r.get("plan_name") == name
+            ][-self.n_executions:]
+            optimizations = executions[-1].get("optimizations") if executions else None
+            measured = self._aggregate_lines(row, executions)
+        else:
+            executions = [row]
+            optimizations = row.get("optimizations")
+            measured = self._measured_lines(row)
+        # A score from a plan whose operators errored measures the bug, not the idea.
+        op_errors = next((r["op_errors"] for r in reversed(executions) if r.get("op_errors")), None)
+        if op_errors:
+            measured.append(f"operator errors (the score reflects these, not the idea): "
+                            f"{json.dumps(op_errors, default=str)}")
+        return "\n".join([
+            f"--- plan {name} ---",
+            f"description: {row.get('description', '') or '(none)'}",
+            f"operators: ({self._op_chain(name)})",
+            f"optimizations (recorded by the plan-writing agent):\n{self._fmt_optimizations(optimizations)}",
+            *measured,
             *([f"search cost to write + execute this plan: ${search_cost:.4f} "
                "(includes its cost_usd plus the other optimization costs of writing and executing it)"]
               if search_cost is not None else []),

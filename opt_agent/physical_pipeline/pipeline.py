@@ -6,6 +6,7 @@ execution engine). The individual operators it dispatches to live in operators/.
 from __future__ import annotations
 
 import time
+from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from typing import TYPE_CHECKING, Any, Callable, Optional
 
@@ -45,6 +46,10 @@ from .operators import (
 if TYPE_CHECKING:
     from .base import Operator
 
+# How much of the operators' errors a plan reports: the most frequent distinct messages per
+# operator, each cut to a length that still shows the cause.
+MAX_ERRORS_PER_OP = 3
+MAX_ERROR_CHARS = 300
 
 class PhysicalPipeline:
     """
@@ -163,12 +168,16 @@ class PhysicalPipeline:
     # Semantic operators
     # ------------------------------------------------------------------
 
-    def sem_filter(self, condition: str, model: Model, depends_on: list[str] | None = None, reasoning_effort_override: str | None = None) -> "PhysicalPipeline":
-        """LLM-based row filter. Keeps records where condition is true."""
-        self._ops.append(SemFilter(condition=condition, model=model, schema=self._schema, depends_on=depends_on, reasoning_effort_override=reasoning_effort_override))
+    def sem_filter(self, condition: str, model: Model, depends_on: list[str] | None = None, reasoning_effort_override: str | None = None, skip_if: Callable[[dict], bool] | None = None) -> "PhysicalPipeline":
+        """LLM-based row filter. Keeps records where condition is true.
+
+        skip_if (sem_filter, sem_map, rag_filter, rag_map): records for which it returns True
+        bypass the LLM call at no cost -- a filter keeps them, a map leaves its new columns None.
+        """
+        self._ops.append(SemFilter(condition=condition, model=model, schema=self._schema, depends_on=depends_on, reasoning_effort_override=reasoning_effort_override, skip_if=skip_if))
         return self
 
-    def sem_map(self, cols: list[dict], model: Model, depends_on: list[str] | None = None, reasoning_effort_override: str | None = None) -> "PhysicalPipeline":
+    def sem_map(self, cols: list[dict], model: Model, depends_on: list[str] | None = None, reasoning_effort_override: str | None = None, skip_if: Callable[[dict], bool] | None = None) -> "PhysicalPipeline":
         """
         LLM-based column derivation. Adds new fields to each record.
 
@@ -185,7 +194,7 @@ class PhysicalPipeline:
             for col in cols
         }
         output_schema = _make_schema({**self._defs, **new_defs})
-        self._ops.append(SemMap(cols=cols, model=model, input_schema=self._schema, output_schema=output_schema, depends_on=depends_on, reasoning_effort_override=reasoning_effort_override))
+        self._ops.append(SemMap(cols=cols, model=model, input_schema=self._schema, output_schema=output_schema, depends_on=depends_on, reasoning_effort_override=reasoning_effort_override, skip_if=skip_if))
         self._defs = {**self._defs, **new_defs}
         self._schema = output_schema
         return self
@@ -248,6 +257,7 @@ class PhysicalPipeline:
         similarity_method: str = "embedding",
         depends_on: list[str] | None = None,
         reasoning_effort_override: str | None = None,
+        skip_if: Callable[[dict], bool] | None = None,
     ) -> "PhysicalPipeline":
         """
         Chunk long fields, retrieve their most relevant chunks, then LLM-filter over just
@@ -278,6 +288,7 @@ class PhysicalPipeline:
             similarity_threshold=similarity_threshold, embedding_model=embedding_model,
             similarity_method=similarity_method,
             depends_on=depends_on, reasoning_effort_override=reasoning_effort_override,
+            skip_if=skip_if,
         ))
         return self
 
@@ -293,6 +304,7 @@ class PhysicalPipeline:
         similarity_method: str = "embedding",
         depends_on: list[str] | None = None,
         reasoning_effort_override: str | None = None,
+        skip_if: Callable[[dict], bool] | None = None,
     ) -> "PhysicalPipeline":
         """
         Chunk long fields, retrieve their most relevant chunks, then LLM-derive new columns
@@ -320,6 +332,7 @@ class PhysicalPipeline:
             similarity_threshold=similarity_threshold, embedding_model=embedding_model,
             similarity_method=similarity_method,
             depends_on=depends_on, reasoning_effort_override=reasoning_effort_override,
+            skip_if=skip_if,
         ))
         self._defs = {**self._defs, **new_defs}
         self._schema = output_schema
@@ -486,8 +499,11 @@ class PhysicalPipeline:
         # _flat_ops() includes right-branch operators so all ops appear in per_op_list.
         stage_map: dict[int, dict] = {}
         for flat_idx, (op_name, op) in enumerate(self._flat_ops()):
+            op.errors = []
             op.logical_op_id = op.params_id
             op._pz_op.logical_op_id = op.params_id
+            if op._skip_op is not None:
+                op._skip_op.logical_op_id = op.params_id
             # Reset a join operator's cross-call accumulation before each run. NestedLoopsJoin /
             # NonLLMJoin keep _left/_right_input_records to build the full cross product from
             # incrementally-fed batches WITHIN a single run. But the pipeline is cached and
@@ -892,6 +908,8 @@ class PhysicalPipeline:
 
         plan_dict keys (each value is a single scalar):
             cost_usd, latency_s, input_tokens, output_tokens
+        plus plan_str, op_samples, and op_errors ({op_name: ["<count>x <message>"]}, see
+        _op_errors).
         """
         def _fmt_record(dr: DataRecord | None) -> str:
             if dr is None:
@@ -975,6 +993,7 @@ class PhysicalPipeline:
             "output_tokens": total_output_tokens,
             "plan_str": str(self),
             "op_samples": op_samples_dict,
+            "op_errors": self._op_errors(),
         }
 
         exec_stats = ExecutionStats(
@@ -1011,7 +1030,8 @@ class PhysicalPipeline:
         SubsetExecutionContext: sampled records, output records, and per-op samples
           (all operators, semantic and non-semantic) for use by QualityEvaluator and get_op_samples.
         plan_dict: plan-level totals; plan_dict["latency_s"] is the WALL-CLOCK time of the
-          subset execution (real elapsed, reflecting parallelism).
+          subset execution (real elapsed, reflecting parallelism). plan_dict["op_errors"]
+          holds the errors the operators hit (see _op_errors).
         """
         import os as _os
         if subset_cache_path is not None and _os.path.exists(subset_cache_path):
@@ -1177,8 +1197,21 @@ class PhysicalPipeline:
             "cost_usd": sum(op["cost_usd"] for op in per_op_list),
             "input_tokens": sum(op["input_tokens"] for op in per_op_list),
             "output_tokens": sum(op["output_tokens"] for op in per_op_list),
+            "op_errors": self._op_errors(),
         }
         return per_op_list, context, plan_dict
+
+    def _op_errors(self) -> dict[str, list[str]]:
+        """The errors each operator hit in the last execution, most frequent first, as
+        "<count>x <message>". An operator that raised on a record dropped that record from the
+        run; a failed or unparseable LLM call let the record through with a failed filter
+        verdict or None fields. Empty when nothing went wrong."""
+        report = {}
+        for op_name, op in self._flat_ops():
+            if op.errors:
+                counts = Counter(msg[:MAX_ERROR_CHARS] for msg in op.errors)
+                report[op_name] = [f"{n}x {msg}" for msg, n in counts.most_common(MAX_ERRORS_PER_OP)]
+        return report
 
     # ------------------------------------------------------------------
     # Oracle copy (for QualityEvaluator)
@@ -1205,6 +1238,7 @@ class PhysicalPipeline:
                     model=oracle_model,
                     depends_on=getattr(op, "depends_on", None),
                     reasoning_effort_override=oracle_reasoning_effort,
+                    skip_if=op.skip_if,
                 )
             elif isinstance(op, SemMap):
                 cols = getattr(op, "_cols_full", None)
@@ -1214,6 +1248,7 @@ class PhysicalPipeline:
                         model=oracle_model,
                         depends_on=getattr(op, "depends_on", None),
                         reasoning_effort_override=oracle_reasoning_effort,
+                        skip_if=op.skip_if,
                     )
             elif isinstance(op, RagFilter):
                 oracle.rag_filter(
@@ -1227,6 +1262,7 @@ class PhysicalPipeline:
                     similarity_method=op.attributes.get("similarity_method", "embedding"),
                     depends_on=getattr(op, "depends_on", None),
                     reasoning_effort_override=oracle_reasoning_effort,
+                    skip_if=op.skip_if,
                 )
             elif isinstance(op, RagMap):
                 cols = getattr(op, "_cols_full", None)
@@ -1242,6 +1278,7 @@ class PhysicalPipeline:
                         similarity_method=op.attributes.get("similarity_method", "embedding"),
                         depends_on=getattr(op, "depends_on", None),
                         reasoning_effort_override=oracle_reasoning_effort,
+                        skip_if=op.skip_if,
                     )
             elif isinstance(op, SemJoin):
                 # For a self-join, join the oracle with itself; else oracle-copy the right side.

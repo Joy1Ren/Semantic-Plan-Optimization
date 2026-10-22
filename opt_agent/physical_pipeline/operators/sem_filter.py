@@ -13,7 +13,7 @@ class SemFilter(Operator):
     stage_type = "filter"
     op_type = "sem_filter"
 
-    def __init__(self, condition: str, model: Model, schema, depends_on: list[str] | None = None, reasoning_effort_override: str | None = None):
+    def __init__(self, condition: str, model: Model, schema, depends_on: list[str] | None = None, reasoning_effort_override: str | None = None, skip_if=None):
         super().__init__()
         self.model = model
         eff = reasoning_effort_override if reasoning_effort_override is not None else _resolve_reasoning_effort(model)
@@ -29,3 +29,4 @@ class SemFilter(Operator):
         self.depends_on = depends_on
         self.attributes = {"condition": condition, "model": model.value, "reasoning_effort": eff, "depends_on": depends_on}
         self.params_id = _compute_op_id(self.op_type, self.attributes)
+        self._set_skip_if(skip_if)

@@ -50,6 +50,7 @@ def _dump_opt_debug_artifacts(
     runcount: Any = None,
     oracle_df: Any = None,
     evaluator: Any = None,
+    execution: int | None = None,
 ) -> None:
     """Write execute_plan's intermediate state under the run's opt_results directory, for
     debugging quality/per_sem_op_quality mysteries (e.g. comparing against a standalone re-run
@@ -73,6 +74,8 @@ def _dump_opt_debug_artifacts(
                                            per-record latencies)
                 per_sem_op_info.json       per-semantic-operator input/output samples
             p2/ ...
+            p3/e1/, p3/e2/, ...            the same files once per execution, when each plan is
+                                           executed several times (run_opt's --lower-variance)
 
     The run directory carries `runcount` so a second run of the same query keeps its own copies
     instead of overwriting the first run's (matching how trajectory/ and metrics/ filenames are
@@ -88,6 +91,8 @@ def _dump_opt_debug_artifacts(
     import pathlib as _pathlib
 
     out_dir = _pathlib.Path(results_prefix) / "opt_results" / run_key(query_id, runcount) / str(plan_name)
+    if execution is not None:
+        out_dir = out_dir / f"e{execution}"
     out_dir.mkdir(parents=True, exist_ok=True)
 
     raw_output_df.to_csv(out_dir / "raw_output.csv", index=False)

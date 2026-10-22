@@ -12,7 +12,7 @@ class SemMap(Operator):
     stage_type = "convert"
     op_type = "sem_map"
 
-    def __init__(self, cols: list[dict], model: Model, input_schema, output_schema, depends_on: list[str] | None = None, reasoning_effort_override: str | None = None):
+    def __init__(self, cols: list[dict], model: Model, input_schema, output_schema, depends_on: list[str] | None = None, reasoning_effort_override: str | None = None, skip_if=None):
         super().__init__()
         self.model = model
         eff = reasoning_effort_override if reasoning_effort_override is not None else _resolve_reasoning_effort(model)
@@ -34,3 +34,4 @@ class SemMap(Operator):
         self._cols_full = cols  # preserved for make_oracle_copy
         self.attributes = {"model": model.value, "reasoning_effort": eff, "cols": _cols_attribute(cols), "depends_on": depends_on}
         self.params_id = _compute_op_id(self.op_type, self.attributes)
+        self._set_skip_if(skip_if)

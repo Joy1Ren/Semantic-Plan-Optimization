@@ -116,6 +116,7 @@ class RagFilter(Operator):
         similarity_method: str = "embedding",
         depends_on: list[str] | None = None,
         reasoning_effort_override: str | None = None,
+        skip_if=None,
     ):
         super().__init__()
         self.model = model
@@ -149,3 +150,4 @@ class RagFilter(Operator):
             "depends_on": depends_on,
         }
         self.params_id = _compute_op_id(self.op_type, self.attributes)
+        self._set_skip_if(skip_if)

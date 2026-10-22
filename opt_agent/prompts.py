@@ -62,6 +62,8 @@ LLM-executed operators (these are what cost dollars and seconds):
   rag_map     — chunk a long field, retrieve the top chunks, LLM-map only those.
 Every LLM operator chooses: `model` (see the model catalog), and `depends_on` (which columns
   the operator is actually shown).
+  sem_filter/sem_map/rag_filter/rag_map can also take `skip_if` (records it matches bypass
+  the LLM call), which lets a cheap step decide which records reach an expensive one.
 The rag_* operators additionally choose HOW MUCH TEXT REACHES THE LLM:
   chunk_size            — chars per chunk; a fixed int, or an expression over the field's own
                           length (e.g. "max(10000, input_length / 5)").
@@ -187,6 +189,14 @@ def _per_op_info_text(text: str, enabled: bool) -> str:
     return _tagged_text(_tagged_text(text, "per_op_info", enabled), "no_per_op_info", not enabled)
 
 
+def _lower_variance_text(text: str, enabled: bool, n_executions: int) -> str:
+    """Resolve a prompt's `<lower_variance>` and `<no_lower_variance>` blocks (run_opt's
+    --lower-variance), then fill in the `{n_executions}` token: how many times each plan is
+    executed. A template that goes through `.format()` writes the token as `{{n_executions}}`."""
+    text = _tagged_text(_tagged_text(text, "lower_variance", enabled), "no_lower_variance", not enabled)
+    return text.replace("{n_executions}", str(n_executions))
+
+
 def _quality_metric_reminder(eval_metric: str | None, per_op_quality: bool = True) -> str:
     """One-line reminder of what `quality` measures, shown on every execute_plan result so the agent
     keeps the metric in mind — and understands why overall quality can diverge from per_sem_op_quality."""
@@ -295,6 +305,10 @@ Semantic operators — require a model= argument:
 All semantic operators have an optional "depends_on: list[str] | None" argument,
 which is a list of field names to pass in for the LLM call (instead of the full input schema).
 Using `depends_on` will reduce the LLM input and help reduce cost.
+sem_filter, sem_map, rag_filter and rag_map also take an optional `skip_if: Callable[[dict], bool]`:
+records for which it returns True bypass that operator's LLM call at no cost (a filter keeps
+them; a map leaves its new columns None). Use it to send only the records that need it to an
+expensive operator.
 {physical_sem_ops}
 
 Non-semantic operators — no model argument:
@@ -303,7 +317,7 @@ Non-semantic operators — no model argument:
 ## Available Models:
 All models listed support both text and image inputs. Use `add_image_data` with a `depends_on`
 that includes the image column to pass images to any model.
-Within each tier, cheaper options are listed first. Prefer the cheaper models unless improving
+Within each group, cheaper options are listed first. Prefer the cheaper models unless improving
 quality requires a more expensive model.
 {available_models}
 
@@ -321,6 +335,9 @@ separate minimal sandbox — see the write_plan tool description).
 - `plans`           : dict[str, dict] — {{name: {{"plan": PhysicalPipeline, "description": str, "optimizations": ...}}}}; populated by write_plan (updated by execute_plan)
 - `plan_codes`      : dict[str, str] — code strings stored by write_plan (keys = plan names)
 - `plan_results`    : the observed-execution store (`plan_results.rows`, `plan_results.df`)
+<lower_variance>
+- `plan_results_agg`: one row per executed plan, aggregated over its {{n_executions}} executions (`plan_results_agg.rows`, `plan_results_agg.df`)
+</lower_variance>
 <per_op_info>
 - `op_results`      : the observed-execution store (`op_results.rows`, `op_results.df`, `op_results.summary()`)
 </per_op_info>

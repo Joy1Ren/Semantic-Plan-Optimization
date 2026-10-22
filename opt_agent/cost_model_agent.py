@@ -30,6 +30,7 @@ from agent_cost_model.opt_agent.prompts import (
     _PHYSICAL_SEMANTIC_OPERATORS,
     _QUALITY_METRIC_DOCS,
     _SYSTEM_TEMPLATE,
+    _lower_variance_text,
     _per_op_info_text,
     _per_op_quality_text,
     _quality_metric_reminder,
@@ -56,6 +57,7 @@ class _RunContext:
     checker: "ExplorationCheckerAgent | None"
     quality_evaluator: Any
     plan_codes: dict
+    plan_results_agg: ResultsStore
 
 
 class CostModelAgent:
@@ -106,8 +108,19 @@ class CostModelAgent:
              the range of achievable quality/cost.
            - `plans[name]["plan"]` is populated immediately with the newly written PhysicalPipeline instance.
         3. Execute with `execute_plan(name)`:
+           <no_lower_variance>
            - Runs on a reproducible sample of records (same records across all plans).
            - Appends plan-level stats to `plan_results` (cost_usd, latency_s, tokens, quality).
+           </no_lower_variance>
+           <lower_variance>
+           - Executes the plan {n_executions} times, in parallel, on the same reproducible sample
+             of records (same records across all plans).
+           - Appends one row per execution to `plan_results` (`execution` = 1..{n_executions}), and
+             one row per plan to `plan_results_agg` with the mean and std over the executions
+             (`quality_avg`, `quality_std`, `cost_avg`, `cost_std`, `latency_wallclock_avg`,
+             `latency_wallclock_std`) and `n_unstable_records`, the number of records whose
+             output differed between executions.
+           </lower_variance>
            <per_op_info>
            - Appends per-operator stats to `op_results` (cost_usd, latency_s, tokens, num_records per op).
            </per_op_info>
@@ -120,6 +133,10 @@ class CostModelAgent:
         </no_per_op_info>
            - `quality`: 0–1 overall plan quality.
            - `quality_counts`: the TP/FP/FN/TN counts behind `quality`, for metrics built from counts.
+           <lower_variance>
+           - Compare plans on `plan_results_agg.df`; use `plan_results.df` to see how the
+             individual executions differ.
+           </lower_variance>
            <per_op_quality>
            - `per_sem_op_quality`: per-semantic-operator quality (0–1). Use to diagnose
              which operator is the bottleneck.
@@ -149,6 +166,41 @@ class CostModelAgent:
             optimization space: try different models and different logical structures.
            - Stop and give your final answer when the gains over your current best plan are
              marginal, or you run low on steps.
+        <lower_variance>
+
+        ## Execution variance
+        The same plan can score differently each time it is executed, so every plan is executed
+        {n_executions} times.
+        - Judge plans by `quality_avg`, and weigh the gap between two plans' averages against
+          their `quality_std`: a gap is meaningful only if it is large relative to the std.
+        - Lower variance is part of the goal. When `quality_avg` and cost are similar, prefer the
+          plan with the lower `quality_std`; when that is similar too, prefer the simpler plan.
+          Choose your final plan the same way.
+        - Start simple. A simple plan is often already stable: measure it and tune its settings
+          (wording, model, context) before adding operators. Keep an added operator (a verifier, a
+          pre-filter, an ensemble) only if it beats the plan without it by more than the noise.
+        - A small `n_unstable_records` means a few borderline records drive the variance:
+          compare an operator's samples across executions with `get_op_samples(...,
+          execution=k)` and make the wording decide them.
+        - Temperature is fixed, not a setting you choose: the GPT-5 family and o4-mini only run at
+          their default temperature (1), so they vary more between calls; every other model runs
+          at temperature 0.
+        - Ways to reduce variance, simplest first: state the condition or column description more
+          precisely (define the borderline cases; give a short example of what counts and what
+          does not); use a stronger model; or, if those fall short, ensemble -- get several
+          independent LLM judgments (the same or different models and wordings) and consolidate
+          them. Each judgment can also return a short reason column: an aggregator that reads the
+          reasons can weigh the judgments, not just count them.
+            # map: each judgment adds answer + reason columns; one final sem_map reads only those
+            p.sem_map(cols=[{"name": "ans_1", ...}, {"name": "why_1", "type": str, ...}], model=...)  # likewise ans_2/why_2
+            p.sem_map(cols=[{"name": "ans", ...}], model=..., depends_on=["ans_1", "why_1", "ans_2", "why_2"])
+            # filter: sem_filters in a row AND together, so vote with bool sem_map columns instead
+            p.sem_map(cols=[{"name": "vote_1", "type": bool, ...}, {"name": "why_1", "type": str, ...}], model=...)  # likewise vote_2/why_2
+            p.filter(lambda r: bool(r["vote_1"]) or bool(r["vote_2"]))             # both no: dropped
+            p.sem_filter("...", model=..., depends_on=[..., "why_1", "why_2"],    # decides only the splits
+                         skip_if=lambda r: bool(r["vote_1"]) and bool(r["vote_2"]))  # both yes: kept
+          An ensemble multiplies that operator's cost; weigh it like any other cost.
+        </lower_variance>
         """)
 
     final_answer_doc = textwrap.dedent("""\
@@ -185,6 +237,8 @@ class CostModelAgent:
         checker_every: int = 3,
         max_checker_vetoes: int = 2,
         cost_aware_opt: bool = False,
+        lower_variance: bool = False,
+        executions_per_plan: int = 3,
     ) -> None:
         self.llm = llm
         self.agent_dir = agent_dir
@@ -207,6 +261,13 @@ class CostModelAgent:
                 "quality is per-operator information."
             )
         self.per_operator_info = per_operator_info
+        # Lower-variance search: every plan is executed `executions_per_plan` times in parallel,
+        # the agent and the exploration checker are shown the spread, and the oracle's
+        # per-operator judging is turned off to pay for the extra executions.
+        self.lower_variance = lower_variance
+        self.n_executions = executions_per_plan if lower_variance else 1
+        if lower_variance:
+            self.oracle_operator_quality = False
         # The exploration checker reviews how well the optimization space has been explored:
         # after every `checker_every` executions, and once when the agent tries to finish. Its
         # model defaults to the main agent's. `max_checker_vetoes` bounds how many times it may
@@ -310,9 +371,11 @@ class CostModelAgent:
         self._log(f"[run] exploration checks → {out}")
 
     def _save_results_df(
-        self, results: ResultsStore, query_info: dict, final_answer: dict | None = None
+        self, results: ResultsStore, query_info: dict, final_answer: dict | None = None,
+        results_agg: ResultsStore | None = None,
     ) -> None:
-        """Dump the accumulated plan-level results table to CSV."""
+        """Dump the accumulated plan-level results table to CSV, plus the per-plan aggregate
+        table when plans were executed several times."""
         if not results.rows:
             return
         out = self._run_artifact("metrics", query_info, "_results.csv")
@@ -321,6 +384,14 @@ class CostModelAgent:
         df["query_id"] = query_info["query_id"]
         best_name = (final_answer or {}).get("best_plan", {}).get("name")
         df["final_selected"] = df["plan_name"] == best_name if best_name else False
+        if results_agg is not None and results_agg.rows:
+            agg = results_agg.df
+            agg["use_case"] = query_info["use_case"]
+            agg["query_id"] = query_info["query_id"]
+            agg["final_selected"] = agg["plan_name"] == best_name if best_name else False
+            agg_out = self._run_artifact("metrics", query_info, "_results_agg.csv")
+            agg.to_csv(agg_out, index=False)
+            self._log(f"[run] aggregate results table → {agg_out}")
         # re-attach large blob columns (stripped by results.df) and move them to the end
         for col in ["plan_str", "op_samples"]:
             if col not in df.columns:
@@ -331,7 +402,7 @@ class CostModelAgent:
 
     # -- prompt assembly ---------------------------------------------------
     def _system_prompt(self, tools: list[Tool], eval_metric: str | None = None) -> str:
-        return _per_op_info_text(_per_op_quality_text(_SYSTEM_TEMPLATE.format(
+        return _lower_variance_text(_per_op_info_text(_per_op_quality_text(_SYSTEM_TEMPLATE.format(
             briefing=self.briefing,
             quality_metric=_quality_metric_section(eval_metric),
             tools_doc="\n\n".join(t.doc for t in tools),
@@ -341,7 +412,7 @@ class CostModelAgent:
             max_steps=self.max_steps,
             cost_awareness=_COST_AWARENESS if self.cost_aware_opt else "",
             final_answer_doc=self.final_answer_doc,
-        ), self.oracle_operator_quality), self.per_operator_info)
+        ), self.oracle_operator_quality), self.per_operator_info), self.lower_variance, self.n_executions)
 
     def _opening_message(self, task: str, plans: dict, results: ResultsStore) -> str:
         plan_lines = []
@@ -524,6 +595,11 @@ class CostModelAgent:
         }
         if self.per_operator_info:
             variables["op_results"] = op_results
+        # One row per execute_plan call, aggregated over that call's executions. Filled (and
+        # shown to the agent) only in a lower-variance run.
+        plan_results_agg = ResultsStore([])
+        if self.lower_variance:
+            variables["plan_results_agg"] = plan_results_agg
 
         # Minimal sandbox variables for WritePlanTool: only what plan CODE needs to construct a
         # PhysicalPipeline — the source-table reader (required by PhysicalPipeline.__init__ for
@@ -570,6 +646,12 @@ class CostModelAgent:
                 subset_path=query_info.get("subset_path"),
                 oracle_operator_quality=self.oracle_operator_quality,
                 per_operator_info=self.per_operator_info,
+                n_executions=self.n_executions,
+                plan_results_agg=plan_results_agg,
+                # Repeated executions run on fresh copies of the plan, built from its code the
+                # same way the final full-dataset runs rebuild it.
+                rebuild_pipeline=lambda name: self._fresh_pipeline(name, plan_codes),
+                id_col=id_col,
             ),
         ]
 
@@ -615,6 +697,9 @@ class CostModelAgent:
                 verbose=self.verbose,
                 cost_aware=self.cost_aware_opt,
                 per_op_quality=self.oracle_operator_quality,
+                lower_variance=self.lower_variance,
+                n_executions=self.n_executions,
+                plan_results_agg=plan_results_agg,
             )
 
         tools = base_tools + [write_plan_tool]
@@ -649,6 +734,7 @@ class CostModelAgent:
         self._ctx = _RunContext(
             executor=executor, system=system, checker=checker,
             quality_evaluator=quality_evaluator, plan_codes=plan_codes,
+            plan_results_agg=plan_results_agg,
         )
         return self._ctx
 
@@ -691,6 +777,8 @@ class CostModelAgent:
                 "reasoning_effort": getattr(self.llm, "reasoning_effort", None),
                 "cost_aware_opt": self.cost_aware_opt,
                 "per_operator_info": self.per_operator_info,
+                "lower_variance": self.lower_variance,
+                "executions_per_plan": self.n_executions,
                 "cost": round(self.agent_cost_usd, 6),
             },
             "optimization_checker": {
@@ -919,7 +1007,10 @@ class CostModelAgent:
         executor, system, checker = ctx.executor, ctx.system, ctx.checker
 
         checker_consumed = 0  # exploration-checker trajectory rows already merged into the main one
-        checked_plan_rows = len(plan_results.rows)  # executions as of the last exploration check
+        # One entry per execute_plan call: a lower-variance run appends several plan_results
+        # rows per call, but exploring the space means running plans, not repeating them.
+        plan_calls = ctx.plan_results_agg if self.lower_variance else plan_results
+        checked_plan_rows = len(plan_calls.rows)  # plans executed as of the last exploration check
         step = 0
         while step < self.max_steps:
             step += 1
@@ -1031,8 +1122,8 @@ class CostModelAgent:
             # Every `checker_every` executions, review how well the optimization space has been
             # explored and pass any gap back to the agent as ordinary feedback. Counted in
             # EXECUTIONS, not steps: exploring the space means running plans, not writing them.
-            if checker is not None and len(plan_results.rows) - checked_plan_rows >= self.checker_every:
-                checked_plan_rows = len(plan_results.rows)
+            if checker is not None and len(plan_calls.rows) - checked_plan_rows >= self.checker_every:
+                checked_plan_rows = len(plan_calls.rows)
                 check = checker.check(
                     reason="periodic",
                     budget=self._cost_snapshot(ctx, plan_results, commit=False)
@@ -1097,7 +1188,9 @@ class CostModelAgent:
             result["plan_optimizations"] = {name: entry.get("optimizations") for name, entry in plans.items()}
             # Model settings and spend for every actor, including the core agent's own.
             result.update(self._run_config())
-        self._save_results_df(plan_results, query_info, final_answer=result)
+        self._save_results_df(
+            plan_results, query_info, final_answer=result, results_agg=ctx.plan_results_agg
+        )
         self._merge_sub_agent_trajectory(ctx.checker, "exploration_checker", step, checker_consumed)
         self._save_trajectory_df(query_info)
         self._save_exploration_checks(query_info)
@@ -1374,10 +1467,14 @@ class CostModelAgent:
             else:
                 self._log(f"[final_eval] no ground truth at {gt_path} — quality is N/A")
 
+            op_errors = plan_dict.get("op_errors")
+            if op_errors:
+                self._log(f"[final_eval] operator errors (run {final_run}): {op_errors}")
             runs[f"run{final_run}"] = {
                 "latency": round(total_latency, 4),
                 "cost": round(total_cost, 6),
                 "quality": quality,
+                **({"op_errors": op_errors} if op_errors else {}),
             }
 
         return runs, metric_type, n_runs
@@ -1407,7 +1504,8 @@ class CostModelAgent:
                 entry = {}
         plans_written = len(plan_codes) if plan_codes is not None else 0
         _executed_rows = [r.get("plan_name") for r in (plan_results.rows if plan_results is not None else []) if r.get("plan_name")]
-        plans_executed = len(_executed_rows)
+        # Rows come in complete groups of n_executions (execute_plan appends all or none).
+        plans_executed = len(_executed_rows) // self.n_executions
         unique_plans_executed = len(set(_executed_rows))
         metrics_key = run_key(query_id, runcount).removeprefix("Q")
         # Agent-search-level fields once, then per-run full-dataset execution metrics nested under runK.

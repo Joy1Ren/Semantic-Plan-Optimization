@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import pathlib
-from typing import Any
+from concurrent.futures import ThreadPoolExecutor
+from typing import Any, Callable
 
 from agent_cost_model.opt_agent import run_log
 from agent_cost_model.opt_agent.cost_model_types import ResultsStore, _dump_opt_debug_artifacts
@@ -76,6 +77,9 @@ Retrieve sample (input, output) pairs for an executed plan from `plan_results`.
 several at once. Ask only for the operators you actually want to look at: samples are long,
 and a plan's operators often repeat each other's fields.
 Returns at most `n` samples per operator.
+<lower_variance>
+Pass `execution=k` (1..{n_executions}) for a specific execution's samples; the default is the last one.
+</lower_variance>
 
 ```python
 get_op_samples("p1", "p1_op2_sem_map", n=5)                  # up to 5 samples from one operator
@@ -85,18 +89,24 @@ get_op_samples("p1", ["p1_op1_sem_filter", "p1_op2_sem_map"])  # two operators s
     def __init__(self, plan_results: ResultsStore) -> None:
         self._plan_results = plan_results
 
-    def __call__(self, plan_name: str, op_name: str | list[str], n: int = 3) -> str:
+    def __call__(
+        self, plan_name: str, op_name: str | list[str], n: int = 3, execution: int | None = None
+    ) -> str:
         if not op_name:
             return "You must specify an operator name (e.g. 'p1_op2_sem_map') to retrieve samples."
         requested = [op_name] if isinstance(op_name, str) else list(op_name)
-        # The LAST row for this plan: re-executing a plan appends another row, and the samples
-        # have to belong to the same execution as the numbers the agent is reading. (The
-        # exploration checker resolves the same duplication the same way.)
+        # The LAST row for this plan (and execution, when one is named): re-executing a plan
+        # appends another row, and the samples have to belong to the same execution as the
+        # numbers the agent is reading. (The exploration checker resolves the same duplication
+        # the same way.)
         row = next(
-            (r for r in reversed(self._plan_results.rows) if r.get("plan_name") == plan_name),
+            (r for r in reversed(self._plan_results.rows) if r.get("plan_name") == plan_name
+             and (execution is None or r.get("execution") == execution)),
             None,
         )
         if row is None:
+            if execution is not None:
+                return f"No execution {execution} of plan {plan_name!r}."
             available = [r.get("plan_name") for r in self._plan_results.rows]
             return f"No executed plan named {plan_name!r}. Available: {available}"
         samples = row.get("op_samples", {})
@@ -309,6 +319,11 @@ latency, cost, and token usage are appended to `plan_results`. After execution,
 
 Returns a compact summary dict with plan stats. Key fields:
 </no_per_op_info>
+<lower_variance>
+The plan is executed {n_executions} times in parallel on the same sample. The result holds
+`executions` (one summary per execution, with the fields below) followed by `aggregate`, the
+plan's new row in `plan_results_agg`.
+</lower_variance>
 - `quality`: 0–1 overall plan quality evaluated by an oracle. Higher is better.
   Treat oracle quality scores as ground truth.
 <per_op_quality>
@@ -320,6 +335,10 @@ Returns a compact summary dict with plan stats. Key fields:
 - `quality_counts` (only for metrics built from counts): the TP/FP/FN/TN behind `quality`,
   split by reason where a Jaccard gate applies. Use it to tell missed records from wrong ones.
 - `cost_usd`, `latency_s`, `input_tokens`, `output_tokens`: aggregated over all ops.
+- `op_errors` (only when something went wrong): per operator, the errors it hit, as
+  "<count>x <message>". A record whose operator raised (e.g. a Python lambda that failed) was
+  dropped from the run; a record whose LLM call failed went on with a failed filter verdict or
+  None fields. Either way `quality` reflects the bug, not the plan's idea: fix it and re-run.
 <per_op_info>
 To inspect accumulated results use `plan_results.df` and `op_results.df`.
 To view sample input/output pairs use `get_op_samples(plan_name, op_name)`, where `op_name` is one
@@ -350,6 +369,10 @@ execute_plan("p1")
         runcount: Any = None,
         oracle_operator_quality: bool = True,
         per_operator_info: bool = True,
+        n_executions: int = 1,
+        plan_results_agg: ResultsStore | None = None,
+        rebuild_pipeline: Callable[[str], Any] | None = None,
+        id_col: str = "idx",
     ) -> None:
         import pathlib
 
@@ -369,40 +392,120 @@ execute_plan("p1")
         self._results_prefix = pathlib.Path(results_prefix)
         self._runcount = runcount
         self._subset_path = pathlib.Path(subset_path) if subset_path else None
+        # How many times one execute_plan call executes the plan (run_opt's --lower-variance).
+        # Above 1, each extra execution runs on a fresh copy rebuilt from the plan's code, and
+        # every call adds one aggregate row to plan_results_agg.
+        self._n_executions = n_executions
+        self._plan_results_agg = plan_results_agg
+        self._rebuild_pipeline = rebuild_pipeline
+        self._id_col = id_col
 
     def __call__(self, plan_name: str) -> dict:
-        import pandas as pd
-
         entry = self._plans.get(plan_name)
         if entry is None:
             raise KeyError(
                 f"No plan named {plan_name!r}. Call write_plan first. "
                 f"Available: {list(self._plans)}"
             )
-        pipeline = entry["plan"]
-
         if self._subset_path is None:
             raise ValueError(
                 "execute_plan needs a datasubset to run on, but no subset_path was supplied. "
                 "It comes from the benchmark's `subset_path` (see benchmark.yaml), threaded "
                 "through query_info by the runner."
             )
-        subset_path = self._subset_path
-        plan_exec_error: Exception | None = None
-        per_op_list, plan_context, plan_dict = [], None, {}
+
+        # One pipeline per execution: a pipeline carries per-run operator state (join
+        # accumulators, RAG retrieval contexts), so concurrent executions cannot share one. The
+        # copies are built one at a time because the plan sandbox is not thread-safe.
+        pipelines = [entry["plan"]]
+        for _ in range(self._n_executions - 1):
+            pipeline = self._rebuild_pipeline(plan_name)
+            if pipeline is None:
+                raise RuntimeError(f"Could not rebuild plan {plan_name!r} for a repeated execution.")
+            pipelines.append(pipeline)
+        if len(pipelines) == 1:
+            runs = [self._run_once(plan_name, pipelines[0])]
+        else:
+            with ThreadPoolExecutor(max_workers=len(pipelines)) as pool:
+                runs = list(pool.map(lambda p: self._run_once(plan_name, p), pipelines))
+        entry["plan"] = pipelines[0]
+
+        # Scored one at a time: the evaluator keeps per-call state (last_quality_counts, and in
+        # oracle mode a per-plan oracle cache).
+        repeated = self._n_executions > 1
+        executions = [k if repeated else None for k in range(1, len(pipelines) + 1)]
+        scored = [
+            self._score(plan_name, pipeline, run, execution)
+            for pipeline, run, execution in zip(pipelines, runs, executions)
+        ]
+        error = next((run[3] for run in runs if run[3] is not None), None)
+        if error is not None:
+            raise RuntimeError(
+                f"Plan {plan_name!r} execution failed: {type(error).__name__}: {error}"
+            )
+
+        plan_rows = [
+            self._plan_row(plan_name, entry, pipeline, run, quality_result, execution)
+            for pipeline, run, (quality_result, _), execution in zip(pipelines, runs, scored, executions)
+        ]
+        self._plan_results.append(plan_rows)
+        if self._per_operator_info:
+            for (per_op_list, _, _, _), execution in zip(runs, executions):
+                self._op_results.append(
+                    [{**o, "execution": execution} for o in per_op_list] if repeated else per_op_list
+                )
+
+        summaries = [
+            {
+                **({"execution": execution} if repeated else {}),
+                "plan_summary": self._plan_summary(row, quality_result, repeated),
+                **({"op_summary": run[0]} if self._per_operator_info else {}),
+            }
+            for row, run, (quality_result, _), execution in zip(plan_rows, runs, scored, executions)
+        ]
+        quality_metric = _quality_metric_reminder(self._eval_metric, self._oracle_operator_quality)
+        if repeated:
+            agg_row = self._aggregate(plan_name, entry, plan_rows, [out for _, out in scored])
+            self._plan_results_agg.append([agg_row])
+            return {"executions": summaries, "quality_metric": quality_metric, "aggregate": agg_row}
+
+        # Remind the agent, on every execution, what `quality` means and how it differs from
+        # per_sem_op_quality (context for why the two can diverge), plus how each per-op score in
+        # THIS plan is computed -- the definition differs by operator type, and a rag_* score in
+        # particular measures only the LLM step, not retrieval.
+        result = {**summaries[0], "quality_metric": quality_metric}
+        sem_op_docs = (
+            _sem_op_quality_docs(o.get("op_type") for o in runs[0][0])
+            if self._oracle_operator_quality else {}
+        )
+        if sem_op_docs:
+            result["per_sem_op_quality_metric"] = sem_op_docs
+        return result
+
+    def _run_once(self, plan_name: str, pipeline: Any) -> tuple[list, Any, dict, Exception | None]:
+        """Execute one pipeline on the subset: (per_op_list, plan_context, plan_dict, error)."""
         try:
             # The plan is (re)executed on the subset every time — never cached — so that
             # plan_dict["latency_s"] is a real WALL-CLOCK measurement of this run. (Only the
             # oracle, which is used purely for quality scoring, is cached across plans.)
-            per_op_list, plan_context, plan_dict = pipeline.run_subset(subset_cache_path=str(subset_path))
+            per_op_list, plan_context, plan_dict = pipeline.run_subset(
+                subset_cache_path=str(self._subset_path)
+            )
+            return per_op_list, plan_context, plan_dict, None
         except Exception as e:
-            plan_exec_error = e
             print(f"[execute_plan] plan execution failed for {plan_name}: {type(e).__name__}: {e}")
             run_log.log_error(
                 "plan-exec", f"{type(e).__name__}: {e}", content=f"plan={plan_name}", exc=e
             )
-        entry["plan"] = pipeline
+            return [], None, {}, e
 
+    def _score(
+        self, plan_name: str, pipeline: Any, run: tuple, execution: int | None
+    ) -> tuple[Any, "pd.DataFrame"]:
+        """Score one execution and write its debug artifacts: (quality_result, raw output)."""
+        import pandas as pd
+
+        per_op_list, plan_context, plan_dict, _ = run
         raw_output_df = pd.DataFrame(
             plan_context.output_records if plan_context is not None else []
         )
@@ -432,24 +535,14 @@ execute_plan("p1")
                     "quality-eval", f"{type(e).__name__}: {e}", content=f"plan={plan_name}", exc=e
                 )
 
-        total_cost = sum(e.get("cost_usd", 0) for e in per_op_list)
-        # latency_s: SUM of per-op per-record latencies (serial-equivalent). Kept as the plan's
-        # "actual latency" for the cost-model est-vs-act comparison, whose prediction (est.time)
-        # is also a per-op sum. wall_latency_s: real WALL-CLOCK time of this subset execution
-        # (from plan_dict), which reflects the join/convert parallelism.
-        total_latency = sum(e.get("latency_s", 0) for e in per_op_list)
-        wall_latency_s = float(plan_dict.get("latency_s", 0.0) or 0.0)
-        total_in_tok = sum(e.get("input_tokens", 0) for e in per_op_list)
-        total_out_tok = sum(e.get("output_tokens", 0) for e in per_op_list)
-
         try:
             _dump_opt_debug_artifacts(
                 self._results_prefix, self._query_id, plan_name,
                 raw_output_df, plan_output_df, plan_context, quality_result,
                 plan_metrics={
-                    "cost_usd": total_cost,
-                    "latency_s": total_latency,
-                    "wall_latency_s": wall_latency_s,
+                    "cost_usd": sum(e.get("cost_usd", 0) for e in per_op_list),
+                    "latency_s": sum(e.get("latency_s", 0) for e in per_op_list),
+                    "wall_latency_s": float(plan_dict.get("latency_s", 0.0) or 0.0),
                     "op_summary": per_op_list,
                 },
                 runcount=self._runcount,
@@ -458,76 +551,102 @@ execute_plan("p1")
                 # here -- the evaluator owns it and writes one shared copy at the run level.
                 oracle_df=getattr(self._quality_evaluator, "last_oracle_df", None),
                 evaluator=self._quality_evaluator,
+                execution=execution,
             )
         except Exception as e:
             print(f"[execute_plan] opt_results debug dump failed for {plan_name}: {type(e).__name__}: {e}")
             run_log.log_error(
                 "debug-dump", f"{type(e).__name__}: {e}", content=f"plan={plan_name}", exc=e
             )
+        return quality_result, raw_output_df
 
-        if plan_exec_error is not None:
-            raise RuntimeError(
-                f"Plan {plan_name!r} execution failed: {type(plan_exec_error).__name__}: {plan_exec_error}"
-            )
-
+    def _plan_row(
+        self, plan_name: str, entry: dict, pipeline: Any, run: tuple, quality_result: Any,
+        execution: int | None,
+    ) -> dict:
+        per_op_list, plan_context, plan_dict, _ = run
         # Build op_samples for GetOpSamplesTool. Records are stored field by field (each value
         # capped at SAMPLE_FIELD_CHARS) so the display can budget and de-duplicate them; op_type
         # rides along so the display knows e.g. that a filter's output is just a verdict.
         op_samples: dict[str, dict] = {}
         for _stage_idx, info in plan_context.per_sem_op_info.items():
-            op_n = info["op_name"]
             raw_samples = info.get("samples", [])
-            op_samples[op_n] = {
+            op_samples[info["op_name"]] = {
                 "op_type": info.get("op_type", ""),
                 "samples": [
                     {"input": _record_fields(inp), "output": _record_fields(out)}
                     for inp, out in raw_samples[:5]
                 ],
             }
-
-        plan_row = {
+        # latency_s: SUM of per-op per-record latencies (serial-equivalent). Kept as the plan's
+        # "actual latency" for the cost-model est-vs-act comparison, whose prediction (est.time)
+        # is also a per-op sum. wall_latency_s: real WALL-CLOCK time of this subset execution
+        # (from plan_dict), which reflects the join/convert parallelism.
+        return {
             "plan_name": plan_name,
+            **({"execution": execution} if execution is not None else {}),
             "description": entry.get("description", ""),
             "optimizations": entry.get("optimizations"),
             "plan_str": str(pipeline),
-            "cost_usd": total_cost,
-            "latency_s": total_latency,
-            "wall_latency_s": wall_latency_s,
-            "input_tokens": total_in_tok,
-            "output_tokens": total_out_tok,
+            "cost_usd": sum(e.get("cost_usd", 0) for e in per_op_list),
+            "latency_s": sum(e.get("latency_s", 0) for e in per_op_list),
+            "wall_latency_s": float(plan_dict.get("latency_s", 0.0) or 0.0),
+            "input_tokens": sum(e.get("input_tokens", 0) for e in per_op_list),
+            "output_tokens": sum(e.get("output_tokens", 0) for e in per_op_list),
             "quality": quality_result.quality if quality_result is not None else float("nan"),
             **({"per_sem_op_quality": (
                 quality_result.per_sem_op_quality if quality_result is not None else {}
             )} if self._oracle_operator_quality else {}),
             "quality_counts": quality_result.quality_counts if quality_result is not None else None,
             **({"op_samples": op_samples} if self._per_operator_info else {}),
+            # Shown whatever the agent's mode: errors explain a score, they are not extra info.
+            **({"op_errors": plan_dict["op_errors"]} if plan_dict.get("op_errors") else {}),
         }
-        self._plan_results.append([plan_row])
-        if self._per_operator_info:
-            self._op_results.append(per_op_list)
 
-        plan_summary = {k: v for k, v in plan_row.items() if k not in ("op_samples", "plan_str")}
-        if plan_summary["quality_counts"] is None:
-            del plan_summary["quality_counts"]
+    @staticmethod
+    def _plan_summary(plan_row: dict, quality_result: Any, repeated: bool) -> dict:
+        # A repeated execution's description and optimizations are the aggregate's; repeating
+        # them in every execution's summary would only lengthen the observation.
+        dropped = ("op_samples", "plan_str", "execution") + (("description", "optimizations") if repeated else ())
+        summary = {k: v for k, v in plan_row.items() if k not in dropped}
+        if summary["quality_counts"] is None:
+            del summary["quality_counts"]
         # When quality is N/A because the oracle returned no rows, explain it in the observation so
         # the agent doesn't read the bare NaN as a failed plan.
         if quality_result is not None and getattr(quality_result, "quality_note", None):
-            plan_summary["quality_note"] = quality_result.quality_note
-        # Remind the agent, on every execution, what `quality` means and how it differs from
-        # per_sem_op_quality (context for why the two can diverge), plus how each per-op score in
-        # THIS plan is computed -- the definition differs by operator type, and a rag_* score in
-        # particular measures only the LLM step, not retrieval.
-        result = {
-            "plan_summary": plan_summary,
-            **({"op_summary": per_op_list} if self._per_operator_info else {}),
-            "quality_metric": _quality_metric_reminder(
-                self._eval_metric, self._oracle_operator_quality
-            ),
+            summary["quality_note"] = quality_result.quality_note
+        return summary
+
+    def _aggregate(
+        self, plan_name: str, entry: dict, plan_rows: list[dict], outputs: list["pd.DataFrame"]
+    ) -> dict:
+        import pandas as pd
+
+        df = pd.DataFrame(plan_rows)
+        return {
+            "plan_name": plan_name,
+            "description": entry.get("description", ""),
+            "quality_avg": df["quality"].mean(),
+            "quality_std": df["quality"].std(),
+            "cost_avg": df["cost_usd"].mean(),
+            "cost_std": df["cost_usd"].std(),
+            "latency_wallclock_avg": df["wall_latency_s"].mean(),
+            "latency_wallclock_std": df["wall_latency_s"].std(),
+            "n_unstable_records": _n_unstable_records(outputs, self._id_col),
         }
-        sem_op_docs = (
-            _sem_op_quality_docs(o.get("op_type") for o in per_op_list)
-            if self._oracle_operator_quality else {}
-        )
-        if sem_op_docs:
-            result["per_sem_op_quality_metric"] = sem_op_docs
-        return result
+
+
+def _n_unstable_records(outputs: list["pd.DataFrame"], id_col: str) -> int | None:
+    """How many records' output differs between executions; a record that one execution did not
+    return counts as differing. None when the output carries no id column (e.g. an aggregate)."""
+    if any(not df.empty and id_col not in df.columns for df in outputs):
+        return None
+
+    def view(df) -> dict:
+        rows: dict[str, list] = {}
+        for r in df.astype(str).to_dict("records"):
+            rows.setdefault(r.pop(id_col), []).append(tuple(sorted(r.items())))
+        return {k: sorted(v) for k, v in rows.items()}
+
+    views = [view(df) for df in outputs]
+    return sum(len({repr(v.get(i)) for v in views}) > 1 for i in set().union(*views))
