@@ -13,6 +13,9 @@ Usage:
         --benchmark cuad_categories --query-ids 2 14
     PYTHONPATH=. python -m agent_cost_model.experiments.run_baseline \\
         --benchmark SemBench --use-case ecomm --scale-factors 500 2000 --query-ids 1 3
+    # 3 more runs, saved as runs 3-5, keeping runs 1-2
+    PYTHONPATH=. python -m agent_cost_model.experiments.run_baseline \
+        --benchmark cuad_categories --runs 3 --first-run 3
 """
 from __future__ import annotations
 
@@ -20,6 +23,7 @@ import argparse
 import importlib
 import json
 import os
+import re
 from pathlib import Path
 
 import pandas as pd
@@ -69,7 +73,7 @@ def build_pipeline(code: str, plan_name: str, data_dir: Path, source_csv: str,
 
 
 def run_query(benchmark: dict, use_case: str, query_id: str, scale_factor, code: str,
-              num_runs: int, repo_root) -> None:
+              num_runs: int, first_run: int, repo_root) -> None:
     use_case_config = benchmark["use_cases"][use_case]
     dataset_config = use_case_config["dataset"]
     context = build_context(benchmark, runner="baseline", use_case=use_case,
@@ -95,12 +99,19 @@ def run_query(benchmark: dict, use_case: str, query_id: str, scale_factor, code:
     if not has_gt:
         print(f"[baseline] no ground truth at {gt_path} -- quality will be NaN")
 
+    metrics_path = out_dir / "metrics.json"
+    previous = (json.loads(metrics_path.read_text()) if metrics_path.exists() else {}).get(query_id, {})
+    if first_run > 1 and previous.get("plan_code") != code:
+        raise ValueError(f"plan code differs from the one runs 1-{first_run - 1} executed")
     entry = {"query_id": query_id, "metric_type": metric, "plan_code": code}
     if scale_factor is not None:
         entry["scale_factor"] = scale_factor
-    for k in range(1, num_runs + 1):
+    entry.update({k: v for k, v in previous.items()
+                  if re.fullmatch(r"run\d+", k) and int(k[3:]) < first_run})
+    last_run = first_run + num_runs - 1
+    for k in range(first_run, last_run + 1):
         label = f"{use_case} Q{query_id}" + (f" sf={scale_factor}" if scale_factor is not None else "")
-        print(f"[baseline] {label} run {k}/{num_runs}")
+        print(f"[baseline] {label} run {k}/{last_run}")
         pipeline = build_pipeline(code, f"baseline_q{query_id}", data_dir, source_csv,
                                   dataset_config.get("id_col", "idx"),
                                   dataset_config.get("image_subdir", "images"))
@@ -122,7 +133,6 @@ def run_query(benchmark: dict, use_case: str, query_id: str, scale_factor, code:
         }
         print(f"[baseline] {label} run {k}: {entry[f'run{k}']}")
 
-    metrics_path = out_dir / "metrics.json"
     metrics = json.loads(metrics_path.read_text()) if metrics_path.exists() else {}
     metrics[query_id] = entry
     metrics = dict(sorted(metrics.items(), key=lambda kv: int(kv[0])))
@@ -140,6 +150,9 @@ def main() -> None:
     parser.add_argument("--query-ids", nargs="+", default=None,
                         help="default: every query with a baseline plan for this use case")
     parser.add_argument("--runs", type=int, default=2, help="executions per query (default: %(default)s)")
+    parser.add_argument("--first-run", type=int, default=1,
+                        help="number of the first run; earlier runs in metrics.json are kept "
+                             "(default: %(default)s)")
     parser.add_argument("--plans", type=Path, default=None,
                         help="default: baseline_plans.yaml beside the benchmark's benchmark.yaml")
     args = parser.parse_args()
@@ -170,7 +183,8 @@ def main() -> None:
     for scale_factor in args.scale_factors or [None]:
         for query_id in query_ids:
             try:
-                run_query(benchmark, use_case, query_id, scale_factor, plans[query_id], args.runs, repo_root)
+                run_query(benchmark, use_case, query_id, scale_factor, plans[query_id], args.runs,
+                          args.first_run, repo_root)
             except Exception as e:
                 print(f"[baseline] {use_case} Q{query_id} sf={scale_factor} failed: {type(e).__name__}: {e}")
 

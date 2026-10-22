@@ -40,6 +40,10 @@ def patch_litellm_for_openrouter() -> None:
     def _openrouter_completion(model, **kwargs):
         if not model.startswith("openrouter/"):
             model = "openrouter/" + model
+        # Palimpzest's Generator turns ANY exception into an empty answer (a filter drops the
+        # record, a map returns None) without retrying, so a transient 429/timeout would
+        # otherwise be scored as a wrong answer. litellm retries these with backoff first.
+        kwargs.setdefault("num_retries", 3)
         return _orig_completion(model=model, **kwargs)
 
     _litellm.completion = _openrouter_completion
