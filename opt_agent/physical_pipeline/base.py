@@ -3,9 +3,14 @@ physical-pipeline operators (agent_cost_model/physical_pipeline/operators/*.py) 
 by the `PhysicalPipeline` fluent interface (pipeline.py)."""
 from __future__ import annotations
 
+import ast
 import hashlib
 import inspect
 import json
+import logging
+import re
+import sys
+import threading
 from dataclasses import dataclass
 from typing import Any
 
@@ -22,6 +27,7 @@ from .constants import (  # noqa: F401
     SUBSET_SEED,
     _RAG_EMBEDDING_BASE_URL,
 )
+from .openrouter_models import register_openrouter_models
 
 
 def _patch_convert_empty_field_answers() -> None:
@@ -195,6 +201,53 @@ def _patch_convert_coerce_str_field_answers() -> None:
 _patch_convert_coerce_str_field_answers()
 
 
+def _patch_get_json_from_answer() -> None:
+    """Make installed palimpzest 1.5.3's `get_json_from_answer` recover two answers json.loads
+    rejects, which otherwise give the record None for every field the op generates. Palimpzest
+    handles both only for Llama models.
+
+    "Extra data": gpt-4o-mini often answers a map with the JSON, then the `---` palimpzest's
+    prompt asks it to finish with, then the same JSON again. The parser keeps everything from the
+    first `{` to the last `}`, so keep just the first value.
+
+    "Expecting value": the model writes Python's True/False/None instead of JSON's
+    true/false/null. Read it as a Python literal, which leaves those words inside strings alone.
+
+    A recovered value counts only if it is the object (one-to-one) or array (one-to-many) the
+    parser was looking for; a bare answer like `11` keeps the original error."""
+    from palimpzest.constants import Cardinality
+    from palimpzest.query.generators import generators
+
+    if getattr(generators, "_agent_cost_model_get_json_patched", False):
+        return
+    _orig = generators.get_json_from_answer
+
+    def _parse(answer, model, cardinality):
+        try:
+            return _orig(answer, model, cardinality)
+        except json.JSONDecodeError as e:
+            expected = dict if cardinality == Cardinality.ONE_TO_ONE else list
+            try:
+                if e.msg == "Extra data":
+                    value = json.loads(e.doc[: e.pos])
+                elif e.msg == "Expecting value":
+                    value = ast.literal_eval(e.doc)
+                else:
+                    raise e
+            except (ValueError, SyntaxError):
+                raise e from None
+            if not isinstance(value, expected):
+                raise e
+            return value
+
+    generators.get_json_from_answer = _parse
+    generators._agent_cost_model_get_json_patched = True
+
+
+_patch_get_json_from_answer()
+register_openrouter_models()
+
+
 def _str_to_pz_model(model_str: str) -> Model:
     """Map an OpenRouter/PZ model string to pz.Model enum value.
 
@@ -231,16 +284,18 @@ class SubsetExecutionContext:
 
 
 def _resolve_reasoning_effort(model: Model) -> str | None:
-    """Mirror PZ optimizer logic: disable thinking tokens for reasoning models by default."""
+    """Every reasoning model's operators run at low effort, whatever the provider (MOAR's
+    operators too, see docetl's sembench_run.py)."""
     if model is None or not model.is_reasoning_model():
         return None
-    if model.is_provider_vertex_ai() or model.is_provider_google_ai_studio():
-        if model in (getattr(Model, 'GEMINI_2_5_PRO', None), getattr(Model, 'GOOGLE_GEMINI_2_5_PRO', None)):
-            return "low"
-        return "disable"
-    if model.is_provider_openai() or model.is_provider_azure():
-        return "low"
-    return None
+    return "low"
+
+
+def _no_reasoning_prompt(model: Model, effort: str | None) -> bool:
+    """Whether an operator gets pz's prompt without a written REASONING section: a reasoning
+    model at low effort or below already reasons internally (pz's own rule, see
+    palimpzest.utils.model_helpers.use_reasoning_prompt)."""
+    return model.is_reasoning_model() and effort in (None, "minimal", "low", "disable")
 
 
 def _compute_op_id(op_type: str, params: dict) -> str:
@@ -311,6 +366,36 @@ def _has_image_field(schema, field_names: list[str] | None) -> bool:
     return False
 
 
+# The operator a worker thread is running a record through, so an error palimpzest only logs can
+# be charged to it (see _OpErrorLog).
+_current_op = threading.local()
+
+
+class _OpErrorLog(logging.Handler):
+    """Palimpzest handles a failed LLM call or an unparseable answer itself -- the record just
+    fails the filter or gets None fields -- and only logs it. Charge each such log line to the
+    operator whose call produced it, so the error reaches the plan's `op_errors`.
+
+    A filter's unparseable answer arrives with the whole completion, which palimpzest already
+    saves to parse-answer-errors/. Keep only what follows its last "ANSWER:" -- the verdict the
+    parser rejected -- so the console stays readable and repeats of the same verdict group into
+    one `op_errors` count."""
+
+    def emit(self, record: logging.LogRecord) -> None:
+        msg, sep, completion = record.getMessage().partition(" from completion text: ")
+        if sep:
+            answer = re.split(r"(?i)answer:", completion)[-1].replace("---", "").strip()
+            msg += f": the answer {answer[-100:]!r} has neither TRUE nor FALSE, so the record failed the filter"
+        # A handler here stops logging's fallback printing to stderr; keep that output.
+        sys.stderr.write(msg + "\n")
+        op = getattr(_current_op, "op", None)
+        if op is not None:
+            op.errors.append(msg)
+
+
+logging.getLogger("palimpzest").addHandler(_OpErrorLog(level=logging.ERROR))
+
+
 class Operator:
     """Base class for PhysicalPipeline operators.
 
@@ -339,12 +424,60 @@ class Operator:
 
     def __init__(self):
         self.logical_op_id: str | None = None
+        self.skip_if = None
+        self._skip_op = None
+        # Errors from the current execution, one entry per occurrence; the pipeline resets
+        # them before each run and reports them as the plan's `op_errors`.
+        self.errors: list[str] = []
 
     def __call__(self, *args, **kwargs):
-        return self._pz_op(*args, **kwargs)
+        _current_op.op = self
+        try:
+            if self._skip_op is not None and self.skip_if(args[0].to_dict()):
+                return self._skip_op(args[0])
+            return self._pz_op(*args, **kwargs)
+        except Exception as e:
+            # The pipeline drops a record whose operator raised; this is the only trace of why.
+            self.errors.append(f"{type(e).__name__}: {e}")
+            raise
+        finally:
+            _current_op.op = None
+
+    def _set_skip_if(self, skip_if) -> None:
+        """Send the records `skip_if` matches to a zero-cost pass-through instead of the LLM op:
+        a filter keeps them, a convert leaves its new columns None. Enters `attributes` (and so
+        `params_id`) only when set, so an operator without one keeps the id it always had."""
+        if skip_if is None:
+            return
+        from collections import defaultdict
+
+        from palimpzest.core.elements.filters import Filter
+        from palimpzest.query.operators.convert import NonLLMConvert
+        from palimpzest.query.operators.filter import NonLLMFilter
+
+        schemas = {"input_schema": self._pz_op.input_schema, "output_schema": self._pz_op.output_schema}
+        if self.stage_type == "filter":
+            self._skip_op = NonLLMFilter(filter=Filter(filter_fn=lambda r: True), **schemas)
+        else:
+            self._skip_op = NonLLMConvert(udf=lambda r: defaultdict(lambda: None), **schemas)
+        self.skip_if = skip_if
+        self.attributes["skip_if"] = _fn_source(skip_if)
+        self.params_id = _compute_op_id(self.op_type, self.attributes)
 
     def __str__(self) -> str:
         if not self.attributes:
             return self.op_type
         attr_str = "\n".join(f"{k}={v!r}" for k, v in self.attributes.items())
         return f"{self.op_type}({attr_str})"
+
+
+def row_id_str(value) -> str:
+    """A row id as it names files on disk (<image_subdir>/<id>.jpg).
+
+    A UDF can get an integer id back as a float: palimpzest's DataRecord.to_dict() goes through
+    pd.Series, which upcasts a record whose fields are all numeric (e.g. ecomm Q9's idx + price)
+    to float64, so 50194 arrives as 50194.0.
+    """
+    if isinstance(value, float) and value.is_integer():
+        return str(int(value))
+    return str(value)

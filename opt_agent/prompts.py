@@ -8,13 +8,13 @@ import pathlib
 import re
 
 _PHYSICAL_SEMANTIC_OPERATORS = {
-    "sem_filter": "pipeline.sem_filter(condition: str, model: pz.Mode) — LLM filter; keeps rows where condition is true.",
+    "sem_filter": "pipeline.sem_filter(condition: str, model: pz.Model) — LLM filter; LLM is asked to answer TRUE or FALSE for the 'condition' and only rows with response TRUE are kept.",
     "sem_map": "pipeline.sem_map(cols: list[dict], model: pz.Model) — Add LLM-derived columns. col is list of dict {'name': str, 'type': type, 'description': str}",
-    "sem_join": "pipeline.sem_join(other: PhysicalPipeline, condition: str, model: pz.Model) — LLM join; keeps pairs where condition holds."
+    "sem_join": "pipeline.sem_join(other: PhysicalPipeline, condition: str, model: pz.Model) — LLM join; keeps pairs where condition holds. Write `condition` as for sem_filter (the LLM answers TRUE or FALSE; give no answer format). "
                 "If specifying columns with `depends_on`, make sure to include both left and right columns (e.g., `depends_on=['col', 'col_right']`)."
                 "Performs a self join when `other` is the same instance as `pipeline`",
     "rag_filter": "pipeline.rag_filter(condition: str, embedding_query: str, model: pz.Model, chunk_size: int | str = 20000, similarity_method: str = 'embedding', num_chunks_per_field: int = None, similarity_threshold: float = None, embedding_model: str = 'qwen/qwen3-embedding-8b') — "
-                  "For a long text field where only a small part is actually relevant, chunk the field and retrieve just the relevant chunks BEFORE the LLM call, instead of sending the whole field to the LLM — cheaper than sem_filter. It then LLM-filters using `condition` over just the retrieved chunks. "
+                  "For a long text field where only a small part is actually relevant, chunk the field and retrieve just the relevant chunks BEFORE the LLM call, instead of sending the whole field to the LLM — cheaper than sem_filter. It then LLM-filters using `condition` over just the retrieved chunks (write `condition` as for sem_filter: the LLM answers with TRUE or FALSE and only rows with response TRUE are kept). "
                   "There are two chunk-selection methods, chosen via similarity_method: 'embedding' (default) scores chunks by cosine similarity of their embedding to embedding_query — best for paraphrase/meaning matches; 'bm25' scores chunks by keyword/full-text overlap with embedding_query, with no embedding cost — best when the target hinges on specific terminology (e.g. legal/technical text). "
                   "embedding_model only matters (and is only used) when similarity_method='embedding'; it is ignored for 'bm25'. "
                   "chunk_size (characters) is required for EITHER method — either a fixed int, or a string expression over `input_length` (that field's own char count), e.g. \"max(10000, input_length / 5)\", to scale chunk size with document length instead of a fixed size. "

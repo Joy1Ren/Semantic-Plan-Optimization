@@ -1,11 +1,11 @@
 """LLM-based row filter operator."""
 from __future__ import annotations
 
-from palimpzest.constants import Model
+from palimpzest.constants import Model, PromptStrategy
 from palimpzest.core.elements.filters import Filter
 from palimpzest.query.operators.filter import LLMFilter
 
-from ..base import Operator, _compute_op_id, _resolve_reasoning_effort
+from ..base import Operator, _compute_op_id, _no_reasoning_prompt, _resolve_reasoning_effort
 
 
 class SemFilter(Operator):
@@ -19,6 +19,7 @@ class SemFilter(Operator):
         eff = reasoning_effort_override if reasoning_effort_override is not None else _resolve_reasoning_effort(model)
         self._pz_op = LLMFilter(
             model=model,
+            prompt_strategy=PromptStrategy.FILTER_NO_REASONING if _no_reasoning_prompt(model, eff) else PromptStrategy.FILTER,
             filter=Filter(filter_condition=condition),
             output_schema=schema,
             input_schema=schema,

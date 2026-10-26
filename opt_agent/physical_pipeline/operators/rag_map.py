@@ -8,7 +8,7 @@ from palimpzest.core.models import GenerationStats
 from palimpzest.query.operators.convert import LLMConvert
 from palimpzest.query.operators.rag import RAGConvert as _PZRAGConvert
 
-from ..base import DEFAULT_RAG_EMBEDDING_MODEL, Operator, _cols_attribute, _compute_op_id, _has_image_field, _resolve_reasoning_effort
+from ..base import DEFAULT_RAG_EMBEDDING_MODEL, Operator, _cols_attribute, _compute_op_id, _has_image_field, _no_reasoning_prompt, _resolve_reasoning_effort
 from .rag_common import _RAG_PLACEHOLDER_MODEL, _rag_embed, rag_get_chunked_candidate
 
 
@@ -123,7 +123,7 @@ class RagMap(Operator):
         # strategy -- there's no separate *_IMAGE variant; the Generator now detects image
         # fields from the schema itself rather than from prompt_strategy.
         is_image = _has_image_field(input_schema, depends_on)  # noqa: F841 -- kept for parity/future use
-        prompt_strategy = PromptStrategy.MAP_NO_REASONING if (model.is_reasoning_model() and eff in (None, "minimal", "low", "disable")) else PromptStrategy.MAP
+        prompt_strategy = PromptStrategy.MAP_NO_REASONING if _no_reasoning_prompt(model, eff) else PromptStrategy.MAP
         self._pz_op = RAGConvert(
             embedding_query=embedding_query,
             chunk_size=chunk_size,

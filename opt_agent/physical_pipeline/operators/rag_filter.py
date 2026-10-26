@@ -2,14 +2,14 @@
 behind the OpenRouter-embedding / decoupled-query / chunk-selection design."""
 from __future__ import annotations
 
-from palimpzest.constants import Model
+from palimpzest.constants import Model, PromptStrategy
 from palimpzest.core.elements.filters import Filter
 from palimpzest.core.elements.records import DataRecord
 from palimpzest.core.models import GenerationStats
 from palimpzest.query.operators.filter import LLMFilter
 from palimpzest.query.operators.rag import RAGFilter as _PZRAGFilter
 
-from ..base import DEFAULT_RAG_EMBEDDING_MODEL, Operator, _compute_op_id, _resolve_reasoning_effort
+from ..base import DEFAULT_RAG_EMBEDDING_MODEL, Operator, _compute_op_id, _no_reasoning_prompt, _resolve_reasoning_effort
 from .rag_common import _RAG_PLACEHOLDER_MODEL, _rag_embed, rag_get_chunked_candidate
 
 
@@ -129,6 +129,7 @@ class RagFilter(Operator):
             embedding_model=embedding_model,
             similarity_method=similarity_method,
             model=model,
+            prompt_strategy=PromptStrategy.FILTER_NO_REASONING if _no_reasoning_prompt(model, eff) else PromptStrategy.FILTER,
             filter=Filter(filter_condition=condition),
             output_schema=schema,
             input_schema=schema,

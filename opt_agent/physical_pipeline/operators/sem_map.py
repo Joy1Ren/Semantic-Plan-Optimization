@@ -4,7 +4,7 @@ from __future__ import annotations
 from palimpzest.constants import Model, PromptStrategy
 from palimpzest.query.operators.convert import LLMConvertBonded
 
-from ..base import Operator, _cols_attribute, _compute_op_id, _has_image_field, _resolve_reasoning_effort
+from ..base import Operator, _cols_attribute, _compute_op_id, _has_image_field, _no_reasoning_prompt, _resolve_reasoning_effort
 
 
 class SemMap(Operator):
@@ -20,7 +20,7 @@ class SemMap(Operator):
         # strategy -- there's no separate *_IMAGE variant; the Generator now detects image
         # fields from the schema itself rather than from prompt_strategy.
         is_image = _has_image_field(input_schema, depends_on)  # noqa: F841 -- kept for parity/future use
-        prompt_strategy = PromptStrategy.MAP_NO_REASONING if (model.is_reasoning_model() and eff in (None, "minimal", "low", "disable")) else PromptStrategy.MAP
+        prompt_strategy = PromptStrategy.MAP_NO_REASONING if _no_reasoning_prompt(model, eff) else PromptStrategy.MAP
         self._pz_op = LLMConvertBonded(
             model=model,
             prompt_strategy=prompt_strategy,
