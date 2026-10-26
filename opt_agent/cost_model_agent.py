@@ -104,7 +104,7 @@ class CostModelAgent:
              `filter(lambda row: row["description"].isin(["settee", "sofa", "couch"]))`, or
              `map(lambda row: {"red_freq_count": row["description"].str.count("red")}, ...)`.
              These are general and save on cost and latency.
-           - DO start with baseline plans that have no or minimal cost/quality optimizations to understand
+           - DO start with baseline plans with an inexpensive model (e.g., gpt-6-luna) that have no or minimal cost/quality optimizations to understand
              the range of achievable quality/cost.
            - `plans[name]["plan"]` is populated immediately with the newly written PhysicalPipeline instance.
         3. Execute with `execute_plan(name)`:
@@ -160,8 +160,10 @@ class CostModelAgent:
            being less aggressive with pre-filtering or truncation, or changing logical structure.
            - Don't just hunt for cost cuts that hold quality steady — also spend some plans actively
              trying to raise quality, then weigh whether the resulting cost/latency is worth it.
-           - Do NOT rabbit-hole on fine-tuning a single knob (e.g. the exact truncation length):
+           - Do NOT overfit by fine-tuning a single knob (e.g. the exact truncation length):
              we run on a small subsample and micro-tuning is inefficient and prone to overfitting.
+           - Do NOT chase one or two records: spending excessive time and cost on optimizations that only effect one or two records
+            may be wasteful. Make changes that may generalize.
            - To prevent falling in a local minimum, make sure to also explore a wider range of the
             optimization space: try different models and different logical structures.
            - Stop and give your final answer when the gains over your current best plan are
@@ -182,9 +184,6 @@ class CostModelAgent:
         - A small `n_unstable_records` means a few borderline records drive the variance:
           compare an operator's samples across executions with `get_op_samples(...,
           execution=k)` and make the wording decide them.
-        - Temperature is fixed, not a setting you choose: the GPT-5 family and o4-mini only run at
-          their default temperature (1), so they vary more between calls; every other model runs
-          at temperature 0.
         - Ways to reduce variance, simplest first: state the condition or column description more
           precisely (define the borderline cases; give a short example of what counts and what
           does not); use a stronger model; or, if those fall short, ensemble -- get several
@@ -239,8 +238,10 @@ class CostModelAgent:
         cost_aware_opt: bool = False,
         lower_variance: bool = False,
         executions_per_plan: int = 3,
+        image_describer_model: str = "google/gemini-2.5-flash-lite",
     ) -> None:
         self.llm = llm
+        self.image_describer_model = image_describer_model
         self.agent_dir = agent_dir
         self.use_case = use_case
         self.data_dir = data_dir
@@ -551,7 +552,7 @@ class CostModelAgent:
                 ) from e
 
         import pandas as pd
-        from agent_cost_model.opt_agent.physical_pipeline import PhysicalPipeline
+        from agent_cost_model.opt_agent.physical_pipeline import PhysicalPipeline, row_id_str
         try:
             import palimpzest as pz
         except ImportError as exc:
@@ -567,7 +568,7 @@ class CostModelAgent:
             # only generates fields not already present on the record, so a colliding name produces
             # an empty field_answers and raises `max() iterable argument is empty` on every row.
             pipeline.map(
-                udf=lambda row: {col_name: os.path.join(data_dir, image_subdir, str(row[id_col]) + ".jpg")},
+                udf=lambda row: {col_name: os.path.join(data_dir, image_subdir, row_id_str(row[id_col]) + ".jpg")},
                 cols=[{"name": col_name, "type": pz.ImageFilepath, "description": ""}],
             )
             return pipeline
@@ -618,7 +619,7 @@ class CostModelAgent:
         self._pending_images: list[dict] = []
         # Dedicated cheap vision model for image descriptions, kept separate from the (possibly
         # pricey) main-agent model so exploring images stays cheap.
-        self._image_describer = OpenRouterClient("google/gemini-2.5-flash-lite")
+        self._image_describer = OpenRouterClient(self.image_describer_model, reasoning_effort="low")
 
         base_tools = [
             ListFilesTool(data_dir),
@@ -1201,7 +1202,7 @@ class CostModelAgent:
     def _describe_images(self, images: list[dict]) -> str:
         """Generate a textual description of the staged explore_images pictures.
 
-        Uses a dedicated cheap vision model (`_image_describer`, gemini-2.5-flash-lite) so image
+        Uses a dedicated cheap vision model (`_image_describer`, `image_describer_model`) so image
         exploration stays inexpensive regardless of the main-agent model. The description is shown in
         THIS step's observation and persisted in the trajectory; the pixels themselves are not
         forwarded to the main agent. Cost is billed to agent_cost_usd, matching normal LLM steps.

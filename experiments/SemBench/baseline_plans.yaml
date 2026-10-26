@@ -6,7 +6,7 @@
 # resolves it, so one plan serves every scale factor. The last expression must be the
 # PhysicalPipeline.
 #
-# Every LLM operator uses gpt-4o-mini.
+# Every LLM operator uses gpt-6-luna.
 
 ecomm:
   # backpacks from Reebok (text)
@@ -14,7 +14,7 @@ ecomm:
     pipe = PhysicalPipeline(plan_name, "products", load_data(source_csv))
     pipe.sem_filter(
         "The product is a backpack from the brand Reebok.",
-        model=pz.Model.GPT_4o_MINI,
+        model=pz.Model.GPT_6_LUNA,
         depends_on=["productDisplayName", "productDescriptors"],
     )
     pipe.project(["idx"])
@@ -26,7 +26,7 @@ ecomm:
     add_image_data(pipe, "image")
     pipe.sem_filter(
         "The image shows a pair of sports shoes that are predominantly yellow and silver.",
-        model=pz.Model.GPT_4o_MINI,
+        model=pz.Model.GPT_6_LUNA,
         depends_on=["image"],
     )
     pipe.project(["idx"])
@@ -37,7 +37,7 @@ ecomm:
     pipe = PhysicalPipeline(plan_name, "products", load_data(source_csv))
     pipe.sem_map(
         cols=[{"name": "category", "type": str, "description": "The brand name of the product."}],
-        model=pz.Model.GPT_4o_MINI,
+        model=pz.Model.GPT_6_LUNA,
         depends_on=["productDisplayName", "productDescriptors"],
     )
     pipe.project(["idx", "category"])
@@ -49,7 +49,7 @@ ecomm:
     add_image_data(pipe, "image")
     pipe.sem_map(
         cols=[{"name": "category", "type": str, "description": "The single primary color of the depicted product, as one common color name, e.g. Black, Blue, White."}],
-        model=pz.Model.GPT_4o_MINI,
+        model=pz.Model.GPT_6_LUNA,
         depends_on=["image"],
     )
     pipe.project(["idx", "category"])
@@ -60,7 +60,7 @@ ecomm:
     pipe = PhysicalPipeline(plan_name, "products", load_data(source_csv))
     pipe.sem_map(
         cols=[{"name": "category", "type": str, "description": "Exactly one of: Dress (a one-piece outer garment worn on the torso that hangs down over the legs), Bottomwear (trousers, jeans, skirts, shorts, leggings), Socks, Topwear (shirts, blouses, t-shirts, jackets), Innerwear (underwear, bras, undershirts)."}],
-        model=pz.Model.GPT_4o_MINI,
+        model=pz.Model.GPT_6_LUNA,
         depends_on=["productDisplayName", "productDescriptors"],
     )
     pipe.project(["idx", "category"])
@@ -72,7 +72,7 @@ ecomm:
     add_image_data(pipe, "image")
     pipe.sem_map(
         cols=[{"name": "category", "type": str, "description": "Exactly one of: Dress (a one-piece outer garment worn on the torso that hangs down over the legs), Bottomwear (trousers, jeans, skirts, shorts, leggings), Socks, Topwear (shirts, blouses, t-shirts, jackets), Innerwear (underwear, bras, undershirts)."}],
-        model=pz.Model.GPT_4o_MINI,
+        model=pz.Model.GPT_6_LUNA,
         depends_on=["image"],
     )
     pipe.project(["idx", "category"])
@@ -87,7 +87,7 @@ ecomm:
             {"name": "brand", "type": str, "description": "The product's brand, lowercase, e.g. adidas."},
             {"name": "category", "type": str, "description": "The product's category as a short lowercase noun, e.g. t-shirt."},
         ],
-        model=pz.Model.GPT_4o_MINI,
+        model=pz.Model.GPT_6_LUNA,
         depends_on=["productDisplayName", "productDescriptors"],
     )
     items.join(
@@ -109,7 +109,7 @@ ecomm:
     text.sem_join(
         images,
         "The image depicts the product described by the title (productDisplayName) and description (productDescriptors).",
-        model=pz.Model.GPT_4o_MINI,
+        model=pz.Model.GPT_6_LUNA,
     )
     text.project(["idx", "idx_right"])
     text
@@ -124,7 +124,7 @@ ecomm:
             {"name": "category", "type": str, "description": "The type of object depicted, as a short lowercase noun, e.g. tshirts, watches, sports shoes, handbags."},
             {"name": "color", "type": str, "description": "The product's color: exactly one of black, blue, red, white, orange, green if it is a single one of these colors; otherwise multicolor."},
         ],
-        model=pz.Model.GPT_4o_MINI,
+        model=pz.Model.GPT_6_LUNA,
         depends_on=["image"],
     )
     items.filter(lambda row: str(row["color"]).lower() in ("black", "blue", "red", "white", "orange", "green"))
@@ -149,7 +149,7 @@ ecomm:
                 {"name": "color", "type": str, "description": "The product's main color: exactly one of black, blue, red, white, other."},
                 {"name": "brand", "type": str, "description": "The brand shown on the product, lowercase; empty if not visible."},
             ],
-            model=pz.Model.GPT_4o_MINI,
+            model=pz.Model.GPT_6_LUNA,
             depends_on=["image"],
         )
         p.filter(lambda row: str(row["color"]).lower() in ("black", "blue", "red", "white") and bool(row["brand"]))
@@ -185,7 +185,7 @@ ecomm:
                 {"name": "is_black", "type": bool, "description": "True if the product is black."},
                 {"name": "brand", "type": str, "description": "The product's brand, lowercase."},
             ],
-            model=pz.Model.GPT_4o_MINI,
+            model=pz.Model.GPT_6_LUNA,
             depends_on=["productDisplayName", "productDescriptors", "image"],
         )
         p.filter(lambda row: bool(row["is_black"]) and bool(row["brand"]))
@@ -221,7 +221,7 @@ ecomm:
             {"name": "brand", "type": str, "description": "The product's brand name, lowercase."},
             {"name": "category", "type": str, "description": "The product's master category: exactly one of accessories, apparel, footwear."},
         ],
-        model=pz.Model.GPT_4o_MINI,
+        model=pz.Model.GPT_6_LUNA,
         depends_on=["productDisplayName", "productDescriptors"],
     )
     pipe.filter(lambda row: str(row["brand"]).strip().lower() in ("adidas", "puma"))
@@ -234,24 +234,29 @@ ecomm:
     add_image_data(pipe, "image")
     pipe.sem_filter(
         "The product is a men's running shirt with a round neck and short sleeves, blue or black (not a bright color like white, and not green), with a striped design, suitable for outdoor running in warm weather.",
-        model=pz.Model.GPT_4o_MINI,
+        model=pz.Model.GPT_6_LUNA,
         depends_on=["productDisplayName", "productDescriptors", "image"],
     )
     pipe.project(["idx"])
     pipe
 
-  # products < 130 whose image matches the description and shows white socks
+  # products < 130 joined to the white-socks images that match their text (text x image join).
+  # PZ has no per-product top-1, so every matching image is returned.
   "14": |
-    pipe = PhysicalPipeline(plan_name, "products", load_data(source_csv))
-    pipe.filter(lambda row: float(row["price"]) < 130)
-    add_image_data(pipe, "image")
-    pipe.sem_filter(
-        "The image matches the product's title and description, and the image depicts white socks.",
-        model=pz.Model.GPT_4o_MINI,
-        depends_on=["productDisplayName", "productDescriptors", "image"],
+    products = PhysicalPipeline(plan_name, "products", load_data(source_csv))
+    products.filter(lambda row: float(row["price"]) < 130)
+    products.project(["idx", "productDisplayName", "productDescriptors"])
+    images = PhysicalPipeline(f"{plan_name}_images", "products", load_data(source_csv))
+    add_image_data(images, "image")
+    images.project(["idx", "image"])
+    images.sem_filter("The image depicts white socks.", model=pz.Model.GPT_6_LUNA, depends_on=["image"])
+    products.sem_join(
+        images,
+        "The image depicts exactly the product described by the title (productDisplayName) and description (productDescriptors).",
+        model=pz.Model.GPT_6_LUNA,
     )
-    pipe.project(["idx"])
-    pipe
+    products.project(["idx_right"])
+    products
 
 movie:
   # count of positive reviews for taken_3
@@ -260,7 +265,7 @@ movie:
     reviews.filter(lambda row: row["idx"] == "taken_3")
     reviews.sem_filter(
         "The review expresses a positive sentiment toward the movie.",
-        model=pz.Model.GPT_4o_MINI,
+        model=pz.Model.GPT_6_LUNA,
         depends_on=["reviewText"],
     )
     reviews.groupby(group_by_fields=["idx"], agg_funcs=["count"], agg_fields=["reviewId"])
@@ -277,7 +282,7 @@ movie:
     reviews.filter(lambda row: row["idx"] == "ant_man_and_the_wasp_quantumania")
     reviews.sem_map(
         cols=[{"name": "sentiment", "type": str, "description": "The review's sentiment toward the movie: exactly one of positive, negative."}],
-        model=pz.Model.GPT_4o_MINI,
+        model=pz.Model.GPT_6_LUNA,
         depends_on=["reviewText"],
     )
     reviews.join(
@@ -302,7 +307,7 @@ movie:
     reviews.filter(lambda row: row["idx"] == "ant_man_and_the_wasp_quantumania")
     reviews.sem_map(
         cols=[{"name": "reviewScore", "type": int, "description": "How much the reviewer liked the movie, from 1 (hated it) to 5 (loved it)."}],
-        model=pz.Model.GPT_4o_MINI,
+        model=pz.Model.GPT_6_LUNA,
         depends_on=["reviewText"],
     )
     reviews.project(["reviewId", "reviewScore"])
@@ -313,7 +318,7 @@ movie:
     reviews = PhysicalPipeline(plan_name, "reviews", load_data(source_csv).fillna(""))
     reviews.sem_map(
         cols=[{"name": "reviewScore", "type": int, "description": "How much the reviewer liked the movie, from 1 (hated it) to 5 (loved it)."}],
-        model=pz.Model.GPT_4o_MINI,
+        model=pz.Model.GPT_6_LUNA,
         depends_on=["reviewText"],
     )
     reviews.groupby(group_by_fields=["idx"], agg_funcs=["average"], agg_fields=["reviewScore"])
