@@ -56,7 +56,10 @@ from agent_cost_model.sampling.results import (
     RoundRecord,
     SamplingResult,
     StratumRecord,
+    _atomic_write_json,
     merge_results_json,
+    merged_subset_config,
+    subset_label,
     write_rounds_trace,
     write_scores_csv,
     write_subset,
@@ -124,6 +127,7 @@ class DataSampler:
         results_path: str,
         sample_size: int,
         mode: str = "agentic",
+        subset_id: int | None = None,
         llm_client: Any = None,
         embedding_model: str = DEFAULT_RAG_EMBEDDING_MODEL,
         id_col: str = "idx",
@@ -158,6 +162,10 @@ class DataSampler:
         self.use_case = use_case
         self.query_text = query_text
         self.mode = mode
+        # Names this subset among the several one mode can build for a query; its record,
+        # trace, and scores are keyed by it so a later subset does not overwrite them.
+        self.subset_id = subset_id
+        self.subset_label = subset_label(mode, subset_id)
         self.llm_client = llm_client
         self.id_col = id_col
         self.sample_size = sample_size
@@ -166,7 +174,9 @@ class DataSampler:
         self.feedback_row_chars = feedback_row_chars
         self.feedback_char_ceiling = feedback_char_ceiling
         self.max_cell_chars = max_cell_chars
-        self.seed = seed
+        # Each subset id draws with its own seed, or every random subset of a query would be the
+        # same rows. Id 1 keeps the base seed, so it matches the unnumbered subsets built before ids.
+        self.seed = seed if subset_id is None else seed + subset_id - 1
         # Agentic only: one optional data-exploration call before the first spec.
         self.explore = explore and mode == "agentic"
         # Spread each stratum's allocation across its ranking instead of taking its top-m. Held
@@ -200,12 +210,14 @@ class DataSampler:
 
         self.cache_dir = pathlib.Path(cache_dir)
         self.subset_out_path = pathlib.Path(subset_out_path)
+        # How each subset id was drawn, beside the subsets themselves.
+        self.config_path = self.subset_out_path.parent / "sampling_config.json"
         self.results_path = pathlib.Path(results_path)
         self.trace_path = (
-            self.results_path.parent / "rounds" / f"Q{query_id}_{mode}.json"
+            self.results_path.parent / "rounds" / f"Q{query_id}_{self.subset_label}.json"
         )
         self.scores_path = (
-            self.results_path.parent / "scores" / f"Q{query_id}_{mode}_scores.csv"
+            self.results_path.parent / "scores" / f"Q{query_id}_{self.subset_label}_scores.csv"
         )
 
         # Read off the client so the record cannot disagree with what actually ran; the
@@ -229,7 +241,7 @@ class DataSampler:
         if image_describer_model and self.has_images and mode != "random":
             from agent_cost_model.opt_agent.llm_client import OpenRouterClient
 
-            self._image_describer = OpenRouterClient(image_describer_model, api_key=api_key)
+            self._image_describer = OpenRouterClient(image_describer_model, api_key=api_key, reasoning_effort="low")
 
         self.cost = CostLedger()
         self._messages: list[dict] = []
@@ -665,7 +677,23 @@ class DataSampler:
         return ids, warnings
 
     # ------------------------------------------------------------------ run
+    def _subset_config(self) -> dict:
+        """The settings every subset with this id shares. None marks one this mode does not use."""
+        scored = self.mode != "random"
+        llm = self.mode not in ("baseline", "random")
+        return {
+            "seed": self.seed,
+            "sample_size": self.sample_size,
+            "embedding_model": self.embedding_model if scored else None,
+            "sampler_llm_model": self.llm_model if llm else None,
+            "idx_specification": self.idx_specification if llm else None,
+        }
+
     def sample(self) -> SamplingResult:
+        # Raise on a settings conflict before anything is paid for; the file is written once
+        # the subset is.
+        if self.subset_id is not None:
+            merged_subset_config(self.config_path, self.subset_id, self._subset_config())
         # Start-to-end wall clock for the whole run. Measured rather than summed from the
         # component timers: those miss cache load/save, retries, image description, filtering
         # and frame work, so their sum is a lower bound on how long this actually took.
@@ -764,7 +792,10 @@ class DataSampler:
             record["artifacts"]["trace"] = str(self.trace_path)
 
         write_subset(self.df, self.id_col, sampled, self.subset_out_path)
-        merge_results_json(self.results_path, str(self.query_id), self.mode, record)
+        merge_results_json(self.results_path, str(self.query_id), self.subset_label, record)
+        if self.subset_id is not None:
+            _atomic_write_json(self.config_path, merged_subset_config(
+                self.config_path, self.subset_id, self._subset_config()))
         write_scores_csv(self.scores_path, self._score_frames)
         if self._trace:
             write_rounds_trace(

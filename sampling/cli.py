@@ -37,7 +37,7 @@ from agent_cost_model.sampling.constants import (
     MODES,
 )
 from agent_cost_model.sampling.data_sampler import DataSampler
-from agent_cost_model.sampling.results import mode_subset_path
+from agent_cost_model.sampling.results import mode_subset_path, subset_label
 
 
 def _from_benchmark(args, qid, parser) -> dict:
@@ -110,6 +110,9 @@ def main() -> None:
     ap.add_argument("--images", default=None, help="directory of {id}.jpg (only without --config)")
 
     ap.add_argument("--mode", choices=list(MODES), default="agentic")
+    ap.add_argument("--subset-id", type=int, default=None,
+                    help="number this subset among the mode's subsets for the query: 2 writes "
+                         "Q{id}_subset_{mode}-2.csv (default: unnumbered)")
     ap.add_argument("--id-col", default="idx")
     ap.add_argument("--model", default="openai/gpt-5", help="planning LLM (OpenRouter id)")
     ap.add_argument("--embedding-model", default=DEFAULT_RAG_EMBEDDING_MODEL)
@@ -155,9 +158,11 @@ def main() -> None:
                 "results_path": args.results,
             }
 
-        # Mode-suffixed here rather than in the resolution branches above, so the config path and the
-        # hand-passed --subset-out get the same treatment.
-        resolved["subset_out_path"] = str(mode_subset_path(resolved["subset_out_path"], args.mode))
+        # Label-suffixed here rather than in the resolution branches above, so the config path and
+        # the hand-passed --subset-out get the same treatment.
+        resolved["subset_out_path"] = str(
+            mode_subset_path(resolved["subset_out_path"], subset_label(args.mode, args.subset_id))
+        )
 
         llm = None
         if args.mode not in ("baseline", "random"):
@@ -172,6 +177,7 @@ def main() -> None:
             query_text=resolved["query_text"],
             df=df,
             mode=args.mode,
+            subset_id=args.subset_id,
             llm_client=llm,
             embedding_model=args.embedding_model,
             id_col=args.id_col,

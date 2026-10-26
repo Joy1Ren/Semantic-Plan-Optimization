@@ -192,6 +192,13 @@ class SamplingResult:
         return len(self.sampled_ids)
 
 
+def subset_label(mode: str, subset_id: int | None = None) -> str:
+    """`one-shot` -> `one-shot-2`: names one subset, since a mode can build several per query.
+
+    Without a subset_id the label is the bare mode, the name every subset had before ids."""
+    return mode if subset_id is None else f"{mode}-{subset_id}"
+
+
 def mode_subset_path(path: pathlib.Path | str, mode: str) -> pathlib.Path:
     """`.../Q6_subset.csv` -> `.../Q6_subset_agentic.csv`: one subset file per sampling mode.
 
@@ -280,6 +287,26 @@ def merge_results_json(
     existing[mode] = record
     results[str(query_id)] = existing
     _atomic_write_json(path, results)
+
+
+def merged_subset_config(path: pathlib.Path, subset_id: int, config: dict) -> dict:
+    """sampling_config.json's contents with `config` merged into `subset_id`'s entry.
+
+    Every subset sharing an id must be drawn the same way, whichever mode built it, so a setting
+    already recorded for the id must agree with this run's. None means this mode does not use
+    the setting (random has no embedding model): it neither conflicts nor overwrites, and a
+    later mode that does use it fills it in.
+    """
+    configs = json.loads(path.read_text()) if path.exists() else {}
+    entry = dict(configs.get(str(subset_id), {}))
+    conflicts = [f"{k}: {entry[k]!r} recorded, {v!r} now" for k, v in config.items()
+                 if v is not None and entry.get(k) is not None and entry[k] != v]
+    if conflicts:
+        raise ValueError(f"subset id {subset_id} in {path} was built with other settings: "
+                         + "; ".join(conflicts))
+    entry.update({k: v for k, v in config.items() if v is not None})
+    configs[str(subset_id)] = entry
+    return dict(sorted(configs.items(), key=lambda kv: int(kv[0])))
 
 
 def write_rounds_trace(path: pathlib.Path, payload: dict) -> None:

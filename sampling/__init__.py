@@ -32,13 +32,14 @@ See `data_sampler.py` for the orchestration and `scoring.py` for the formula.
 """
 from agent_cost_model.sampling.constants import IMAGE_FIELD, MODES
 from agent_cost_model.sampling.data_sampler import DataSampler
-from agent_cost_model.sampling.results import SamplingResult, mode_subset_path
+from agent_cost_model.sampling.results import SamplingResult, mode_subset_path, subset_label
 from agent_cost_model.sampling.spec import SamplingSpec, ScorerColumns
 
 __all__ = [
     "DataSampler",
     "SamplingResult",
     "mode_subset_path",
+    "subset_label",
     "SamplingSpec",
     "ScorerColumns",
     "IMAGE_FIELD",
