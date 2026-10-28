@@ -500,6 +500,10 @@ class PhysicalPipeline:
         stage_map: dict[int, dict] = {}
         for flat_idx, (op_name, op) in enumerate(self._flat_ops()):
             op.errors = []
+            if isinstance(op, (RagFilter, RagMap)):
+                # Per execution, like errors: a record that does not reach the op this time must
+                # not keep the chunks it got last time.
+                op._pz_op._retrieval_contexts = {}
             op.logical_op_id = op.params_id
             op._pz_op.logical_op_id = op.params_id
             if op._skip_op is not None:
@@ -1172,7 +1176,8 @@ class PhysicalPipeline:
                 # post-retrieval input view the op's LLM call actually received. Recorded by
                 # rag_common._record_retrieval_context on the chunked COPY of each candidate,
                 # which is why it can't be recovered from `samples` (those hold the untouched
-                # original). None for every non-RAG op. See _score_map_op.
+                # original). None for every non-RAG op. Read by _score_map_op and by
+                # get_op_samples (plan_tools._plan_row).
                 "retrieval_contexts": getattr(
                     getattr(op, "_pz_op", None), "_retrieval_contexts", None
                 ),

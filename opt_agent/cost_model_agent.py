@@ -142,8 +142,8 @@ class CostModelAgent:
              which operator is the bottleneck.
            </per_op_quality>
            <per_op_info>
-           - Use `get_op_samples(plan_name, op_name)` — one operator name, or a list of them — to
-             inspect input/output pairs.
+           - Use `get_op_samples(plan_name, op_name)` — one operator per call — to inspect
+             input/output pairs.
            </per_op_info>
         <per_op_info>
         5. Based on `plan_results.df` and `op_results.df`, write ONE new plan and execute it,
@@ -1270,7 +1270,7 @@ class CostModelAgent:
                 text = self._llm_step(system)
                 self.messages.append({"role": "assistant", "content": text})
 
-    _OBS_CHAR_LIMIT = 10_000
+    _OBS_CHAR_LIMIT = 22_000
 
     def _format_observation(self, step: int, out: Any) -> str:
         parts = [f"Observation (step {step}):"]

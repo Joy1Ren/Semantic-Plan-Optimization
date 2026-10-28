@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pathlib
+import re
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable
 
@@ -18,10 +19,18 @@ from .base import Tool
 # A sample is stored per FIELD ({field_name: value}) rather than as one flat
 # `str(DataRecord)`, which went through palimpzest's DataRecord.__str__ and cut EVERY field to 15
 # characters (palimpzest/core/elements/records.py). Per-field storage is what lets the display
-# below truncate, budget, and de-duplicate values field by field.
+# below truncate and budget values field by field.
+#
+# A rag_map/rag_filter sample also stores `retrieved`: the chunks its LLM call actually received
+# for each field long enough to chunk, uncapped (at most num_chunks_per_field x chunk_size). The
+# display shows those in place of the original field.
 # ---------------------------------------------------------------------------
-SAMPLE_FIELD_CHARS = 100    # per-field cap applied when a sample is STORED
-OP_DISPLAY_BUDGET = 4000    # per-operator cap on value chars applied when samples are DISPLAYED
+SAMPLE_FIELD_CHARS = 1000      # per-field cap applied when a sample is STORED
+DISPLAY_BUDGET = 9000          # cap on value chars per call when samples are DISPLAYED
+RAG_DISPLAY_BUDGET = 20000     # the same, for rag_map/rag_filter
+_RAG_OP_TYPES = ("rag_map", "rag_filter")
+# Header that rag_common._format_ranked_chunks puts in front of every retrieved chunk.
+_CHUNK_SPLIT = re.compile(r"\n\n(?=\[Chunk rank \d+/\d+, )")
 _ELLIPSIS = "…"
 
 
@@ -41,6 +50,21 @@ def _record_fields(dr: Any, limit: int = SAMPLE_FIELD_CHARS) -> dict[str, str] |
     except Exception:
         return {"<record>": _cap(str(dr), limit)}
     return {k: _cap(str(getattr(dr, k, None)), limit) for k in field_names}
+
+
+def _retrieved_fields(dr: Any, contexts: dict | None) -> dict[str, list[str]] | None:
+    """{field_name: [chunk, ...]} for the fields a RAG operator chunked for this record.
+
+    None when no retrieval was recorded for it (e.g. skip_if bypassed the operator); {} when no
+    field was long enough to chunk, so the LLM got the input in full."""
+    from agent_cost_model.opt_agent.physical_pipeline.operators.rag_common import retrieval_context_key
+    key = retrieval_context_key(dr)
+    view = (contexts or {}).get(key) if key is not None else None
+    if view is None:
+        return None
+    return {
+        f: _CHUNK_SPLIT.split(v) for f, v in view.items() if v != getattr(dr, f, None)
+    }
 
 
 def _allocate(lengths: list[int], budget: int) -> list[int]:
@@ -71,30 +95,25 @@ class GetOpSamplesTool(Tool):
     name = "get_op_samples"
     doc = """\
 ### get_op_samples(plan_name, op_name, n=3)
-Retrieve sample (input, output) pairs for an executed plan from `plan_results`.
-`op_name` is required and names the operator(s) you want — `{plan}_op{idx}_{op_type}`
-(e.g. "p1_op1_rag_map"), the same names `plan_str` and `op_results` use. Pass a list to see
-several at once. Ask only for the operators you actually want to look at: samples are long,
-and a plan's operators often repeat each other's fields.
-Returns at most `n` samples per operator.
+Retrieve sample (input, output) pairs of ONE operator of an executed plan from `plan_results`.
+`op_name` is `{plan}_op{idx}_{op_type}` (e.g. "p1_op1_rag_map"), the same names `plan_str` and
+`op_results` use. Returns at most `n` samples (at most 5 are kept per operator).
+For rag_map/rag_filter, the input shows the retrieved chunks the LLM actually received (with
+their rank and score) in place of the full field, and the output only the new columns.
 <lower_variance>
 Pass `execution=k` (1..{n_executions}) for a specific execution's samples; the default is the last one.
 </lower_variance>
 
 ```python
-get_op_samples("p1", "p1_op2_sem_map", n=5)                  # up to 5 samples from one operator
-get_op_samples("p1", ["p1_op1_sem_filter", "p1_op2_sem_map"])  # two operators side by side
+get_op_samples("p1", "p1_op2_sem_map", n=5)   # up to 5 samples from one operator
 ```"""
 
     def __init__(self, plan_results: ResultsStore) -> None:
         self._plan_results = plan_results
 
-    def __call__(
-        self, plan_name: str, op_name: str | list[str], n: int = 3, execution: int | None = None
-    ) -> str:
-        if not op_name:
-            return "You must specify an operator name (e.g. 'p1_op2_sem_map') to retrieve samples."
-        requested = [op_name] if isinstance(op_name, str) else list(op_name)
+    def __call__(self, plan_name: str, op_name: str, n: int = 3, execution: int | None = None) -> str:
+        if not op_name or not isinstance(op_name, str):
+            return "Pass ONE operator name (e.g. 'p1_op2_sem_map'): get_op_samples shows one operator per call."
         # The LAST row for this plan (and execution, when one is named): re-executing a plan
         # appends another row, and the samples have to belong to the same execution as the
         # numbers the agent is reading. (The exploration checker resolves the same duplication
@@ -112,84 +131,83 @@ get_op_samples("p1", ["p1_op1_sem_filter", "p1_op2_sem_map"])  # two operators s
         samples = row.get("op_samples", {})
         if not samples:
             return f"No op_samples recorded for plan {plan_name!r}."
-        missing = [name for name in requested if name not in samples]
-        if missing:
-            return f"No operator {missing} in plan {plan_name!r}. Available: {list(samples)}"
-        samples = {name: samples[name] for name in requested}
+        if op_name not in samples:
+            return f"No operator {op_name!r} in plan {plan_name!r}. Available: {list(samples)}"
 
-        # De-duplication collapses values that a downstream operator merely carries through from
-        # an upstream one, so it only means anything when more than one operator is shown; a
-        # single operator prints in full (subject to the char budget). Keyed by (sample index,
-        # field name) so that two different records of the same operator never collapse into
-        # each other.
-        dedup = len(requested) > 1
-        seen: dict[tuple[int, str], str] = {}
+        op_type, pairs = _unpack_op_samples(samples[op_name])
+        shown = pairs[:n]
+        is_rag = op_type in _RAG_OP_TYPES
+        budget = RAG_DISPLAY_BUDGET if is_rag else DISPLAY_BUDGET
+        # Filters and joins do not rewrite fields: the sampled output IS the input record when
+        # the record passes, and None when it does not (see PhysicalPipeline._execute_core).
+        # Printing the verdict says everything repeating every field would.
+        gate = "filter" if op_type.endswith("filter") else "join condition" if op_type.endswith("join") else None
+
+        # Pass 1: lay out every line. A cell's `parts` is its value, or a retrieved field's chunks.
+        rendered: list[tuple[str, str | list[dict]]] = []   # (label, str | list[cell])
+        for i, pair in enumerate(shown):
+            inp, out = pair.get("input"), pair.get("output")
+            in_label = "input"
+            if is_rag and "retrieved" in pair and isinstance(inp, dict):
+                retrieved = pair["retrieved"]
+                if retrieved is None:
+                    in_label = "input (no retrieval recorded)"
+                elif not retrieved:
+                    in_label = "input (no field over chunk_size, sent in full)"
+                else:
+                    in_label = "input (retrieved chunks)"
+                    inp = {**inp, **retrieved}
+            if is_rag and isinstance(out, dict) and isinstance(pair.get("input"), dict):
+                out = {k: v for k, v in out.items() if k not in pair["input"]}
+            rendered.append((f"  [{i}] {in_label}: ", _cells(inp)))
+            if gate is not None:
+                rendered.append(("       output: ", f"passed {gate}" if out is not None else f"did not pass {gate}"))
+            else:
+                rendered.append(("       output: ", _cells(out)))
+
+        # Pass 2: spend the char budget over every value (and every retrieved chunk) printed.
+        parts = [(cell, j) for _, payload in rendered if isinstance(payload, list)
+                 for cell in payload for j in range(len(cell["parts"]))]
+        for (cell, j), alloc in zip(parts, _allocate([len(c["parts"][j]) for c, j in parts], budget)):
+            cell["allocs"][j] = alloc
 
         lines = [
-            f"[fields capped at {SAMPLE_FIELD_CHARS} chars when sampled, "
-            f"{OP_DISPLAY_BUDGET} chars of values per operator when shown"
-            + ("; `field=…` = unchanged from where it was first shown above]" if dedup else "]")
+            f"[fields capped at {SAMPLE_FIELD_CHARS} chars when sampled"
+            + (" (retrieved chunks are not)" if is_rag else "")
+            + f", {budget} chars of values when shown]",
+            f"{op_name} ({len(shown)}/{len(pairs)} samples shown):",
         ]
-        for op, entry in samples.items():
-            op_type, pairs = _unpack_op_samples(entry)
-            shown = pairs[:n]
-            # Filters and joins do not rewrite fields: the sampled output IS the input record when
-            # the record passes, and None when it does not (see PhysicalPipeline._execute_core).
-            # Printing the verdict says everything repeating every field would.
-            gate = "filter" if op_type.endswith("filter") else "join condition" if op_type.endswith("join") else None
-
-            # Pass 1: lay out every cell, marking the ones de-duplication collapses.
-            rendered: list[tuple[int, str, Any]] = []   # (sample idx, side, str | list[cell])
-            budgeted: list[dict] = []                   # cells that still need a char allowance
-            for i, pair in enumerate(shown):
-                for side in ("input", "output"):
-                    fields = pair.get(side) if isinstance(pair, dict) else None
-                    if side == "output" and gate is not None:
-                        rendered.append((i, side, f"passed {gate}" if fields is not None else f"did not pass {gate}"))
-                        continue
-                    if fields is None:
-                        rendered.append((i, side, "∅"))
-                        continue
-                    if not isinstance(fields, dict):    # legacy flat-string sample
-                        rendered.append((i, side, str(fields)))
-                        continue
-                    cells = []
-                    for k, v in fields.items():
-                        collapsed = dedup and seen.get((i, k)) == v
-                        cell = {"field": k, "value": v, "collapsed": collapsed, "alloc": 0}
-                        cells.append(cell)
-                        if not collapsed:
-                            seen[(i, k)] = v
-                            budgeted.append(cell)
-                    rendered.append((i, side, cells))
-
-            # Pass 2: spend this operator's char budget over the cells that are actually printed.
-            for cell, alloc in zip(budgeted, _allocate([len(c["value"]) for c in budgeted], OP_DISPLAY_BUDGET)):
-                cell["alloc"] = alloc
-
-            lines.append(f"{op} ({len(shown)}/{len(pairs)} samples shown):")
-            for i, side, payload in rendered:
-                label = f"  [{i}] input:  " if side == "input" else "       output: "
-                body = payload if isinstance(payload, str) else _render_cells(payload)
-                lines.append(f"{label}{body}")
+        for label, payload in rendered:
+            lines.append(label + (payload if isinstance(payload, str) else _render_cells(payload)))
         return "\n".join(lines)
 
 
+def _cells(fields: Any) -> str | list[dict]:
+    if fields is None:
+        return "∅"
+    if not isinstance(fields, dict):    # legacy flat-string sample
+        return str(fields)
+    cells = []
+    for k, v in fields.items():
+        parts = v if isinstance(v, list) else [v]
+        cells.append({"field": k, "parts": parts, "chunked": isinstance(v, list), "allocs": [0] * len(parts)})
+    return cells
+
+
+def _clip(value: str, alloc: int) -> str:
+    if alloc >= len(value):
+        return repr(value)
+    if alloc <= 0:
+        return _ELLIPSIS
+    return f"{value[:alloc]!r}{_ELLIPSIS}"
+
+
 def _render_cells(cells: list[dict]) -> str:
-    # Very common once de-duplication is on (a filter's input, or any operator that only reads
-    # what an upstream operator produced): naming every carried-through field one by one is pure
-    # noise, so say it once.
-    if cells and all(c["collapsed"] for c in cells):
-        return f"{{{_ELLIPSIS} all {len(cells)} fields unchanged}}"
     parts = []
     for cell in cells:
-        value, alloc = cell["value"], cell["alloc"]
-        if cell["collapsed"] or alloc <= 0:
-            parts.append(f"{cell['field']}={_ELLIPSIS}")
-        elif alloc < len(value):
-            parts.append(f"{cell['field']}={value[:alloc]!r}{_ELLIPSIS}")
-        else:
-            parts.append(f"{cell['field']}={value!r}")
+        clipped = [_clip(p, a) for p, a in zip(cell["parts"], cell["allocs"])]
+        value = "[" + ", ".join(clipped) + "]" if cell["chunked"] else clipped[0]
+        parts.append(f"{cell['field']}={value}")
     return "{" + ", ".join(parts) + "}"
 
 
@@ -342,7 +360,7 @@ plan's new row in `plan_results_agg`.
 <per_op_info>
 To inspect accumulated results use `plan_results.df` and `op_results.df`.
 To view sample input/output pairs use `get_op_samples(plan_name, op_name)`, where `op_name` is one
-operator name or a list of them.
+operator name.
 </per_op_info>
 <no_per_op_info>
 To inspect accumulated results use `plan_results.df`.
@@ -566,18 +584,19 @@ execute_plan("p1")
     ) -> dict:
         per_op_list, plan_context, plan_dict, _ = run
         # Build op_samples for GetOpSamplesTool. Records are stored field by field (each value
-        # capped at SAMPLE_FIELD_CHARS) so the display can budget and de-duplicate them; op_type
-        # rides along so the display knows e.g. that a filter's output is just a verdict.
+        # capped at SAMPLE_FIELD_CHARS) so the display can budget them; op_type rides along so
+        # the display knows e.g. that a filter's output is just a verdict. RAG operators also
+        # keep the chunks each record's LLM call received.
         op_samples: dict[str, dict] = {}
         for _stage_idx, info in plan_context.per_sem_op_info.items():
-            raw_samples = info.get("samples", [])
-            op_samples[info["op_name"]] = {
-                "op_type": info.get("op_type", ""),
-                "samples": [
-                    {"input": _record_fields(inp), "output": _record_fields(out)}
-                    for inp, out in raw_samples[:5]
-                ],
-            }
+            op_type = info.get("op_type", "")
+            samples = []
+            for inp, out in info.get("samples", [])[:5]:
+                sample = {"input": _record_fields(inp), "output": _record_fields(out)}
+                if op_type in _RAG_OP_TYPES:
+                    sample["retrieved"] = _retrieved_fields(inp, info.get("retrieval_contexts"))
+                samples.append(sample)
+            op_samples[info["op_name"]] = {"op_type": op_type, "samples": samples}
         # latency_s: SUM of per-op per-record latencies (serial-equivalent). Kept as the plan's
         # "actual latency" for the cost-model est-vs-act comparison, whose prediction (est.time)
         # is also a per-op sum. wall_latency_s: real WALL-CLOCK time of this subset execution
