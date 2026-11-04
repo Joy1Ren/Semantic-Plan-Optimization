@@ -6,7 +6,7 @@
 # resolves it, so one plan serves every scale factor. The last expression must be the
 # PhysicalPipeline.
 #
-# Every LLM operator uses gpt-4o-mini.
+# Every LLM operator uses gpt-6-luna.
 
 "1": |
   categories = [
@@ -20,9 +20,9 @@
       ("Governing Law", "Which state/country's law governs the interpretation of the contract?"),
       ("Most Favored Nation", "Is there a clause that if a third party gets better terms on the licensing or sale of technology/goods/services described in the contract, the buyer of such technology/goods/services under the contract shall be entitled to those better terms?"),
       ("Non-Compete", "Is there a restriction on the ability of a party to compete with the counterparty or operate in a certain geography or business or technology sector?"),
-      ("Exclusivity", "Is there an exclusive dealing commitment with the counterparty? This includes a commitment to procure all requirements from one party of certain technology, goods, or services or a prohibition on licensing or selling technology, goods or services to third parties, or a prohibition on collaborating or working with other parties, whether during the contract or after the contract ends (or both)."),
+      ("Exclusivity", "Is there an exclusive dealing commitment with the counterparty? This includes a commitment to procure all \"requirements\" from one party of certain technology, goods, or services or a prohibition on licensing or selling technology, goods or services to third parties, or a prohibition on collaborating or working with other parties), whether during the contract or after the contract ends (or both)."),
       ("No-Solicit Of Customers", "Is a party restricted from contracting or soliciting customers or partners of the counterparty, whether during the contract or after the contract ends (or both)?"),
-      ("Competitive Restriction Exception", "The exceptions or carveouts to Non-Compete, Exclusivity and No-Solicit of Customers."),
+      ("Competitive Restriction Exception", "This category includes the exceptions or carveouts to Non-Compete, Exclusivity and No-Solicit of Customers above."),
       ("No-Solicit Of Employees", "Is there a restriction on a party's soliciting or hiring employees and/or contractors from the counterparty, whether during the contract or after the contract ends (or both)?"),
       ("Non-Disparagement", "Is there a requirement on a party not to disparage the counterparty?"),
       ("Termination For Convenience", "Can a party terminate this contract without cause (solely by giving a notice and allowing a waiting period to expire)?"),
@@ -39,7 +39,7 @@
       ("Non-Transferable License", "Does the contract limit the ability of a party to transfer the license being granted to a third party?"),
       ("Affiliate License-Licensor", "Does the contract contain a license grant by affiliates of the licensor or that includes intellectual property of affiliates of the licensor?"),
       ("Affiliate License-Licensee", "Does the contract contain a license grant to a licensee (incl. sublicensor) and the affiliates of such licensee/sublicensor?"),
-      ("Unlimited/All-You-Can-Eat-License", "Is there a clause granting one party an enterprise, all you can eat or unlimited usage license?"),
+      ("Unlimited/All-You-Can-Eat-License", "Is there a clause granting one party an \"enterprise,\" \"all you can eat\" or unlimited usage license?"),
       ("Irrevocable Or Perpetual License", "Does the contract contain a license grant that is irrevocable or perpetual?"),
       ("Source Code Escrow", "Is one party required to deposit its source code into escrow with a third party, which can be released to the counterparty upon the occurrence of certain events (bankruptcy, insolvency, etc.)?"),
       ("Post-Termination Services", "Is a party subject to obligations after the termination or expiration of a contract, including any post-termination transition, payment, transfer of IP, wind-down, last-buy, or similar commitments?"),
@@ -58,7 +58,7 @@
           {"name": name, "type": str, "description": f"{question} Return the verbatim text span(s) from the contract for this category, comma-separated if there are several; empty string if not present."}
           for name, question in categories
       ],
-      model=pz.Model.GPT_4o_MINI,
+      model=pz.Model.GPT_6_LUNA,
       depends_on=["document"],
   )
   pipe.project(["idx"] + [name for name, _ in categories])

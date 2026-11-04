@@ -75,7 +75,7 @@ use_cases:
       "7": |-
         Find all pairs of products priced at $500 or less where both products
         are of the same category and from the same brand based on their descriptions.
-        The pairs may be the same and output all orders of pairs (e.g., include pair a,b and b,a and a,a).
+        Include each product paired with itself (pair a,a).
         Return the two `idx` columns in this order: first product's `idx`, second product's `idx`.
       "8": |-
         Perform a self-join of the dataset.
@@ -86,7 +86,6 @@ use_cases:
         Based on product images, find pairs of distinct products under $800
         in a single base color (Black, Blue, Red, White, Orange, or Green)
         that depict objects of the same category and the same dominant surface color.
-        The pairs MAY NOT be the same but output all order of pairs (e.g., include pair a,b and b,a but not a,a).
         Return the two `idx` columns in this order: first product's `idx`, second product's `idx`.
       "10": |-
         Based on product images and descriptions, find matching outfits consisting of shoes,
@@ -114,6 +113,9 @@ use_cases:
         find the single image that best matches the product's textual description
         (including the product name and full description),
         but only if that image also depicts white socks.
+        Search all of the dataset's images (every row's image, identified by that row's `idx`),
+        not only the product's own.
+        Return the matched image's `idx` as the only column.
     dataset:
       directory: "{benchmark_dir}/dataset/ecomm/sf_{scale_factor}"
       source_csv: "styles_details_{scale_factor}_Q{query_id}.csv"
@@ -141,7 +143,6 @@ use_cases:
         Count of positive reviews for movie `taken_3`. Return one column: `positive_review_cnt`.
       "7": |-
         All Pairs of reviews that express the *opposite* sentiment (one is positive and the other is negative) for movie with id `ant_man_and_the_wasp_quantumania`.
-        The two reviewIds MAY NOT be the same but output both orders of pairs (e.g., include pair a,b and b,a but not a,a).
         Return columns in this order: `movie_name`, `reviewId1`, `reviewId2`
       "9": |-
         Score from 1 to 5 how much did the reviewer like the movie based on the movie reviews for movie `ant_man_and_the_wasp_quantumania`.

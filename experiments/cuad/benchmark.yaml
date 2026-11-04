@@ -8,7 +8,7 @@ external_repo:
   env_var: DOCETL_ROOT
   default: ../docetl
   python_path: .
-results_prefix: "{results_dir}/CUAD/{runner}"
+results_prefix: "{results_dir}/CUAD/q{query_id}/{runner}"
 # Shared with cuad_categories/benchmark.yaml, whose contracts keep the idx given here.
 sampling_dir: "{results_dir}/CUAD/_sampling"
 sampling_results_path: "{results_dir}/CUAD/_sampling/sampling_results.json"
@@ -69,9 +69,11 @@ use_cases:
         Output `idx` and one column per category above, using the exact category name as the column name (e.g. a column named "Document Name" for category 1, a column named "Third Party Beneficiary" for category 41).
     query_metrics:
       "1": f1_jaccard  # matches avg_f1 in docetl/experiments/reasoning/evaluation/cuad.py (jaccard > 0.15 gate)
+    # The same 140 contracts cuad_categories runs on and samples its subsets from (a copy of
+    # cuad_categories/dataset/cuad_clean_140.csv).
     dataset:
       directory: "{benchmark_dir}/dataset"
-      source_csv: "cuad.csv"
+      source_csv: "cuad_clean_140.csv"
       id_col: idx
-    subset_path: "{benchmark_dir}/datasubset_opt/cuad_optimize.csv"
+    subset_path: "{benchmark_dir}/datasubset_opt/Q{query_id}_subset.csv"
     ground_truth_path: "{repo_root}/experiments/reasoning/data/CUAD-master_clauses.csv"

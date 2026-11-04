@@ -48,7 +48,7 @@ ecomm:
     pipe = PhysicalPipeline(plan_name, "products", load_data(source_csv))
     add_image_data(pipe, "image")
     pipe.sem_map(
-        cols=[{"name": "category", "type": str, "description": "The single primary color of the depicted product, as one common color name, e.g. Black, Blue, White."}],
+        cols=[{"name": "category", "type": str, "description": "The single primary color of the depicted product."}],
         model=pz.Model.GPT_6_LUNA,
         depends_on=["image"],
     )
@@ -59,7 +59,7 @@ ecomm:
   "5": |
     pipe = PhysicalPipeline(plan_name, "products", load_data(source_csv))
     pipe.sem_map(
-        cols=[{"name": "category", "type": str, "description": "Exactly one of: Dress (a one-piece outer garment worn on the torso that hangs down over the legs), Bottomwear (trousers, jeans, skirts, shorts, leggings), Socks, Topwear (shirts, blouses, t-shirts, jackets), Innerwear (underwear, bras, undershirts)."}],
+        cols=[{"name": "category", "type": str, "description": "The product's category, one of the following. Dress: A dress is a one-piece outer garment that is worn on the torso, hangs down over the legs, and often consist of a bodice attached to a skirt. Bottomwear: Bottomwear refers to clothing worn on the lower part of the body, such as trousers, jeans, skirts, shorts, and leggings. Socks: Socks are a type of clothing worn on the feet, typically made of soft fabric, designed to provide comfort and warmth. Topwear: Topwear refers to clothing worn on the upper part of the body, such as shirts, blouses, t-shirts, and jackets. Innerwear: Innerwear refers to clothing worn beneath outer garments, typically close to the skin, such as underwear, bras, and undershirts. Each product can only have one category."}],
         model=pz.Model.GPT_6_LUNA,
         depends_on=["productDisplayName", "productDescriptors"],
     )
@@ -71,7 +71,7 @@ ecomm:
     pipe = PhysicalPipeline(plan_name, "products", load_data(source_csv))
     add_image_data(pipe, "image")
     pipe.sem_map(
-        cols=[{"name": "category", "type": str, "description": "Exactly one of: Dress (a one-piece outer garment worn on the torso that hangs down over the legs), Bottomwear (trousers, jeans, skirts, shorts, leggings), Socks, Topwear (shirts, blouses, t-shirts, jackets), Innerwear (underwear, bras, undershirts)."}],
+        cols=[{"name": "category", "type": str, "description": "The product's category, one of the following. Dress: A dress is a one-piece outer garment that is worn on the torso, hangs down over the legs, and often consist of a bodice attached to a skirt. Bottomwear: Bottomwear refers to clothing worn on the lower part of the body, such as trousers, jeans, skirts, shorts, and leggings. Socks: Socks are a type of clothing worn on the feet, typically made of soft fabric, designed to provide comfort and warmth. Topwear: Topwear refers to clothing worn on the upper part of the body, such as shirts, blouses, t-shirts, and jackets. Innerwear: Innerwear refers to clothing worn beneath outer garments, typically close to the skin, such as underwear, bras, and undershirts. Each product can only have one category."}],
         model=pz.Model.GPT_6_LUNA,
         depends_on=["image"],
     )
@@ -84,8 +84,8 @@ ecomm:
     items.filter(lambda row: float(row["price"]) <= 500)
     items.sem_map(
         cols=[
-            {"name": "brand", "type": str, "description": "The product's brand, lowercase, e.g. adidas."},
-            {"name": "category", "type": str, "description": "The product's category as a short lowercase noun, e.g. t-shirt."},
+            {"name": "brand", "type": str, "description": "The product's brand."},
+            {"name": "category", "type": str, "description": "The product's category."},
         ],
         model=pz.Model.GPT_6_LUNA,
         depends_on=["productDisplayName", "productDescriptors"],
@@ -121,7 +121,7 @@ ecomm:
     add_image_data(items, "image")
     items.sem_map(
         cols=[
-            {"name": "category", "type": str, "description": "The type of object depicted, as a short lowercase noun, e.g. tshirts, watches, sports shoes, handbags."},
+            {"name": "category", "type": str, "description": "The category of the object depicted."},
             {"name": "color", "type": str, "description": "The product's color: exactly one of black, blue, red, white, orange, green if it is a single one of these colors; otherwise multicolor."},
         ],
         model=pz.Model.GPT_6_LUNA,
@@ -216,13 +216,14 @@ ecomm:
   # Adidas / Puma products: brand and master category (text)
   "12": |
     pipe = PhysicalPipeline(plan_name, "products", load_data(source_csv))
+    add_image_data(pipe, "image")
     pipe.sem_map(
         cols=[
             {"name": "brand", "type": str, "description": "The product's brand name, lowercase."},
             {"name": "category", "type": str, "description": "The product's master category: exactly one of accessories, apparel, footwear."},
         ],
         model=pz.Model.GPT_6_LUNA,
-        depends_on=["productDisplayName", "productDescriptors"],
+        depends_on=["productDisplayName", "productDescriptors", "image"],
     )
     pipe.filter(lambda row: str(row["brand"]).strip().lower() in ("adidas", "puma"))
     pipe.project(["idx", "brand", "category"])

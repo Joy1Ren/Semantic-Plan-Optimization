@@ -70,7 +70,7 @@
 "6": |
   pipe = PhysicalPipeline(plan_name, "contracts", load_data(source_csv))
   pipe.sem_filter(
-      "The contract takes effect on an event (e.g. execution, a signature, a closing, an approval) rather than on a calendar date it states. A contract that gives an effective date, or says nothing about taking effect, does not qualify.",
+      "The contract takes effect on an event rather than on a calendar date it states. A contract that gives an effective date, or says nothing about taking effect, does not qualify.",
       model=pz.Model.GPT_6_LUNA,
       depends_on=["document"],
   )
@@ -203,7 +203,7 @@
 "16": |
   pipe = PhysicalPipeline(plan_name, "contracts", load_data(source_csv))
   pipe.sem_filter(
-      "Both hold: (1) the contract states an expiration date later than 31 December 2000 -- a contract that gives only a term length, or no expiration, does not qualify; (2) a party has the right to audit the books, records, or physical locations of the counterparty to ensure compliance with the contract.",
+      "Both hold: (1) the contract states an expiration date later than 31 December 2000 -- a contract that gives only a term length (\"five years from the effective date\"), or no expiration, does not qualify; (2) it contains an Audit Rights clause: a party has the right to audit the books, records, or physical locations of the counterparty to ensure compliance with the contract.",
       model=pz.Model.GPT_6_LUNA,
       depends_on=["document"],
   )
@@ -225,7 +225,7 @@
 "18": |
   pipe = PhysicalPipeline(plan_name, "contracts", load_data(source_csv))
   pipe.sem_filter(
-      "Both hold: (1) the contract has no expiration: it runs until a party terminates it, with no end date and no fixed term; (2) one party must maintain insurance for the benefit of the counterparty.",
+      "Both hold: (1) the contract has no expiration: it runs until a party terminates it, with no end date and no fixed term; (2) it contains an Insurance clause: there is a requirement for insurance that must be maintained by one party for the benefit of the counterparty.",
       model=pz.Model.GPT_6_LUNA,
       depends_on=["document"],
   )
@@ -236,7 +236,7 @@
 "19": |
   pipe = PhysicalPipeline(plan_name, "contracts", load_data(source_csv))
   pipe.sem_filter(
-      "Both hold: (1) the contract is dated before 1 January 2010; (2) it restricts a party's ability to compete with the counterparty or to operate in a certain geography or business or technology sector.",
+      "Both hold: (1) the contract is dated before 1 January 2010; (2) it contains a Non-Compete clause: there is a restriction on the ability of a party to compete with the counterparty or operate in a certain geography or business or technology sector.",
       model=pz.Model.GPT_6_LUNA,
       depends_on=["document"],
   )
@@ -258,7 +258,7 @@
 "21": |
   pipe = PhysicalPipeline(plan_name, "contracts", load_data(source_csv))
   pipe.sem_filter(
-      "Both hold: (1) the contract states its expiration terms: when its initial term ends, or that it has no end at all; a contract that says nothing about its term ending does not qualify; (2) there is a fee increase or consent requirement, etc. if one party's use of the product/services exceeds a certain threshold.",
+      "Both hold: (1) the contract states its expiration terms: when its initial term ends, or that it has no end at all; a contract that says nothing about its term ending does not qualify; (2) it contains a Volume Restriction clause: there is a fee increase or consent requirement, etc. if one party's use of the product/services exceeds a certain threshold.",
       model=pz.Model.GPT_6_LUNA,
       depends_on=["document"],
   )
@@ -274,7 +274,7 @@
 "22": |
   pipe = PhysicalPipeline(plan_name, "contracts", load_data(source_csv))
   pipe.sem_filter(
-      "Both hold: (1) the contract states its expiration terms: when its initial term ends, or that it has no end at all; a contract that says nothing about its term ending does not qualify; (2) a party can terminate the contract without cause, solely by giving notice and allowing a waiting period to expire.",
+      "Both hold: (1) the contract states its expiration terms: when its initial term ends, or that it has no end at all; a contract that says nothing about its term ending does not qualify; (2) it contains a Termination for Convenience clause: a party can terminate the contract without cause, solely by giving notice and allowing a waiting period to expire.",
       model=pz.Model.GPT_6_LUNA,
       depends_on=["document"],
   )
