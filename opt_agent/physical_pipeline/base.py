@@ -201,6 +201,50 @@ def _patch_convert_coerce_str_field_answers() -> None:
 _patch_convert_coerce_str_field_answers()
 
 
+_JSON_DECODER = json.JSONDecoder()
+_WHITESPACE = re.compile(r"\s*")
+
+
+def _lenient_json_object(doc: str) -> dict:
+    """Parse a flat JSON object of `"key": value` pairs, where a value may be followed by extra bare
+    strings (joined onto a string value with ', ', the comma-separated form CUAD asks for) and the
+    comma between pairs may be missing. A string followed by ':' starts the next pair. Raises
+    ValueError on anything else."""
+    def skip(i):
+        return _WHITESPACE.match(doc, i).end()
+
+    i = skip(doc.index("{") + 1)
+    out = {}
+    while i < len(doc) and doc[i] != "}":
+        key, i = _JSON_DECODER.raw_decode(doc, i)
+        i = skip(i)
+        if not isinstance(key, str) or doc[i:i + 1] != ":":
+            raise ValueError("expected a string key and ':'")
+        value, i = _JSON_DECODER.raw_decode(doc, skip(i + 1))
+        extras = []
+        while True:
+            j = skip(i)
+            if doc[j:j + 1] == ",":
+                j = skip(j + 1)
+            if doc[j:j + 1] != '"':
+                break
+            extra, k = _JSON_DECODER.raw_decode(doc, j)
+            if doc[skip(k):skip(k) + 1] == ":":
+                break
+            extras.append(extra)
+            i = k
+        if extras:
+            if isinstance(value, str):
+                value = ", ".join(map(str, [value, *extras]))
+            else:
+                value = [*value, *extras] if isinstance(value, list) else [value, *extras]
+        out[key] = value
+        i = j
+    if i >= len(doc):
+        raise ValueError("unterminated object")
+    return out
+
+
 def _patch_get_json_from_answer() -> None:
     """Make installed palimpzest 1.5.3's `get_json_from_answer` recover two answers json.loads
     rejects, which otherwise give the record None for every field the op generates. Palimpzest
@@ -212,6 +256,13 @@ def _patch_get_json_from_answer() -> None:
 
     "Expecting value": the model writes Python's True/False/None instead of JSON's
     true/false/null. Read it as a Python literal, which leaves those words inside strings alone.
+
+    "Expecting ':' delimiter" / "Expecting ',' delimiter": asked for several spans as "a
+    comma-separated list" (CUAD's task prompt), gpt-6-luna writes `"Parties": "span one", "span
+    two",` or drops the comma between two pairs. Read the object leniently (_lenient_json_object).
+    Unrecovered, the bonded convert re-calls once per field with the full contract: ~41 extra
+    full-contract calls per bad answer on CUAD's 41-field maps (run 56 p1: 0.84M-2.44M input
+    tokens for one 0.84M-token pass).
 
     A recovered value counts only if it is the object (one-to-one) or array (one-to-many) the
     parser was looking for; a bare answer like `11` keeps the original error."""
@@ -232,6 +283,8 @@ def _patch_get_json_from_answer() -> None:
                     value = json.loads(e.doc[: e.pos])
                 elif e.msg == "Expecting value":
                     value = ast.literal_eval(e.doc)
+                elif e.msg in ("Expecting ':' delimiter", "Expecting ',' delimiter") and expected is dict:
+                    value = _lenient_json_object(e.doc)
                 else:
                     raise e
             except (ValueError, SyntaxError):
@@ -245,6 +298,34 @@ def _patch_get_json_from_answer() -> None:
 
 
 _patch_get_json_from_answer()
+
+
+def _patch_prepare_field_answers_missing_keys() -> None:
+    """Make installed palimpzest 1.5.3's `Generator._prepare_field_answers` give a field the
+    model's JSON leaves out None, as its one-to-many branch already does. Its one-to-one branch
+    indexes `field_answers[field_name]`, so one missing key raises KeyError, which the generator
+    turns into None for EVERY field the op generates.
+
+    Seen on CUAD's 41-field maps (28 of the 65 failed calls in the pre-migration runs: one
+    category such as 'Parties' left out) and on cuad_categories q10 run 50, where gpt-6-luna
+    answered `reason` for the agent-suffixed `reason_p7` and lost `qualifies_p7` with it."""
+    from palimpzest.constants import Cardinality
+    from palimpzest.query.generators.generators import Generator
+
+    if getattr(Generator, "_agent_cost_model_missing_keys_patched", False):
+        return
+    _orig = Generator._prepare_field_answers
+
+    def _prepare(self, field_answers, fields):
+        if self.cardinality == Cardinality.ONE_TO_ONE and isinstance(field_answers, dict):
+            return {field_name: [field_answers.get(field_name)] for field_name in fields}
+        return _orig(self, field_answers, fields)
+
+    Generator._prepare_field_answers = _prepare
+    Generator._agent_cost_model_missing_keys_patched = True
+
+
+_patch_prepare_field_answers_missing_keys()
 register_openrouter_models()
 
 

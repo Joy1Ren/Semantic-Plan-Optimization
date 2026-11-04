@@ -231,7 +231,7 @@ each mapping an optimization name you choose to the extent you took it:
 optimizations={
     "improve quality": {"model": "medium",
                         "logical structure": "divide single sem_map into four separate sem_map"},
-    "reduce cost": {"input truncation": "embedding-based RAG before map"},
+    "reduce cost": {"input length": "BM25 top-3 × 2,000-char chunks (~6k chars per record)"},
 }
 ```
 
@@ -342,8 +342,7 @@ The plan is executed {n_executions} times in parallel on the same sample. The re
 `executions` (one summary per execution, with the fields below) followed by `aggregate`, the
 plan's new row in `plan_results_agg`.
 </lower_variance>
-- `quality`: 0–1 overall plan quality evaluated by an oracle. Higher is better.
-  Treat oracle quality scores as ground truth.
+- `quality`: 0–1 overall plan quality, scored against the ground truth. Higher is better.
 <per_op_quality>
 - `per_sem_op_quality`: per-semantic-operator quality (0–1). Use to diagnose
   which operator is the bottleneck. `per_sem_op_quality_metric` states how that

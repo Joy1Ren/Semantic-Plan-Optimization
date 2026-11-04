@@ -29,7 +29,10 @@ _PHYSICAL_SEMANTIC_OPERATORS = {
 
 _PHYSICAL_NONSEMANTIC_OPERATORS = {
     "filter": "pipeline.filter(fn: Callable[[dict], bool]) — Exact row filter using a Python callable.",
-    "map": "pipeline.map(fn: Callable[[dict], dict], cols: list[dict]) - Exact row map using a Python callable to add new columns. col is list of dict {'name': str, 'type': type, 'description': str}",
+    "map": "pipeline.map(fn: Callable[[dict], dict], cols: list[dict]) - Exact row map using a Python callable to add new columns. col is list of dict {'name': str, 'type': type, 'description': str}."
+           " Can also be used to reduce input length: output a column holding a truncated field (e.g., its start and end)"
+           " or only the small text windows (e.g., ±500 chars) around matches of general cue patterns, and point a"
+           " semantic operator's `depends_on` at it.",
     "add_col_suffix": "pipeline.add_col_suffix(suffix: str) — Append `suffix` to EVERY column name."
                       " Use before a join to disambiguate columns so the two sides have no colliding names, e.g."
                       " left.add_col_suffix('_dish'); right.add_col_suffix('_table'); left.join(right, lambda l, r: l['brand_dish'] == r['brand_table']).",
@@ -76,8 +79,12 @@ The rag_* operators additionally choose HOW MUCH TEXT REACHES THE LLM:
   NOTE: chunk_size x num_chunks_per_field is the operator's total context budget. Two plans can
   move both knobs and leave that product unchanged -- that is a change of GRANULARITY, not of
   how much the LLM gets to see.
-Free operators (ordinary code, no LLM cost): filter, map, join, project, limit, groupby,
-  add_col_suffix. Logical structure -- how many LLM operators there are, what each one is
+  NOTE: context can also be reduced for free, and record size cut more significantly (thus saving
+  cost), by using a plain `map` to output a regex-window reduction of the field, followed by a
+  semantic operator that reads this column via `depends_on`. The window size is its own dimension,
+  like chunk_size and num_chunks_per_field for rag_*: reducing it can significantly reduce cost.
+Free operators (ordinary code, no LLM cost): filter, map (e.g., new schemas, truncation or regex windows),
+  join, project, limit, groupby, add_col_suffix. Logical structure -- how many LLM operators there are, what each one is
   responsible for, and what order they run in -- is itself a dimension.
 """
 
@@ -284,10 +291,10 @@ the data to solve the query and reverse-engineer a plan from the answer.
 You MUST NOT use the data to identify specific records and then hardcode their IDs. For example, writing
 plans like `filter(lambda row: row["id"] in [3, 17, 42])` is **cheating** and will produce meaningless results.
 However, you can use your observations to construct Python-based and regex functions for deterministic operators. For
-example, `filter(lambda row: row["description"].isin(["settee", "sofa", "couch"]))`
-and `map(lambda row: {{ "red_freq_count": row["description"].str.count("red")}},
-    cols=[{{"name": "red_freq_count", "type": str, "description": "Number of times the word 'red' appears in the description"}}])`
-are valid.
+example, `filter(lambda row: row["description"] in ["settee", "sofa", "couch"])`
+and `map(lambda row: {{ "red_freq_count": row["description"].count("red")}},
+    cols=[{{"name": "red_freq_count", "type": int, "description": "Number of times the word 'red' appears in the description"}}])`
+are valid. Again, excessive regex scanning during data exploration is not allowed. Running regex inside a plan is allowed.
 
 ## Tools (already imported into your python sandbox)
 
@@ -319,6 +326,18 @@ All models listed support both text and image inputs. Use `add_image_data` with 
 that includes the image column to pass images to any model.
 Within each group, cheaper options are listed first. Prefer the cheaper models unless improving
 quality requires a more expensive model.
+An expensive model also multiplies the optimization cost while the same budget could test many
+cheap plans. Before committing to expensive-model plans, make sure the cheap-model options have
+been tried, including applying beneficial optimizations in the expensive plan and potentially new
+optimizations and parameter choices.
+<lower_variance>
+Expensive models with the right optimizations may help increase quality and reduce variance, but
+weigh the tradeoffs between exploring with cheap and expensive models.
+</lower_variance>
+<no_lower_variance>
+Expensive models with the right optimizations may help increase quality, but weigh the tradeoffs
+between exploring with cheap and expensive models.
+</no_lower_variance>
 {available_models}
 
 ## Also available in your sandbox (no import needed)

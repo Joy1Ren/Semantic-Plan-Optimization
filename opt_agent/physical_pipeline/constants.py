@@ -14,5 +14,5 @@ SUBSET_SEED = 42
 # Embedding model + endpoint used by rag_filter/rag_map for chunk retrieval, and by
 # agent_cost_model.sampling, via OpenRouter's /embeddings endpoint (not a palimpzest Model
 # enum value -- see operators/rag_common.py).
-DEFAULT_RAG_EMBEDDING_MODEL = "qwen/qwen3-embedding-8b"
+DEFAULT_RAG_EMBEDDING_MODEL =  "google/gemini-embedding-2" #"qwen/qwen3-embedding-8b"
 _RAG_EMBEDDING_BASE_URL = "https://openrouter.ai/api/v1"

@@ -100,8 +100,8 @@ class ExplorationCheckerAgent:
 
         Another agent is searching for the plan with the best cost/quality trade-off for one
         query. It writes many plans, each embodying different optimizations, executes them, and
-        observes what each one cost and how well it scored. For every plan it also records an
-        `optimizations` field of its own writing: free-form, in its own vocabulary, naming each
+        observes what each one cost and how well it scored on a small optimization
+        SUBSET of the dataset. For every plan it also records an `optimizations` field of its own writing: free-form, in its own vocabulary, naming each
         optimization the plan uses and HOW FAR that optimization is pushed. There is no fixed
         catalog of optimizations — read the ones it reported and reason about those.
 
@@ -172,27 +172,43 @@ class ExplorationCheckerAgent:
 
         HOW TO JUDGE (guidance, not rules — weigh the whole picture):
         - Make sure to also execute BASELINE plans to understand the range of possible quality/cost.
-          For example, run a plan with no cost optimizations to see what quality is achievable.
+          For example, run a plan with no cost optimizations, on a cheap model, to see what quality is achievable.
           Similarly, run a plan with more significant cost optimizations to see what quality a cheap
           plan can get.
         - Follow the gradient. If pushing an optimization further kept paying off — quality
           rising, or cost falling with quality intact — it is underexplored. Name the concrete
           next setting along that same dimension.
+        - When quality has stopped improving, check if cost can be reduced (e.g., cheaper model,
+          smaller input length) while maintaining close quality.
         - Respect diminishing returns. If an optimization has been pushed two steps with no
           further gain, or pushing it started costing quality, it is done. Do not ask for more.
         - One setting is not exploration. An optimization tried at exactly a single extent is
           untested: one more point, in the direction the evidence favors, settles it.
         - Make sure to try different optimization strategies instead of chasing one lever. For example,
-          consider different logical structures, different model choices, and different context reduction strategies.
+          consider different logical structures, different model choices, and different context reduction strategies
+          (truncation, bm25 retrieval, embedding retrieval, regex window selection).
         - Check both directions. If every plan has been chasing cost and none has genuinely
           tried to raise quality (or the reverse), say so — the trade-off has only been mapped
           from one side.
         - Do not ask for micro-tuning. Plans are measured on a small subsample, so nudging a
-          numeric knob by a little overfits and teaches nothing. Suggest moves that are big
-          enough to change the answer.
+          numeric knob by a little overfits and teaches nothing.
+        - Do not chase a few records. A move aimed at flipping one or a few records (e.g. recovering
+          a single remaining miss) overfits the subset; its gain is marginal and unlikely to carry
+          over to the full dataset.
         - Prefer the cheapest plan that would answer the open question. A dimension can usually
           be tested on a cheap model; do not ask for an expensive plan when a cheap one settles
-          the same thing.
+          the same thing. An expensive model makes each plan many times costlier to evaluate, and
+          that budget would test many cheap plans. When an expensive model wins, check whether its
+          optimizations have been tried on cheaper models. Also, check whether optimizations and
+          parameters have been sufficiently explored using cheaper models.
+        <lower_variance>
+          Expensive models with the right optimizations may help increase quality and reduce
+          variance, but weigh the tradeoffs between exploring with cheap and expensive models.
+        </lower_variance>
+        <no_lower_variance>
+          Expensive models with the right optimizations may help increase quality, but weigh the
+          tradeoffs between exploring with cheap and expensive models.
+        </no_lower_variance>
         - Be concrete and be brief: at most 1-2 suggestions, most valuable first. Point at the
           specific optimization and the specific next extent to take it to. Each suggestion must
           describe ONE plan the agent could write next, in a couple of sentences — not a program

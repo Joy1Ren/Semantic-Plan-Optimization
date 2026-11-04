@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import os
 import pathlib
+import re
 import textwrap
 import time
 from dataclasses import dataclass
@@ -95,14 +96,14 @@ class CostModelAgent:
            - ALWAYS pass `optimizations`, recording which optimizations this plan uses and how far
              each one is pushed (see the write_plan tool description). This is how the record of
              what you have and have not tried stays legible across plans.
-           - NEVER hardcode row IDs to identify specific records (e.g. `filter(lambda row: row["id"].isin([3, 17, 42]))`
+           - NEVER hardcode row IDs to identify specific records (e.g. `filter(lambda row: row["id"] in [3, 17, 42])`
              is cheating and invalid). What you learn from exploration may only shape HOW you build a
              general plan, not which records it targets.
            - DO use semantic operators for conditions that need semantic judgment, and prefer
              deterministic, free Python/regex functions in plain `filter` / `map` when a condition
              can be expressed that way — e.g. `filter(lambda row: row["score"] >= 4)`,
-             `filter(lambda row: row["description"].isin(["settee", "sofa", "couch"]))`, or
-             `map(lambda row: {"red_freq_count": row["description"].str.count("red")}, ...)`.
+             `filter(lambda row: row["description"] in ["settee", "sofa", "couch"])`, or
+             `map(lambda row: {"red_freq_count": row["description"].count("red")}, ...)`.
              These are general and save on cost and latency.
            - DO start with baseline plans with an inexpensive model (e.g., gpt-6-luna) that have no or minimal cost/quality optimizations to understand
              the range of achievable quality/cost.
@@ -154,12 +155,16 @@ class CostModelAgent:
            then repeat from step 2. Each new plan should embody a NEW optimization idea
            or a COMBINATION of ideas that worked. Make sure to write baseline plans and explore different
            optimization strategies. Levers for lowering cost and latency include:
-           swapping to a cheaper/faster model, narrowing `depends_on` to fewer columns, truncating long text with a `map`
-           before a semantic op, reordering to push selective filters earlier, removing images,
-           or changing the logical structure. Levers for increasing quality include: swapping to a more capable model,
-           being less aggressive with pre-filtering or truncation, or changing logical structure.
+           swapping to a cheaper/faster model, narrowing `depends_on` to fewer columns, reducing the input length a
+           semantic op reads (e.g., truncation or regex windows in a `map`, or BM25 or embedding retrieval with
+           rag_map/rag_filter; which approach works best depends on the query), reordering to push selective filters earlier, removing images,
+           or changing the logical structure. Levers for increasing quality include: more targeted context
+           (e.g., regex windows around the relevant section), being less aggressive with pre-filtering or
+           truncation, changing logical structure, or swapping to a more capable model.
            - Don't just hunt for cost cuts that hold quality steady — also spend some plans actively
              trying to raise quality, then weigh whether the resulting cost/latency is worth it.
+           - For high-quality plans, make sure to thoroughly explore cost-cutting techniques (e.g., reducing
+             context length, model selection) while maintaining quality.
            - Do NOT overfit by fine-tuning a single knob (e.g. the exact truncation length):
              we run on a small subsample and micro-tuning is inefficient and prone to overfitting.
            - Do NOT chase one or two records: spending excessive time and cost on optimizations that only effect one or two records
@@ -605,12 +610,14 @@ class CostModelAgent:
         # Minimal sandbox variables for WritePlanTool: only what plan CODE needs to construct a
         # PhysicalPipeline — the source-table reader (required by PhysicalPipeline.__init__ for
         # schema inference), the image helper, the pipeline class, and palimpzest (pz.Model /
-        # pz.ImageFilepath). No results stores, no operator introspection, no explore_data.
+        # pz.ImageFilepath), and `re` for regex UDFs. No results stores, no operator introspection,
+        # no explore_data.
         plan_variables = {
             "load_data": load_data,
             "add_image_data": add_image_data,
             "PhysicalPipeline": PhysicalPipeline,
             "pz": pz,
+            "re": re,
         }
 
         # Buffer of base64 image parts staged by explore_images; drained by the run loop, which
@@ -1477,6 +1484,8 @@ class CostModelAgent:
                 "quality": quality,
                 **({"op_errors": op_errors} if op_errors else {}),
             }
+            self._log(f"[final_eval] run {final_run}/{n_runs}: quality {quality:.4f}, "
+                      f"cost ${total_cost:.4f}, latency {total_latency:.1f} s")
 
         return runs, metric_type, n_runs
 

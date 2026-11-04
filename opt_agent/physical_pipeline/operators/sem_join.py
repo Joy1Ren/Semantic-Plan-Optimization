@@ -3,10 +3,10 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from palimpzest.constants import Model
+from palimpzest.constants import Model, PromptStrategy
 from palimpzest.query.operators.join import NestedLoopsJoin
 
-from ..base import Operator, _compute_op_id, _resolve_reasoning_effort
+from ..base import Operator, _compute_op_id, _no_reasoning_prompt, _resolve_reasoning_effort
 
 if TYPE_CHECKING:
     from ..pipeline import PhysicalPipeline
@@ -33,6 +33,7 @@ class SemJoin(Operator):
         eff = reasoning_effort_override if reasoning_effort_override is not None else _resolve_reasoning_effort(model)
         self._pz_op = NestedLoopsJoin(
             model=model,
+            prompt_strategy=PromptStrategy.JOIN_NO_REASONING if _no_reasoning_prompt(model, eff) else PromptStrategy.JOIN,
             condition=condition,
             output_schema=schema,
             input_schema=schema,

@@ -21,6 +21,7 @@ from .base import (
     _make_schema,
     _resolve_reasoning_effort,
     _str_to_pz_model,
+    row_id_str,
 )
 from .operators import (
     AddColSuffix,
@@ -70,4 +71,5 @@ __all__ = [
     "_compute_op_id",
     "_make_schema",
     "_has_image_field",
+    "row_id_str",
 ]
