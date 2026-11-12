@@ -1,0 +1,188 @@
+# Hand-written baseline plans for the sustainability benchmark: one reasonable, unoptimized plan per
+# query, the comparison point for what the optimizer finds. Run with experiments/run_baseline.py.
+#
+# Keyed by query id. Each value is plan code, executed in the same sandbox WritePlanTool uses, plus
+# `source_csv` -- the query's source file name as benchmark.yaml resolves it. The last expression
+# must be the PhysicalPipeline. Operator wording repeats benchmark.yaml's task prompts, which repeat
+# the definitions the ground-truth labelers were given (queries.py).
+#
+# Every LLM operator uses gpt-6-luna.
+
+# identify: the company is a member of RE100
+"1": |
+  pipe = PhysicalPipeline(plan_name, "documents", load_data(source_csv))
+  pipe.sem_map(
+      cols=[
+          {"name": "qualifies", "type": bool, "description": "True if the document states that the company that issued the document is a member of RE100, the global initiative of companies committed to 100% renewable electricity."},
+          {"name": "reason", "type": str, "description": "If it qualifies, one verbatim quote from the document: the complete phrase or sentence that states it, copied exactly as it appears in the document, so that the quote sufficiently justifies the verdict. Otherwise empty."},
+      ],
+      model=pz.Model.GPT_6_LUNA,
+      depends_on=["document"],
+  )
+  pipe.filter(lambda row: bool(row["qualifies"]))
+  pipe.project(["idx", "reason"])
+  pipe
+
+# identify: SBTi-validated emissions targets
+"2": |
+  pipe = PhysicalPipeline(plan_name, "documents", load_data(source_csv))
+  pipe.sem_map(
+      cols=[
+          {"name": "qualifies", "type": bool, "description": "True if the document states that the Science Based Targets initiative (SBTi) has validated (also called approved) an emissions reduction target of the company that issued the document."},
+          {"name": "reason", "type": str, "description": "If it qualifies, one verbatim quote from the document: the complete phrase or sentence that states it, copied exactly as it appears in the document, so that the quote sufficiently justifies the verdict. Otherwise empty."},
+      ],
+      model=pz.Model.GPT_6_LUNA,
+      depends_on=["document"],
+  )
+  pipe.filter(lambda row: bool(row["qualifies"]))
+  pipe.project(["idx", "reason"])
+  pipe
+
+# identify: an internal carbon price currently in use
+"3": |
+  pipe = PhysicalPipeline(plan_name, "documents", load_data(source_csv))
+  pipe.sem_map(
+      cols=[
+          {"name": "qualifies", "type": bool, "description": "True if the document states that the company that issued it currently uses an internal carbon price. An internal carbon price is a monetary value assigned to greenhouse gas emissions as a means of accounting for the costs of climate change regulation or a company's climate action ambitions."},
+          {"name": "reason", "type": str, "description": "If it qualifies, one verbatim quote from the document: the complete phrase or sentence that states it, copied exactly as it appears in the document, so that the quote sufficiently justifies the verdict, including the price if the document states one. Otherwise empty."},
+      ],
+      model=pz.Model.GPT_6_LUNA,
+      depends_on=["document"],
+  )
+  pipe.filter(lambda row: bool(row["qualifies"]))
+  pipe.project(["idx", "reason"])
+  pipe
+
+# identify: companies with 1 to 4 work-related fatalities in the reporting period
+"4": |
+  import re
+  pipe = PhysicalPipeline(plan_name, "documents", load_data(source_csv))
+  pipe.sem_map(
+      cols=[
+          {"name": "fatalities", "type": str, "description": "The number of work-related fatalities among the employees and contractors of the company that issued the document during the period the document reports on. Give the number, or \"not reported\" if the document does not report it."},
+      ],
+      model=pz.Model.GPT_6_LUNA,
+      depends_on=["document"],
+  )
+  pipe.filter(lambda row: bool(re.search(r"\d", str(row["fatalities"])))
+              and 1 <= int(re.search(r"\d[\d,]*", str(row["fatalities"])).group(0).replace(",", "")) <= 4)
+  pipe.project(["idx"])
+  pipe
+
+# identify: manufacturers with SBTi-validated targets
+"5": |
+  pipe = PhysicalPipeline(plan_name, "documents", load_data(source_csv))
+  pipe.sem_filter(
+      "Both hold: (1) the primary economic activity of the company that issued the document is manufacturing; (2) the document states that the Science Based Targets initiative (SBTi) has validated (also called approved) an emissions reduction target of the company that issued the document.",
+      model=pz.Model.GPT_6_LUNA,
+      depends_on=["document"],
+  )
+  pipe.project(["idx"])
+  pipe
+
+# identify: manufacturers that currently use an internal carbon price
+"6": |
+  pipe = PhysicalPipeline(plan_name, "documents", load_data(source_csv))
+  pipe.sem_filter(
+      "An internal carbon price is a monetary value assigned to greenhouse gas emissions as a means of accounting for the costs of climate change regulation or a company's climate action ambitions. Both hold: (1) the primary economic activity of the company that issued the document is manufacturing; (2) the document states that the company that issued it currently uses an internal carbon price.",
+      model=pz.Model.GPT_6_LUNA,
+      depends_on=["document"],
+  )
+  pipe.project(["idx"])
+  pipe
+
+# identify: SBTi-validated targets AND no internal carbon price
+"7": |
+  pipe = PhysicalPipeline(plan_name, "documents", load_data(source_csv))
+  pipe.sem_filter(
+      "An internal carbon price is a monetary value assigned to greenhouse gas emissions as a means of accounting for the costs of climate change regulation or a company's climate action ambitions. Both hold: (1) the document states that the Science Based Targets initiative (SBTi) has validated (also called approved) an emissions reduction target of the company that issued the document; (2) the document does not state that the company that issued it currently uses an internal carbon price.",
+      model=pz.Model.GPT_6_LUNA,
+      depends_on=["document"],
+  )
+  pipe.project(["idx"])
+  pipe
+
+# identify: an internal carbon price currently in use AND no SBTi-validated target
+"8": |
+  pipe = PhysicalPipeline(plan_name, "documents", load_data(source_csv))
+  pipe.sem_filter(
+      "An internal carbon price is a monetary value assigned to greenhouse gas emissions as a means of accounting for the costs of climate change regulation or a company's climate action ambitions. Both hold: (1) the document states that the company that issued it currently uses an internal carbon price; (2) the document does not state that the Science Based Targets initiative (SBTi) has validated (also called approved) an emissions reduction target of the company that issued the document.",
+      model=pz.Model.GPT_6_LUNA,
+      depends_on=["document"],
+  )
+  pipe.project(["idx"])
+  pipe
+
+# ---- retired queries, kept so their results can be reproduced ----
+# classify: sustainability reports, their issuing company and its sector
+"100": |
+  pipe = PhysicalPipeline(plan_name, "documents", load_data(source_csv))
+  pipe.sem_filter(
+      "The document is a sustainability report: a report a company publishes to disclose the environmental, social and governance impacts and performance of its activities.",
+      model=pz.Model.GPT_6_LUNA,
+      depends_on=["document"],
+  )
+  pipe.sem_map(
+      cols=[
+          {"name": "company_name", "type": str, "description": "The name of the company that issued the report."},
+          {"name": "economic_activity", "type": str, "description": "The company's primary economic activity, exactly one of: agriculture (agriculture, forestry and fishing); mining (mining and quarrying); manufacturing (manufacturing); energy_supply (electricity, gas, steam and air conditioning supply); water_supply (water supply; sewerage, waste management and remediation activities); construction (construction); trade_repair (wholesale and retail trade; repair of motor vehicles and motorcycles); transportation (transportation and storage); accommodation_food (accommodation and food service activities); information_communication (information and communication); finance_insurance (financial and insurance activities); real_estate (real estate activities); professional_scientific (professional, scientific and technical activities); administrative_support (administrative and support service activities); public_administration (public administration and defence; compulsory social security); education (education); health_social (human health and social work activities); arts_entertainment (arts, entertainment and recreation); other (other service activities); households (activities of households as employers; undifferentiated goods- and services-producing activities of households for own use); extraterritorial (activities of extraterritorial organisations and bodies)"},
+      ],
+      model=pz.Model.GPT_6_LUNA,
+      depends_on=["document"],
+  )
+  pipe.project(["idx", "company_name", "economic_activity"])
+  pipe
+
+# identify: an EcoVadis medal the company received
+"101": |
+  pipe = PhysicalPipeline(plan_name, "documents", load_data(source_csv))
+  pipe.sem_map(
+      cols=[
+          {"name": "qualifies", "type": bool, "description": "True if the document states an EcoVadis medal (platinum, gold, silver or bronze; also called a recognition level) received by the company that issued the document."},
+          {"name": "reason", "type": str, "description": "If it qualifies, one verbatim quote from the document: the complete phrase or sentence that states it, copied exactly as it appears in the document, so that the quote sufficiently justifies the verdict. Otherwise empty."},
+      ],
+      model=pz.Model.GPT_6_LUNA,
+      depends_on=["document"],
+  )
+  pipe.filter(lambda row: bool(row["qualifies"]))
+  pipe.project(["idx", "reason"])
+  pipe
+
+# identify: companies with more than 4 work-related fatalities in the reporting period
+"102": |
+  import re
+  pipe = PhysicalPipeline(plan_name, "documents", load_data(source_csv))
+  pipe.sem_map(
+      cols=[
+          {"name": "fatalities", "type": str, "description": "The number of work-related fatalities among the employees and contractors of the company that issued the document during the period the document reports on. Give the number, or \"not reported\" if the document does not report it."},
+          {"name": "company_name", "type": str, "description": "The name of the company that issued the document."},
+      ],
+      model=pz.Model.GPT_6_LUNA,
+      depends_on=["document"],
+  )
+  pipe.filter(lambda row: bool(re.search(r"\d", str(row["fatalities"])))
+              and int(re.search(r"\d[\d,]*", str(row["fatalities"])).group(0).replace(",", "")) > 4)
+  pipe.project(["idx", "company_name"])
+  pipe
+
+# identify: an internal carbon price currently in use AND SBTi-validated targets
+"103": |
+  pipe = PhysicalPipeline(plan_name, "documents", load_data(source_csv))
+  pipe.sem_filter(
+      "An internal carbon price is a monetary value assigned to greenhouse gas emissions as a means of accounting for the costs of climate change regulation or a company's climate action ambitions. Both hold: (1) the document states that the company that issued it currently uses an internal carbon price; (2) the document states that the Science Based Targets initiative (SBTi) has validated (also called approved) an emissions reduction target of the company that issued the document.",
+      model=pz.Model.GPT_6_LUNA,
+      depends_on=["document"],
+  )
+  pipe.project(["idx"])
+  pipe
+
+# identify: SBTi-validated targets AND an EcoVadis medal
+"104": |
+  pipe = PhysicalPipeline(plan_name, "documents", load_data(source_csv))
+  pipe.sem_filter(
+      "Both hold: (1) the document states that the Science Based Targets initiative (SBTi) has validated (also called approved) an emissions reduction target of the company that issued the document; (2) the document states an EcoVadis medal (platinum, gold, silver or bronze; also called a recognition level) received by the company that issued the document.",
+      model=pz.Model.GPT_6_LUNA,
+      depends_on=["document"],
+  )
+  pipe.project(["idx"])
+  pipe

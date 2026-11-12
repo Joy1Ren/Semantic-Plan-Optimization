@@ -1,0 +1,246 @@
+name: Sustainability Reports
+quality_adapter: agent_cost_model.experiments.sustainability.quality_evaluator
+
+# Eight questions over the SAME 140 company documents (docetl's sustainability train 40 + test
+# 100; dataset/sustainability_140.csv carries only idx and document). queries.py binds each query id
+# to its question and holds the definitions; the wording below repeats them, as do baseline_plans.yaml
+# and the MOAR pipelines generated from it (docetl/.../pipelines/Sustainability/make_pipelines.py).
+# Keep queries.py, this file and baseline_plans.yaml in sync by hand. The frontier labelers were given
+# the same definitions, plus, for SBTi, a sentence on what does not count
+# (ground_truth/llm_grading/label_with_models.py).
+#
+#   1-3    identify   one fact each, answered with a verbatim quote that is graded with it
+#   4      identify   companies with 1 to 4 work-related fatalities in the reporting period
+#   5-6    identify   manufacturers with a second fact; F1 only
+#   7-8    identify   one fact without the other (SBTi, internal carbon price); F1 only
+#   100-104           retired queries (see queries.py), kept to track their ground truth and results
+results_prefix: "{results_dir}/sustainability/q{query_id}/{runner}"
+sampling_dir: "{results_dir}/sustainability/_sampling"
+sampling_results_path: "{results_dir}/sustainability/_sampling/sampling_results.json"
+
+use_cases:
+  sustainability:
+    query_source:
+      type: text
+      modalities: [text]
+    task_prompts:
+      # identify: the company is a member of RE100
+      "1": |-
+        You are given the full text of one company document.
+
+        Return this document only if it states that the company that issued the document is a
+        member of RE100, the global initiative of companies committed to 100% renewable
+        electricity.
+
+        Return no row at all for a document that does not qualify. For one that does, output:
+          idx      copy the input row's idx unchanged
+          reason   one verbatim quote from the document: the complete phrase or sentence that
+                   states it, copied exactly as it appears in the document, so that the quote
+                   sufficiently justifies the verdict
+      # identify: SBTi-validated emissions targets
+      "2": |-
+        You are given the full text of one company document.
+
+        Return this document only if it states that the Science Based Targets initiative (SBTi) has
+        validated (also called approved) an emissions reduction target of the company that issued
+        the document.
+
+        Return no row at all for a document that does not qualify. For one that does, output:
+          idx      copy the input row's idx unchanged
+          reason   one verbatim quote from the document: the complete phrase or sentence that
+                   states it, copied exactly as it appears in the document, so that the quote
+                   sufficiently justifies the verdict
+      # identify: an internal carbon price currently in use
+      "3": |-
+        You are given the full text of one company document.
+
+        An internal carbon price is a monetary value assigned to greenhouse gas emissions as a means
+        of accounting for the costs of climate change regulation or a company's climate action
+        ambitions. Return this document only if it states that the company that issued it
+        currently uses an internal carbon price.
+
+        Return no row at all for a document that does not qualify. For one that does, output:
+          idx      copy the input row's idx unchanged
+          reason   one verbatim quote from the document: the complete phrase or sentence that
+                   states it, copied exactly as it appears in the document, so that the quote
+                   sufficiently justifies the verdict, including the price if the
+                   document states one
+      # identify: companies with 1 to 4 work-related fatalities in the reporting period
+      "4": |-
+        You are given the full text of one company document.
+
+        Return this document only if the number of work-related fatalities among the employees and
+        contractors of the company that issued the document during the period the document reports
+        on is at least 1 and at most 4.
+
+        Return no row at all for a document that does not qualify. For one that does,
+        output a single row with these columns:
+          idx      copy the input row's idx unchanged
+      # identify: manufacturers with SBTi-validated targets
+      "5": |-
+        You are given the full text of one company document.
+
+        Return this document only if BOTH of these hold:
+          1. the primary economic activity of the company that issued the document is manufacturing;
+          2. it states that the Science Based Targets initiative (SBTi) has validated (also called
+             approved) an emissions reduction target of the company that issued the document.
+
+        Return no row at all for a document that does not qualify. For one that does,
+        output a single row with these columns:
+          idx      copy the input row's idx unchanged
+      # identify: manufacturers that currently use an internal carbon price
+      "6": |-
+        You are given the full text of one company document.
+
+        An internal carbon price is a monetary value assigned to greenhouse gas emissions as a means
+        of accounting for the costs of climate change regulation or a company's climate action
+        ambitions.
+
+        Return this document only if BOTH of these hold:
+          1. the primary economic activity of the company that issued the document is manufacturing;
+          2. it states that the company that issued it currently uses an internal carbon price.
+
+        Return no row at all for a document that does not qualify. For one that does,
+        output a single row with these columns:
+          idx      copy the input row's idx unchanged
+      # identify: SBTi-validated targets AND no internal carbon price
+      "7": |-
+        You are given the full text of one company document.
+
+        An internal carbon price is a monetary value assigned to greenhouse gas emissions as a means
+        of accounting for the costs of climate change regulation or a company's climate action
+        ambitions.
+
+        Return this document only if BOTH of these hold:
+          1. it states that the Science Based Targets initiative (SBTi) has validated (also called
+             approved) an emissions reduction target of the company that issued the document;
+          2. it does not state that the company that issued it currently uses an internal carbon
+             price.
+
+        Return no row at all for a document that does not qualify. For one that does,
+        output a single row with these columns:
+          idx      copy the input row's idx unchanged
+      # identify: an internal carbon price currently in use AND no SBTi-validated target
+      "8": |-
+        You are given the full text of one company document.
+
+        An internal carbon price is a monetary value assigned to greenhouse gas emissions as a means
+        of accounting for the costs of climate change regulation or a company's climate action
+        ambitions.
+
+        Return this document only if BOTH of these hold:
+          1. it states that the company that issued it currently uses an internal carbon price;
+          2. it does not state that the Science Based Targets initiative (SBTi) has validated (also
+             called approved) an emissions reduction target of the company that issued the
+             document.
+
+        Return no row at all for a document that does not qualify. For one that does,
+        output a single row with these columns:
+          idx      copy the input row's idx unchanged
+      # ---- retired queries, kept so their ground truth and results stay trackable ----
+      # classify: sustainability reports, their issuing company and its sector
+      "100": |-
+        You are given the full text of one company document.
+
+        Return this document only if it is a sustainability report: a report a company publishes to
+        disclose the environmental, social and governance impacts and performance of its activities.
+
+        Return no row at all for any other document. For a sustainability report, output:
+          idx                copy the input row's idx unchanged
+          company_name       the name of the company that issued the report
+          economic_activity  the company's primary economic activity, exactly one of:
+                       agriculture (agriculture, forestry and fishing);
+                       mining (mining and quarrying);
+                       manufacturing (manufacturing);
+                       energy_supply (electricity, gas, steam and air conditioning supply);
+                       water_supply (water supply; sewerage, waste management and remediation activities);
+                       construction (construction);
+                       trade_repair (wholesale and retail trade; repair of motor vehicles and motorcycles);
+                       transportation (transportation and storage);
+                       accommodation_food (accommodation and food service activities);
+                       information_communication (information and communication);
+                       finance_insurance (financial and insurance activities);
+                       real_estate (real estate activities);
+                       professional_scientific (professional, scientific and technical activities);
+                       administrative_support (administrative and support service activities);
+                       public_administration (public administration and defence; compulsory social security);
+                       education (education);
+                       health_social (human health and social work activities);
+                       arts_entertainment (arts, entertainment and recreation);
+                       other (other service activities);
+                       households (activities of households as employers; undifferentiated goods- and services-producing activities of households for own use);
+                       extraterritorial (activities of extraterritorial organisations and bodies)
+      # identify: an EcoVadis medal the company received
+      "101": |-
+        You are given the full text of one company document.
+
+        Return this document only if it states an EcoVadis medal (platinum, gold, silver or bronze;
+        also called a recognition level) received by the company that issued the document.
+
+        Return no row at all for a document that does not qualify. For one that does, output:
+          idx      copy the input row's idx unchanged
+          reason   one verbatim quote from the document: the complete phrase or sentence that
+                   states it, copied exactly as it appears in the document, so that the quote
+                   sufficiently justifies the verdict
+      # identify: companies with more than 4 work-related fatalities in the reporting period
+      "102": |-
+        You are given the full text of one company document.
+
+        Return this document only if the number of work-related fatalities among the employees and
+        contractors of the company that issued the document during the period the document reports
+        on is more than 4.
+
+        Return no row at all for a document that does not qualify. For one that does, output:
+          idx           copy the input row's idx unchanged
+          company_name  the name of the company that issued the document
+      # identify: an internal carbon price currently in use AND SBTi-validated targets
+      "103": |-
+        You are given the full text of one company document.
+
+        An internal carbon price is a monetary value assigned to greenhouse gas emissions as a means
+        of accounting for the costs of climate change regulation or a company's climate action
+        ambitions.
+
+        Return this document only if BOTH of these hold:
+          1. it states that the company that issued it currently uses an internal carbon price;
+          2. it states that the Science Based Targets initiative (SBTi) has validated (also called
+             approved) an emissions reduction target of the company that issued the document.
+
+        Return no row at all for a document that does not qualify. For one that does,
+        output a single row with these columns:
+          idx      copy the input row's idx unchanged
+      # identify: SBTi-validated targets AND an EcoVadis medal
+      "104": |-
+        You are given the full text of one company document.
+
+        Return this document only if BOTH of these hold:
+          1. it states that the Science Based Targets initiative (SBTi) has validated (also called
+             approved) an emissions reduction target of the company that issued the document;
+          2. it states an EcoVadis medal (platinum, gold, silver or bronze; also called a recognition
+             level) received by the company that issued the document.
+
+        Return no row at all for a document that does not qualify. For one that does,
+        output a single row with these columns:
+          idx      copy the input row's idx unchanged
+    query_metrics:  # see queries.py (Query.metric) and quality_evaluator.py
+      "1": set_f1_quote_jaccard  # sustainability_re100_member
+      "2": set_f1_quote_jaccard  # sustainability_sbti_validated
+      "3": set_f1_quote_jaccard  # sustainability_internal_carbon_price
+      "4": set_f1  # sustainability_fatalities_in_range
+      "5": set_f1  # sustainability_manufacturing_sbti
+      "6": set_f1  # sustainability_manufacturing_carbon_price
+      "7": set_f1  # sustainability_sbti_no_carbon_price
+      "8": set_f1  # sustainability_carbon_price_no_sbti
+      "100": sustainability_joint_f1  # sustainability_report_sector
+      "101": set_f1_quote_jaccard  # sustainability_ecovadis_medal
+      "102": set_f1  # sustainability_fatalities_above_threshold
+      "103": set_f1  # sustainability_carbon_price_sbti
+      "104": set_f1  # sustainability_sbti_ecovadis
+    dataset:
+      directory: "{benchmark_dir}/dataset"
+      source_csv: "sustainability_140.csv"
+      id_col: idx
+    # One subset per query: sampling writes Q{id}_subset_{mode}.csv, which run_opt.py reads back.
+    subset_path: "{benchmark_dir}/datasubset_opt/Q{query_id}_subset.csv"
+    # one file per query, built from the frontier-model labels by ground_truth/llm_grading/build_ground_truth.py
+    ground_truth_path: "{benchmark_dir}/ground_truth/Q{query_id}_gt.csv"
