@@ -25,6 +25,8 @@ import re
 
 import pandas as pd
 
+from agent_cost_model.experiments.scoring.spans import SPAN_THRESHOLD, span_jaccard
+
 # Answers that are a word rather than a value. Each is a real answer: "perpetual" (no end),
 # "relative" (tied to an event), "unspecified" (the clause states no length), "redacted"
 # (blacked out in the filing).
@@ -33,8 +35,6 @@ UNSPECIFIED = "unspecified"
 # Answers that say the contract states no usable value. Getting the word right does not show the
 # plan found the clause, so these also need the quoted text to line up.
 SPAN_BACKED = {"unspecified", "redacted", "relative"}
-# How much of CUAD's highlighted text a plan must have quoted for the clause to count as found.
-SPAN_THRESHOLD = 0.5
 
 # Place names a plan may reasonably use for the same jurisdiction. The ground truth holds the most
 # specific place the contract names (see clean_cuad_gt.py); anything here is accepted for it.
@@ -95,18 +95,6 @@ _DATE = re.compile(r"([\d?]{1,4})\s*[/-]\s*([\d?]{1,4})\s*[/-]\s*([\d?]{2,4})")
 _NUMBER_WORDS = {w: i for i, w in enumerate(
     "zero one two three four five six seven eight nine ten eleven twelve".split())}
 _EMPTY = {"", "none", "null", "n/a", "na", "-", "[]", "not present", "not stated", "nan"}
-
-
-def token_set(text: str) -> set[str]:
-    return set(re.sub(r"[^a-z0-9\s]", " ", str(text).lower()).split())
-
-
-def span_jaccard(gt_spans: list[str], predicted: str) -> float:
-    gold, pred = token_set(" ".join(gt_spans)), token_set(predicted)
-    if not gold and not pred:
-        return 1.0
-    union = gold | pred
-    return len(gold & pred) / len(union) if union else 1.0
 
 
 def _year(text: str) -> str:

@@ -1,102 +1,56 @@
-"""Prepare CUAD contract-clause-extraction data (from docetl's reasoning experiments) for
-cost-model-agent optimization.
+"""Build the idx -> contract name map every CUAD experiment shares (IDX_TO_NAME_JSON).
 
-Which json gets converted, and where it lands, is declared once in the four constants below.
-Nothing further down names a file, so pointing this at different splits is an edit to those
-four lines and nothing else.
+A plan never sees a contract's real filename (e.g. "...ContentLicenseAgreement.txt"): the CUAD
+task asks a plan to extract "Document Name", and a filename in an input column would let it copy
+that instead of reading the title from the text. Each contract gets a small integer "idx" instead,
+and this map re-attaches the name at eval time (see quality_evaluator.py's normalize_eval_df). It
+lives under ground_truth/ since that directory is eval-only and never fed to a plan.
 
-The two sources are docetl's own train/test splits, and they are DISJOINT -- the optimize set
-is a held-out set to optimize against, not a strict subset of the full set. Every document's
-idx is therefore assigned from the two sources POOLED (see _build_name_to_idx), so an
-optimize-set document still gets an idx even though it never appears in the full set.
-
-The source json's "name" field (the real source filename, e.g.
-"...ContentLicenseAgreement.txt") is dropped from both dataset CSVs, not just renamed --
-the CUAD task prompt (benchmark.yaml) asks a plan to extract "Document Name" as one of its
-41 clause categories, and leaving the real filename sitting in an input column would let a
-plan "cheat" on that category by just copying it over instead of actually extracting the
-title from the document text. In its place, each document gets a small sequential integer
-"idx", assigned by name over the pooled sources so a document keeps one idx no matter which
-CSV it appears in. The idx -> name mapping needed to re-attach "name" at eval time (see
-quality_evaluator.py's normalize_eval_df) is written to IDX_TO_NAME_JSON, under ground_truth/
-since that directory is already eval-only and never fed to a plan as input.
+The datasets themselves are built elsewhere: cuad/dataset/cuad_clean_140.csv is a copy of
+cuad_categories/dataset/cuad_clean_140.csv, written by
+cuad_categories/prepare_cuad_categories_data.py from this map.
 """
 from __future__ import annotations
 
 import json
-from pathlib import Path
-
-import pandas as pd
 
 from agent_cost_model.experiments.cuad.paths import (
     BENCHMARK_DIR,
-    DATASET_DIR,
-    DATASUBSET_DIR,
     GROUND_TRUTH_DIR,
     IDX_TO_NAME_JSON,
     cuad_data_dir,
     cuad_ground_truth_csv,
 )
 
-# -- what to prepare, declared once -------------------------------------------
-# Source json, relative to the docetl checkout's experiments/reasoning/data/, paired with the
-# CSV it is written to in this repo. The CSV names are deliberately independent of the source
-# split so repointing a source below moves nothing downstream -- but benchmark.yaml's
-# source_csv / subset_path and run_single_plan.py name these same two CSVs, so renaming one
-# means updating those too.
-FULL_SOURCE = "test/cuad.json"       # 100 documents
-FULL_CSV = DATASET_DIR / "cuad.csv"
-OPTIMIZE_SOURCE = "train/cuad.json"  # 40 documents, disjoint from FULL_SOURCE
-OPTIMIZE_CSV = DATASUBSET_DIR / "cuad_optimize.csv"
-
-# Every CUAD contract, for the idx -> name map shared by all CUAD experiments.
+# docetl's own train/test splits, relative to the docetl checkout's experiments/reasoning/data/.
+# Their contracts take the first idx values, so the numbering stays what it has always been.
+SOURCES = ["test/cuad.json", "train/cuad.json"]  # 100 + 40 documents, disjoint
+# Every CUAD contract, for the rest of the map.
 CUAD_JSON = BENCHMARK_DIR / "CUADv1.json"
 
-CONVERSIONS = [
-    (FULL_SOURCE, FULL_CSV),
-    (OPTIMIZE_SOURCE, OPTIMIZE_CSV),
-]
 
-
-def _source_path(relative_source: str) -> Path:
-    path = cuad_data_dir() / relative_source
-    if not path.exists():
-        raise FileNotFoundError(f"CUAD source data not found: {path}")
-    return path
-
-
-def _load(relative_source: str) -> list[dict]:
-    return json.loads(_source_path(relative_source).read_text())
-
-
-def _build_name_to_idx(records_by_source: dict[str, list[dict]]) -> dict[str, int]:
+def _build_name_to_idx() -> dict[str, int]:
     """Assign every one of CUAD's 510 contracts a small sequential idx, keyed by its real "name"
-    (source filename), so every CUAD experiment shares one idx -> name map.
+    (source filename).
 
-    The documents in the sources come first, pooled and sorted: FULL_SOURCE and OPTIMIZE_SOURCE
-    are disjoint splits, so an idx map built from the full set would cover none of the optimize
-    set. The rest of CUADv1 follows, sorted, so adding them never renumbers a document already
-    in these CSVs (or in the embedding cache keyed by idx).
+    The documents in docetl's splits come first, pooled and sorted. The rest of CUADv1 follows,
+    sorted, so adding them never renumbered a document already in use (or in the embedding cache
+    keyed by idx).
     """
-    names = sorted({r["name"] for records in records_by_source.values() for r in records})
+    names = set()
+    for source in SOURCES:
+        path = cuad_data_dir() / source
+        if not path.exists():
+            raise FileNotFoundError(f"CUAD source data not found: {path}")
+        names |= {r["name"] for r in json.loads(path.read_text())}
+    names = sorted(names)
     titles = [f"{doc['title']}.txt" for doc in json.loads(CUAD_JSON.read_text())["data"]]
     names += sorted(set(titles) - set(names))
     return {name: i for i, name in enumerate(names)}
 
 
 def main() -> None:
-    records_by_source = {source: _load(source) for source, _ in CONVERSIONS}
-    name_to_idx = _build_name_to_idx(records_by_source)
-
-    for source, destination_path in CONVERSIONS:
-        records = records_by_source[source]
-        df = pd.DataFrame(records)
-        df["idx"] = df["name"].map(name_to_idx)
-        df = df[["document", "idx"]]
-        destination_path.parent.mkdir(parents=True, exist_ok=True)
-        df.to_csv(destination_path, index=False)
-        print(f"{source}: wrote {len(records)} rows -> {destination_path}")
-
+    name_to_idx = _build_name_to_idx()
     GROUND_TRUTH_DIR.mkdir(parents=True, exist_ok=True)
     idx_to_name = {str(idx): name for name, idx in name_to_idx.items()}
     IDX_TO_NAME_JSON.write_text(json.dumps(idx_to_name, indent=2))

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import importlib
-import json
 from functools import lru_cache
 from pathlib import Path
 from typing import Callable
@@ -11,61 +10,12 @@ from typing import Callable
 import pandas as pd
 
 from agent_cost_model.opt_agent.plan_quality_evaluator import PlanQualityEvaluator
+from agent_cost_model.experiments.SemBench.normalize import normalize_eval_df
 from agent_cost_model.experiments.SemBench.paths import (
     activate_sembench,
     sembench_files_dir,
     sembench_root,
 )
-
-
-def _id_str(value) -> str:
-    if isinstance(value, float) and value.is_integer():
-        return str(int(value))
-    return str(value)
-
-
-def normalize_eval_df(df: pd.DataFrame, use_case: str, query_id: int) -> pd.DataFrame:
-    """Normalize SemBench query outputs into its evaluator's expected shape."""
-    if use_case != "ecomm":
-        return df
-    if query_id in (1, 2, 13, 14):
-        if df.empty:
-            return pd.DataFrame({"id": []})
-        return df.rename(columns={"idx": "id"})[["id"]]
-    if query_id in (3, 4, 5, 6):
-        if df.empty:
-            return pd.DataFrame({"id": [], "category": []})
-        return df.rename(columns={"idx": "id"}).iloc[:, :2]
-    if query_id in (7, 8, 9):
-        if df.empty:
-            return pd.DataFrame({"id": []})
-        df = df.copy()
-        df["id"] = df.iloc[:, :2].apply(lambda col: col.map(_id_str)).agg("-".join, axis=1)
-        return df[["id"]]
-    if query_id in (10, 11):
-        expected_columns = 3 if query_id == 10 else 4
-        if df.empty:
-            return pd.DataFrame({"id": []})
-        assert df.shape[1] == expected_columns, (
-            f"ecomm Q{query_id} expects {expected_columns} columns, got {df.shape[1]}"
-        )
-        df = df.copy()
-        df["id"] = df.iloc[:, :expected_columns].apply(lambda col: col.map(_id_str)).agg("-".join, axis=1)
-        return df[["id"]]
-    if query_id == 12:
-        if df.empty:
-            return pd.DataFrame({"id": []})
-        assert df.shape[1] == 3, f"ecomm Q12 expects 3 columns, got {df.shape[1]}"
-        df = df.copy()
-        df["id"] = df.iloc[:, :3].apply(
-            lambda row: json.dumps(
-                {"id": int(row.iloc[0]), "brand": row.iloc[1], "category": row.iloc[2]},
-                separators=(",", ":"),
-            ),
-            axis=1,
-        )
-        return df[["id"]]
-    return df
 
 
 # Use cases whose gold query can be regenerated on the optimization datasubset (instead of
@@ -198,6 +148,32 @@ def _load_ground_truth(
     return pd.read_csv(ground_truth_path)
 
 
+# F1 queries whose answer is a set of single records drawn from the population, so a record
+# neither returned nor wanted is a TN. Pair and tuple queries have no such population.
+_RECORD_SET_QUERIES = {"ecomm": {1, 2, 13, 14}}
+
+
+def _retrieval_counts(use_case: str, query_id: int, plan_output_df: pd.DataFrame,
+                      ground_truth_df: pd.DataFrame, population_path) -> dict:
+    """TP/FP/FN (and TN where defined) behind a SemBench F1, from the same sets its evaluator
+    compares: ecomm's normalized `id` column, movie Q7's (movie, sorted review pair) tuples."""
+    if use_case == "movie":
+        def pairs(df):
+            if df.empty or df.shape[1] < 3:
+                return set()
+            return {(r.iloc[0], tuple(sorted([r.iloc[1], r.iloc[2]])))
+                    for _, r in df.iterrows() if r.iloc[:3].notna().all()}
+        returned, wanted = pairs(plan_output_df), pairs(ground_truth_df)
+    else:
+        returned = set(plan_output_df["id"]) if not plan_output_df.empty else set()
+        wanted = set(ground_truth_df["id"]) if not ground_truth_df.empty else set()
+    counts = {"TP": len(returned & wanted), "FP": len(returned - wanted),
+              "FN": len(wanted - returned)}
+    if population_path and query_id in _RECORD_SET_QUERIES.get(use_case, ()):
+        counts["TN"] = len(pd.read_csv(population_path)) - len(returned | wanted)
+    return counts
+
+
 @lru_cache(maxsize=None)
 def load_evaluator(use_case: str, scale_factor: int):
     """Construct the SemBench evaluator for a supported benchmark use case.
@@ -252,15 +228,16 @@ class QualityEvaluator(PlanQualityEvaluator):
         """
         df.to_csv(path, index=False)
 
-    def score_plan(self, plan_output_df, ground_truth_df, *_ignored) -> float:
+    def score_plan(self, plan_output_df, ground_truth_df, _ground_truth_path=None,
+                   population_path=None) -> float:
         """Score a plan's output against ground truth using SemBench's own evaluator.
 
         SemBench's evaluators take the ground truth as a DataFrame -- `_evaluate_single_query` is
-        declared in its evaluator/generic_evaluator.py, which is a read-only checkout -- so
-        `*_ignored` absorbs the ground-truth path and the population path the engine also offers;
-        neither reaches a SemBench evaluator. They return one of SemBench's metric dataclasses, and
-        which field carries the score depends on the query's metric family; that mapping lives
-        here rather than in the engine because the dataclasses are SemBench's own taxonomy.
+        declared in its evaluator/generic_evaluator.py, which is a read-only checkout -- so the
+        ground-truth path never reaches one; the population path is read only for F1's TN. They
+        return one of SemBench's metric dataclasses, and which field carries the score depends on
+        the query's metric family; that mapping lives here rather than in the engine because the
+        dataclasses are SemBench's own taxonomy.
         """
         import dataclasses
 
@@ -268,14 +245,29 @@ class QualityEvaluator(PlanQualityEvaluator):
         qm = evaluator._evaluate_single_query(self._query_id, plan_output_df, ground_truth_df)
         qm_dict = dataclasses.asdict(qm)
         qm_type = type(qm).__name__
+        label = f"[QualityEvaluator] {self._use_case} Q{self._query_id}"
         if "Retrieval" in qm_type:
-            return float(qm_dict.get("f1_score", float("nan")))
+            score = float(qm_dict.get("f1_score", float("nan")))
+            counts = self.last_quality_counts = _retrieval_counts(
+                self._use_case, self._query_id, plan_output_df, ground_truth_df, population_path)
+            print(f"{label}: F1 {score:.4f}, (TP, FP, TN, FN) = ({counts['TP']}, {counts['FP']}, "
+                  f"{counts.get('TN', 'n/a')}, {counts['FN']})")
+            return score
         if "Aggregation" in qm_type:
-            return 1.0 / (1.0 + float(qm_dict.get("relative_error", 1.0)))
+            relative_error = float(qm_dict.get("relative_error", 1.0))
+            score = 1.0 / (1.0 + relative_error)
+            print(f"{label}: score {score:.4f} (relative error {relative_error:.4f}), "
+                  f"true {ground_truth_df.head(5).to_dict('records')}, "
+                  f"plan {plan_output_df.head(5).to_dict('records')}")
+            return score
         if "Rank" in qm_type:
-            return float(qm_dict.get("spearman_correlation", float("nan")))
+            score = float(qm_dict.get("spearman_correlation", float("nan")))
+            print(f"{label}: spearman {score:.4f}")
+            return score
         if "SingleAccuracy" in qm_type:
-            return float(qm_dict.get("accuracy", float("nan")))
+            score = float(qm_dict.get("accuracy", float("nan")))
+            print(f"{label}: {qm_dict.get('metric_type', 'accuracy')} {score:.4f}")
+            return score
         return float("nan")
 
     def __init__(
@@ -291,6 +283,7 @@ class QualityEvaluator(PlanQualityEvaluator):
         run_dir: str | Path | None = None,
         oracle_reasoning_effort: str | None = None,
         use_oracle_ground_truth: bool = True,
+        oracle_operator_quality: bool = True,
         # Every adapter is constructed with one fixed keyword set (see CostModelAgent._setup_run);
         # absorbing the rest is what lets the engine add one without breaking every benchmark.
         **_ignored,
@@ -321,6 +314,7 @@ class QualityEvaluator(PlanQualityEvaluator):
             run_dir=run_dir,
             oracle_reasoning_effort=oracle_reasoning_effort,
             use_oracle_ground_truth=use_oracle_ground_truth,
+            oracle_operator_quality=oracle_operator_quality,
             ground_truth_loader=lambda: _load_ground_truth(
                 use_case, scale_factor, query_id, subset_path, ground_truth_path
             ),

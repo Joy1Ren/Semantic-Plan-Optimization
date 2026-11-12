@@ -25,14 +25,14 @@ from pathlib import Path
 
 import pandas as pd
 
-from agent_cost_model.experiments.cuad_categories.paths import IDX_TO_NAME_JSON, per_query_ground_truth
-from agent_cost_model.experiments.cuad_categories.queries import QUERY_BY_ID
-from agent_cost_model.experiments.cuad_categories.scoring import (
-    SPAN_THRESHOLD,
-    party_count_closeness,
-    score_document,
-    span_jaccard,
+from agent_cost_model.experiments.cuad_categories.paths import (
+    GROUND_TRUTH_CSV,
+    IDX_TO_NAME_JSON,
+    per_query_ground_truth,
 )
+from agent_cost_model.experiments.cuad_categories.queries import QUERY_BY_ID, gradable
+from agent_cost_model.experiments.cuad_categories.scoring import party_count_closeness, score_document
+from agent_cost_model.experiments.scoring.identification import score_returned_set
 from agent_cost_model.opt_agent.plan_quality_evaluator import PlanQualityEvaluator
 
 FILENAME_COL = "filename"
@@ -74,54 +74,36 @@ def _gold_rows(ground_truth_path: str | Path) -> pd.DataFrame:
 
 def score_identification(query, plan_output_df: pd.DataFrame, ground_truth_path: str | Path,
                         population_path: str | Path | None = None) -> dict:
-    """F1 over the contracts a plan returned, against the set in Q{id}_gt.csv -- which lists the
-    contracts that qualify, and leaves out the ones whose ground truth cannot settle the query.
+    """F1 over the contracts a plan returned, against the set in Q{id}_gt.csv, which lists the
+    contracts that qualify. A contract whose ground truth cannot settle the query (cuad_gt.csv's
+    `unusable`) counts neither way: returning it is not a false positive.
 
     Where that file has a span column, a returned contract that qualifies is a hit only if the
     plan's reason matches the span (token Jaccard above SPAN_THRESHOLD); otherwise it is a miss,
     counted against recall only."""
     gold = _gold_rows(ground_truth_path)
     judgeable = set(_population_keys(population_path)) if population_path else set(gold[NAME_COL])
-    wanted = set(gold[NAME_COL]) & judgeable
+    judgeable -= _ungradable(query)
 
-    returned, reasons = set(), {}
+    returned = {}
     if not plan_output_df.empty and FILENAME_COL in plan_output_df.columns:
         reason_col = _first_column(plan_output_df, REASON_COL, avoid=())
         for _, row in plan_output_df.iterrows():
-            name = _TXT_SUFFIX.sub("", str(row[FILENAME_COL]))
-            returned.add(name)
             reason = row.get(reason_col) if reason_col else None
-            reasons[name] = reason if isinstance(reason, str) else ""
-    returned &= judgeable
+            returned[_TXT_SUFFIX.sub("", str(row[FILENAME_COL]))] = reason if isinstance(reason, str) else ""
 
-    found = returned & wanted
+    gold_spans = None
     if SPAN_COL in gold.columns:
-        spans = dict(zip(gold[NAME_COL], gold[SPAN_COL]))
-        found = {name for name in found
-                 if span_jaccard(_gold_span(spans[name]) or [], reasons[name]) > SPAN_THRESHOLD}
-    hits = len(found)
-    wrong = len(returned - wanted)
-    precision = hits / (hits + wrong) if hits + wrong else 0.0
-    recall = hits / len(wanted) if wanted else float("nan")
-    f1 = 2 * precision * recall / (precision + recall) if hits else 0.0
-    return {"score": f1, "documents_scored": len(judgeable), "documents_skipped": 0,
-            "returned": len(returned), "wanted": len(wanted),
-            "counts": _identification_counts(judgeable, returned, wanted, found,
-                                             reason_checked=SPAN_COL in gold.columns)}
+        gold_spans = {name: _gold_span(cell) or [] for name, cell in zip(gold[NAME_COL], gold[SPAN_COL])}
+    result = score_returned_set(returned, set(gold[NAME_COL]), judgeable, gold_spans)
+    return {"score": result["score"], "documents_scored": len(judgeable), "documents_skipped": 0,
+            "counts": result["counts"]}
 
 
-def _identification_counts(judgeable: set, returned: set, wanted: set, found: set,
-                           reason_checked: bool) -> dict:
-    """TP/FP/FN/TN over the judgeable contracts. A qualifying contract returned with a reason that
-    fails the span check is an FN."""
-    missed = len(wanted - returned)
-    failed_reason = len((returned & wanted) - found)
-    counts = {"TP": len(found), "FP": len(returned - wanted), "FN": missed + failed_reason,
-              "TN": len(judgeable - returned - wanted)}
-    if reason_checked:
-        counts["FN"] = {"total": counts["FN"], "not_returned": missed,
-                        f"returned_but_reason_jaccard_at_most_{SPAN_THRESHOLD}": failed_reason}
-    return counts
+def _ungradable(query) -> set[str]:
+    """The contracts whose ground truth cannot settle this query."""
+    ground_truth = pd.read_csv(GROUND_TRUTH_CSV, usecols=[NAME_COL, "unusable"])
+    return {row[NAME_COL] for _, row in ground_truth.iterrows() if not gradable(query, row)}
 
 
 def _population_keys(population_path: str | Path) -> list[str]:
@@ -279,9 +261,10 @@ class QualityEvaluator(PlanQualityEvaluator):
             )
         if self.QUERY.kind == "identify":
             result = score_identification(self.QUERY, plan_output_df, ground_truth_path, population_path)
-            self.last_quality_counts = result["counts"]
-            print(f"[QualityEvaluator] {self.QUERY.name}: F1 {result['score']:.4f}, returned "
-                  f"{result['returned']} of {result['wanted']} wanted, over "
+            counts = self.last_quality_counts = result["counts"]
+            fn = counts["FN"]["total"] if isinstance(counts["FN"], dict) else counts["FN"]
+            print(f"[QualityEvaluator] {self.QUERY.name}: F1 {result['score']:.4f}, "
+                  f"(TP, FP, TN, FN) = ({counts['TP']}, {counts['FP']}, {counts['TN']}, {fn}), over "
                   f"{result['documents_scored']} contracts ({result['documents_skipped']} skipped)")
         else:
             scorer = party_count_closeness if self.QUERY.metric == "party_count_relative_error" else None
