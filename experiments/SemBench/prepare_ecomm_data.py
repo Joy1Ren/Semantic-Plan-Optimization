@@ -40,31 +40,20 @@ def _query_subset(df: pd.DataFrame, query_id: int) -> pd.DataFrame:
     return df
 
 
-# The columns a plan may read. `idx` (the source table's `id`) is the row identifier; the rest
-# are the product text and price the queries reason over. Everything else in styles_details --
-# baseColour, masterCategory, brandName, ... -- is a structured answer to the very thing the
-# semantic operators are supposed to derive, so it is dropped after _query_subset has used it
-# for the deterministic predicates.
+# The columns a plan may read: `idx` (the source `id`) plus the product text and price. The other
+# styles_details columns (baseColour, masterCategory, ...) answer what the semantic operators must
+# derive, so they are dropped once _query_subset has used them.
 TEXT_COLUMNS = ["idx", "price", "productDisplayName", "productDescriptors"]
-# An image-only query must read its answer off the pixels, so its dataset carries the id and
-# nothing else. Any text column left here would be a shortcut around the operator the query
-# exists to measure.
+# An image-only query gets the id alone, so its answer must come from the pixels.
 IMAGE_ONLY_COLUMNS = ["idx"]
-# ...except that q9 and q10 state a price cap in the query itself ("under $800", "$1000 or
-# less"). Those get `price` as a column and NO price predicate in _query_subset: applying it
-# during data prep would decide, on the optimizer's behalf, where a cheap deterministic filter
-# sits relative to the expensive image operators -- which is the choice being measured.
-PRICE_PREDICATE_QUERIES = {9, 10}
+# ...except q9, whose query caps the price: it gets `price` and no price predicate in
+# _query_subset, so where the cheap price filter goes stays the optimizer's choice.
+PRICE_PREDICATE_QUERIES = {9}
 
 
 def _output_columns(query_id: int) -> list[str]:
     """Text queries get the product text; image-only queries get the id (plus price if the
-    query caps it).
-
-    Read from q{id}.toml's declared modalities rather than a table kept here, using the same
-    `"text" in modalities` test run_opt.py applies when it decides whether the sampler has any
-    text to score -- so the dataset and the sampler can't disagree about what a query reads.
-    """
+    query caps it). Read from q{id}.toml's modalities, as run_opt.py does for the sampler."""
     path = sembench_files_dir() / "ecomm" / "queries" / f"q{query_id}.toml"
     with path.open("rb") as handle:
         modalities = tomllib.load(handle)["metadata"].get("modalities", [])
@@ -83,7 +72,7 @@ def _copy_images(source_dir: Path, destination_dir: Path) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--scale-factor", type=int, required=True)
-    parser.add_argument("--queries", type=int, nargs="+", default=range(1, 15))
+    parser.add_argument("--queries", type=int, nargs="+", default=[1, 3, 4, 5, 6, 7, 8, 9, 12, 13])
     parser.add_argument("--no-images", action="store_true")
     args = parser.parse_args()
 

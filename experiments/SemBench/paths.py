@@ -1,10 +1,5 @@
-"""SemBench-local file locations.
-
-These live here rather than in the package-level ``paths.py`` because only this adapter and
-its data extractors read them: the runner gets everything it needs from ``benchmark.yaml``.
-The SemBench checkout they hang off is resolved from this benchmark's own ``external_repo``
-block, so there is one declaration of where SemBench lives.
-"""
+"""SemBench file locations, under the checkout benchmark.yaml's ``external_repo`` declares. The
+runner reads its paths from benchmark.yaml instead."""
 
 from __future__ import annotations
 
@@ -49,6 +44,18 @@ def activate_sembench() -> Path:
     return add_repo_to_syspath(sembench_root(), config.get("python_path", "src"))
 
 
-# -- data prepared into this repo (see prepare_ecomm_data.py / prepare_movie_data.py) ------
+# -- data prepared into this repo (see prepare_ecomm_data.py) ------
 DATASET_DIR = BENCHMARK_DIR / "dataset"
 DATASUBSET_DIR = BENCHMARK_DIR / "datasubset_opt"
+GROUND_TRUTH_DIR = BENCHMARK_DIR / "ground_truth"
+
+
+def subset_ground_truth_path(subset_path: Path) -> Path | None:
+    """Where the ground truth regenerated over a datasubset_opt/ subset is written: the same
+    relative path under ground_truth/, as {subset stem}_gt.csv. None for a file outside
+    datasubset_opt/ (the full dataset), whose ground truth is SemBench's own."""
+    try:
+        relative = Path(subset_path).resolve().relative_to(DATASUBSET_DIR.resolve())
+    except ValueError:
+        return None
+    return GROUND_TRUTH_DIR / relative.with_name(f"{relative.stem}_gt.csv")

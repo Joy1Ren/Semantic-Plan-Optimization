@@ -1,11 +1,10 @@
-"""SemBench adapter for oracle-based plan-quality evaluation."""
+"""SemBench adapter for plan-quality evaluation."""
 
 from __future__ import annotations
 
 import importlib
 from functools import lru_cache
 from pathlib import Path
-from typing import Callable
 
 import pandas as pd
 
@@ -15,62 +14,13 @@ from agent_cost_model.experiments.SemBench.paths import (
     activate_sembench,
     sembench_files_dir,
     sembench_root,
+    subset_ground_truth_path,
 )
 
 
-# Use cases whose gold query can be regenerated on the optimization datasubset (instead of
-# falling back to a precomputed full-dataset ground truth CSV, which includes rows the
-# datasubset never sampled). Each entry is a `(scale_factor, query_id, subset_df) -> DataFrame |
-# None` callable; return None when the gold query / domain data aren't available for that query
-# (the caller falls back to the precomputed CSV in that case). Registered below per use case.
-_GOLD_SQL_REGENERATORS: dict[str, Callable[[int, int, pd.DataFrame], "pd.DataFrame | None"]] = {}
-
-
-def _restrict_table_to_subset_ids(table_df: pd.DataFrame, id_col: str, subset_ids) -> pd.DataFrame:
-    """Restrict a full-dataset table to rows whose id_col value was sampled into the datasubset.
-
-    If the table has no id_col column, it isn't part of what the datasubset samples at all (e.g.
-    movie's Movies table has no reviewId) — return it empty (same schema, zero rows) rather than
-    leaving it unrestricted, so a gold query that depends solely on that table regenerates an
-    empty (but not erroring) ground truth.
-    """
-    if id_col not in table_df.columns:
-        return table_df.iloc[0:0]
-    return table_df[table_df[id_col].isin(subset_ids)]
-
-
-# movie: gold SQL lives in files/movie/query/gold_sql/Q{id}.sql, run over domain tables
-# registered by name with DuckDB. Each datasubset row is a sampled Review, uniquely identified by
-# reviewId — with stripped-down columns, so the datasubset CSV itself can't be queried directly.
-# Restrict every full domain table to the reviewId's present in the datasubset.
-def _regenerate_movie_ground_truth(
-    scale_factor: int, query_id: int, subset_df: pd.DataFrame
-) -> "pd.DataFrame | None":
-    sql_path = sembench_files_dir() / "movie" / "query" / "gold_sql" / f"Q{query_id}.sql"
-    data_dir = sembench_files_dir() / "movie" / "data" / f"sf_{scale_factor}"
-    if not sql_path.exists() or not data_dir.exists() or "reviewId" not in subset_df.columns:
-        return None
-
-    import duckdb
-
-    subset_ids = subset_df["reviewId"].drop_duplicates()
-
-    conn = duckdb.connect()
-    for table_name, csv_name in {"Movies": "Movies.csv", "Reviews": "Reviews.csv"}.items():
-        table_df = pd.read_csv(data_dir / csv_name)
-        conn.register(table_name, _restrict_table_to_subset_ids(table_df, "reviewId", subset_ids))
-
-    sql_query = sql_path.read_text().strip()
-    return conn.execute(sql_query).fetchdf()
-
-
-# ecomm: gold SQL is embedded per-query in files/ecomm/queries/q{id}.toml under
-# [definition].ground_truth, and references its one domain table via
-# read_parquet('styles_details.parquet') resolved against DuckDB's file_search_path (see
-# EcommScenario.get_ground_truth). Each datasubset row is a sampled product, uniquely identified
-# by idx (that table's own `id` column, renamed by prepare_ecomm_data.py) — restrict it to the
-# datasubset's products and point file_search_path at a temp copy, reusing the exact same gold SQL
-# text without rewriting it.
+# ecomm: gold SQL is in q{id}.toml's [definition].ground_truth and reads
+# read_parquet('styles_details.parquet') through DuckDB's file_search_path. The table is restricted
+# to the subset's idx and file_search_path pointed at that copy, so the gold SQL runs unchanged.
 def _regenerate_ecomm_ground_truth(
     scale_factor: int, query_id: int, subset_df: pd.DataFrame
 ) -> "pd.DataFrame | None":
@@ -104,21 +54,15 @@ def _regenerate_ecomm_ground_truth(
     return result_df
 
 
-_GOLD_SQL_REGENERATORS["movie"] = _regenerate_movie_ground_truth
-_GOLD_SQL_REGENERATORS["ecomm"] = _regenerate_ecomm_ground_truth
-
-
 def _regenerate_ground_truth_from_subset(
     use_case: str, scale_factor: int, query_id: int, subset_df: pd.DataFrame
 ) -> "pd.DataFrame | None":
-    """Run the benchmark's gold query against domain data restricted to the optimization
-    datasubset, returning None if unavailable for this use case (the caller should fall back
-    to the precomputed ground truth CSV in that case)."""
-    regenerate = _GOLD_SQL_REGENERATORS.get(use_case)
-    if regenerate is None:
+    """The gold query's ground truth over the subset's rows; None when it cannot be regenerated, so
+    the caller falls back to the precomputed full-dataset CSV."""
+    if use_case != "ecomm":
         return None
     try:
-        return regenerate(scale_factor, query_id, subset_df)
+        return _regenerate_ecomm_ground_truth(scale_factor, query_id, subset_df)
     except Exception as e:
         print(f"[QualityEvaluator] gold-query ground-truth regeneration failed for {use_case} Q{query_id}: {e}")
         return None
@@ -127,46 +71,32 @@ def _regenerate_ground_truth_from_subset(
 def _load_ground_truth(
     use_case: str, scale_factor: int, query_id: int, subset_path: Path | None, ground_truth_path: Path
 ) -> pd.DataFrame:
-    """Ground truth for direct (non-oracle) quality scoring: prefer regenerating it from gold
-    SQL over the datasubset (accurate — includes columns the datasubset strips out, e.g. movie's
-    scoreSentiment); fall back to the precomputed full-dataset ground truth CSV otherwise.
-
-    Regenerated once per run (this is reached through `_get_direct_ground_truth`, which loads
-    once and reuses the frame for every plan) and written as {subset stem}_gt.csv next to the
-    datasubset CSV. The name carries the subset's own stem, so the four --sample-method subsets
-    of one query keep four separate ground truths instead of colliding on one filename; the
-    file is an artifact to eyeball, never read back as a cache.
-    """
+    """Ground truth regenerated from gold SQL over the subset, else the precomputed full-dataset
+    CSV. For a datasubset_opt/ subset it is also written to {subset stem}_gt.csv under
+    ground_truth/ (paths.subset_ground_truth_path), for inspection only."""
     if subset_path is not None and subset_path.exists():
-        subset_gt_path = subset_path.with_name(f"{subset_path.stem}_gt.csv")
         subset_df = pd.read_csv(subset_path)
         regenerated = _regenerate_ground_truth_from_subset(use_case, scale_factor, query_id, subset_df)
         if regenerated is not None:
-            subset_gt_path.parent.mkdir(parents=True, exist_ok=True)
-            regenerated.to_csv(subset_gt_path, index=False)
+            subset_gt_path = subset_ground_truth_path(subset_path)
+            if subset_gt_path is not None:
+                subset_gt_path.parent.mkdir(parents=True, exist_ok=True)
+                regenerated.to_csv(subset_gt_path, index=False)
             return regenerated
     return pd.read_csv(ground_truth_path)
 
 
 # F1 queries whose answer is a set of single records drawn from the population, so a record
 # neither returned nor wanted is a TN. Pair and tuple queries have no such population.
-_RECORD_SET_QUERIES = {"ecomm": {1, 2, 13, 14}}
+_RECORD_SET_QUERIES = {"ecomm": {1, 13}}
 
 
 def _retrieval_counts(use_case: str, query_id: int, plan_output_df: pd.DataFrame,
                       ground_truth_df: pd.DataFrame, population_path) -> dict:
     """TP/FP/FN (and TN where defined) behind a SemBench F1, from the same sets its evaluator
-    compares: ecomm's normalized `id` column, movie Q7's (movie, sorted review pair) tuples."""
-    if use_case == "movie":
-        def pairs(df):
-            if df.empty or df.shape[1] < 3:
-                return set()
-            return {(r.iloc[0], tuple(sorted([r.iloc[1], r.iloc[2]])))
-                    for _, r in df.iterrows() if r.iloc[:3].notna().all()}
-        returned, wanted = pairs(plan_output_df), pairs(ground_truth_df)
-    else:
-        returned = set(plan_output_df["id"]) if not plan_output_df.empty else set()
-        wanted = set(ground_truth_df["id"]) if not ground_truth_df.empty else set()
+    compares: the normalized `id` column."""
+    returned = set(plan_output_df["id"]) if not plan_output_df.empty else set()
+    wanted = set(ground_truth_df["id"]) if not ground_truth_df.empty else set()
     counts = {"TP": len(returned & wanted), "FP": len(returned - wanted),
               "FN": len(wanted - returned)}
     if population_path and query_id in _RECORD_SET_QUERIES.get(use_case, ()):
@@ -176,16 +106,9 @@ def _retrieval_counts(use_case: str, query_id: int, plan_output_df: pd.DataFrame
 
 @lru_cache(maxsize=None)
 def load_evaluator(use_case: str, scale_factor: int):
-    """Construct the SemBench evaluator for a supported benchmark use case.
-
-    Cached: the evaluator holds only paths and the scale factor (its _evaluate_single_query
-    takes everything else as arguments), so one instance per (use_case, scale_factor) serves
-    every caller. That is what keeps the full-dataset final-eval path -- which reaches the
-    module-level score_plan directly, with no QualityEvaluator to carry a built one -- from
-    reconstructing it on every repeated run.
-    """
+    """The SemBench evaluator for a use case, one per (use_case, scale_factor): it holds only
+    paths and the scale factor."""
     evaluators = {
-        "movie": ("scenario.movie.evaluation.evaluate", "MovieEvaluator"),
         "ecomm": ("scenario.ecomm.evaluation.evaluate", "EcommEvaluator"),
     }
     try:
@@ -218,27 +141,11 @@ class QualityEvaluator(PlanQualityEvaluator):
         that frame -- written as JSON records to match the artifact's .json extension."""
         plan_output_df.to_json(path, orient="records", indent=2)
 
-    def write_oracle_ground_truth(self, df: pd.DataFrame, path: Path) -> None:
-        """Dump the frame as-is.
-
-        SemBench's evaluators score against the ground-truth DataFrame, never a file (see
-        `score_plan` below), so nothing has to read this back in a particular layout. It exists
-        so `_read_persisted` can restore the run's shared ground truth for a later plan, and so
-        the run directory carries an inspectable copy of what plans were scored against.
-        """
-        df.to_csv(path, index=False)
-
     def score_plan(self, plan_output_df, ground_truth_df, _ground_truth_path=None,
                    population_path=None) -> float:
-        """Score a plan's output against ground truth using SemBench's own evaluator.
-
-        SemBench's evaluators take the ground truth as a DataFrame -- `_evaluate_single_query` is
-        declared in its evaluator/generic_evaluator.py, which is a read-only checkout -- so the
-        ground-truth path never reaches one; the population path is read only for F1's TN. They
-        return one of SemBench's metric dataclasses, and which field carries the score depends on
-        the query's metric family; that mapping lives here rather than in the engine because the
-        dataclasses are SemBench's own taxonomy.
-        """
+        """Score a plan's output with SemBench's own evaluator, which takes the ground truth as a
+        DataFrame and returns a metric dataclass; the score is read from the field of the query's
+        metric family. The population path is read only for F1's TN."""
         import dataclasses
 
         evaluator = self._evaluator or load_evaluator(self._use_case, self._scale_factor)
@@ -276,16 +183,8 @@ class QualityEvaluator(PlanQualityEvaluator):
         use_case: str,
         scale_factor: int,
         ground_truth_path: str | Path,
-        oracle_client=None,
-        oracle_model: str | None = None,
-        llm_judge_dir: str | Path | None = None,
         subset_path: str | Path | None = None,
-        run_dir: str | Path | None = None,
-        oracle_reasoning_effort: str | None = None,
-        use_oracle_ground_truth: bool = True,
-        oracle_operator_quality: bool = True,
-        # Every adapter is constructed with one fixed keyword set (see CostModelAgent._setup_run);
-        # absorbing the rest is what lets the engine add one without breaking every benchmark.
+        # Absorbs the keywords the engine passes every adapter that this one does not use.
         **_ignored,
     ) -> None:
         # Both come from benchmark.yaml (`subset_path`, `ground_truth_path`) via the runner, so
@@ -294,27 +193,17 @@ class QualityEvaluator(PlanQualityEvaluator):
         ground_truth_path = Path(ground_truth_path)
         self._use_case = use_case
         self._scale_factor = scale_factor
-        # SemBench's own evaluator, reused by score_plan. It lives here rather than in
-        # PlanQualityEvaluator because only this benchmark has such an object -- CUAD calls
-        # docetl's evaluate_results directly and has nothing to construct. Built eagerly so a
-        # bad use_case/scale_factor surfaces at construction rather than on the first score;
-        # load_evaluator is cached, so this is the same instance the final-eval path gets.
+        # SemBench's evaluator, reused by score_plan. Built here so a bad use_case/scale_factor
+        # fails at construction rather than on the first score.
         self._evaluator = None
         try:
             self._evaluator = load_evaluator(use_case, scale_factor)
         except Exception as e:
             print(f"[QualityEvaluator] SemBench evaluator init failed: {e}")
         super().__init__(
-            oracle_client=oracle_client,
-            oracle_model=oracle_model,
             query_id=query_id,
             subset_path=subset_path,
             normalize_df=lambda df: normalize_eval_df(df, use_case, query_id),
-            llm_judge_dir=llm_judge_dir,
-            run_dir=run_dir,
-            oracle_reasoning_effort=oracle_reasoning_effort,
-            use_oracle_ground_truth=use_oracle_ground_truth,
-            oracle_operator_quality=oracle_operator_quality,
             ground_truth_loader=lambda: _load_ground_truth(
                 use_case, scale_factor, query_id, subset_path, ground_truth_path
             ),

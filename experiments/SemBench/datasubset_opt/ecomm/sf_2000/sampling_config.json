@@ -1,0 +1,79 @@
+{
+  "1": {
+    "seed": 42,
+    "sample_size": 40,
+    "embedding_model": "google/gemini-embedding-2",
+    "sampler_llm_model": "openai/gpt-6-luna",
+    "idx_specification": true
+  },
+  "2": {
+    "seed": 43,
+    "sample_size": 40,
+    "embedding_model": "google/gemini-embedding-2",
+    "sampler_llm_model": "openai/gpt-6-luna",
+    "idx_specification": true
+  },
+  "3": {
+    "seed": 44,
+    "sample_size": 40,
+    "embedding_model": "google/gemini-embedding-2",
+    "sampler_llm_model": "openai/gpt-6-luna",
+    "idx_specification": true
+  },
+  "4": {
+    "seed": 45,
+    "sample_size": 40,
+    "embedding_model": "google/gemini-embedding-2",
+    "sampler_llm_model": "openai/gpt-6-luna",
+    "idx_specification": true
+  },
+  "5": {
+    "seed": 46,
+    "sample_size": 40,
+    "embedding_model": "google/gemini-embedding-2",
+    "sampler_llm_model": "openai/gpt-6-luna",
+    "idx_specification": true
+  },
+  "6": {
+    "seed": 47,
+    "sample_size": 40,
+    "embedding_model": "google/gemini-embedding-2",
+    "sampler_llm_model": "openai/gpt-6-luna",
+    "idx_specification": true
+  },
+  "7": {
+    "seed": 48,
+    "sample_size": 40,
+    "embedding_model": "google/gemini-embedding-2",
+    "sampler_llm_model": "openai/gpt-6-luna",
+    "idx_specification": true
+  },
+  "8": {
+    "seed": 49,
+    "sample_size": 40,
+    "embedding_model": "google/gemini-embedding-2",
+    "sampler_llm_model": "openai/gpt-6-luna",
+    "idx_specification": true
+  },
+  "9": {
+    "seed": 50,
+    "sample_size": 40,
+    "embedding_model": "google/gemini-embedding-2",
+    "sampler_llm_model": "openai/gpt-6-luna",
+    "idx_specification": true
+  },
+  "10": {
+    "seed": 51,
+    "sample_size": 40,
+    "embedding_model": "google/gemini-embedding-2",
+    "sampler_llm_model": "openai/gpt-6-luna",
+    "idx_specification": true
+  },
+  "11": {
+    "seed": 52,
+    "sample_size": 10,
+    "embedding_model": "google/gemini-embedding-2",
+    "sampler_llm_model": "openai/gpt-6-luna",
+    "idx_specification": true
+  }
+}
