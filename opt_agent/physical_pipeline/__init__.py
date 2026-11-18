@@ -1,28 +1,9 @@
-"""Physical pipeline: chain PZ physical operators directly with per-operator model selection.
-
-This package is organized as:
-  base.py          - shared constants, helpers, and the Operator base class
-  operators/       - one file per operator (SemFilter, SemMap, SemJoin, RagFilter, RagMap,
-                      ExactFilter, Map, Join, AddColSuffix, Project, Limit, GroupBy)
-  pipeline.py      - the PhysicalPipeline class: the fluent builder API and execution engine
-
-Everything importable from the old single-file `agent_cost_model.opt_agent.physical_pipeline` module
-is re-exported here, so `from agent_cost_model.opt_agent.physical_pipeline import PhysicalPipeline`
-(etc.) continues to work unchanged.
 """
-from .base import (
-    DEFAULT_RAG_EMBEDDING_MODEL,
-    NUM_SAMPLES,
-    SUBSET_SEED,
-    Operator,
-    SubsetExecutionContext,
-    _compute_op_id,
-    _has_image_field,
-    _make_schema,
-    _resolve_reasoning_effort,
-    _str_to_pz_model,
-    row_id_str,
-)
+Semantic query plan construction with PZ physical operators.
+This module uses PZ's physical operators, replicates its execution engine,
+and exposes more operator parameters through its API.
+"""
+from .execution import SubsetExecutionContext
 from .operators import (
     AddColSuffix,
     ExactFilter,
@@ -30,46 +11,43 @@ from .operators import (
     Join,
     Limit,
     Map,
-    NonLLMColSuffix,
-    NonLLMJoin,
     Project,
-    RAGConvert,
-    RAGFilter,
     RagFilter,
     RagMap,
+    SemAgg,
     SemFilter,
     SemJoin,
     SemMap,
 )
+from .operators.base import Operator
+from .operators.rag import DEFAULT_RAG_EMBEDDING_MODEL
+from .models import patch_palimpzest_for_new_models
 from .pipeline import PhysicalPipeline
+from .pz_patches import apply_pz_patches
+from .udf_helpers import keys_by_items, number_items, row_id_str
+
+apply_pz_patches()
+patch_palimpzest_for_new_models()
 
 __all__ = [
     "PhysicalPipeline",
     "SubsetExecutionContext",
     "Operator",
-    "NUM_SAMPLES",
-    "SUBSET_SEED",
     "DEFAULT_RAG_EMBEDDING_MODEL",
-    "SemFilter",
-    "SemMap",
-    "SemJoin",
+    "AddColSuffix",
+    "ExactFilter",
+    "GroupBy",
+    "Join",
+    "Limit",
+    "Map",
+    "Project",
     "RagFilter",
     "RagMap",
-    "RAGFilter",
-    "RAGConvert",
-    "ExactFilter",
-    "Map",
-    "Join",
-    "NonLLMJoin",
-    "AddColSuffix",
-    "NonLLMColSuffix",
-    "Project",
-    "Limit",
-    "GroupBy",
-    "_str_to_pz_model",
-    "_resolve_reasoning_effort",
-    "_compute_op_id",
-    "_make_schema",
-    "_has_image_field",
+    "SemAgg",
+    "SemFilter",
+    "SemJoin",
+    "SemMap",
+    "keys_by_items",
+    "number_items",
     "row_id_str",
 ]

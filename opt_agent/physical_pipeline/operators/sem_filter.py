@@ -5,7 +5,7 @@ from palimpzest.constants import Model, PromptStrategy
 from palimpzest.core.elements.filters import Filter
 from palimpzest.query.operators.filter import LLMFilter
 
-from ..base import Operator, _compute_op_id, _no_reasoning_prompt, _resolve_reasoning_effort
+from .base import Operator, _compute_op_id, _no_reasoning_prompt, _resolve_reasoning_effort
 
 
 class SemFilter(Operator):
@@ -29,5 +29,5 @@ class SemFilter(Operator):
         self._pz_op.model = model
         self.depends_on = depends_on
         self.attributes = {"condition": condition, "model": model.value, "reasoning_effort": eff, "depends_on": depends_on}
-        self.params_id = _compute_op_id(self.op_type, self.attributes)
+        self.op_id = _compute_op_id(self.op_type, self.attributes)
         self._set_skip_if(skip_if)

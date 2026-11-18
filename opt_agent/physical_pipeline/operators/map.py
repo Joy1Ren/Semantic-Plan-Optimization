@@ -5,7 +5,7 @@ from typing import Callable
 
 from palimpzest.query.operators.convert import NonLLMConvert
 
-from ..base import Operator, _compute_op_id, _fn_source
+from .base import Operator, _compute_op_id, _fn_source
 
 
 class Map(Operator):
@@ -20,8 +20,6 @@ class Map(Operator):
             output_schema=output_schema,
             input_schema=input_schema,
         )
-        self._udf = udf          # preserved for make_oracle_copy
-        self._cols_full = cols   # preserved for make_oracle_copy
         col_names = sorted(col["name"] for col in cols)
         self.attributes = {"cols": col_names, "udf": _fn_source(udf)}
-        self.params_id = _compute_op_id(self.op_type, self.attributes)
+        self.op_id = _compute_op_id(self.op_type, self.attributes)

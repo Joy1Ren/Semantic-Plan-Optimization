@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from palimpzest.query.operators.project import ProjectOp
 
-from ..base import Operator, _compute_op_id
+from .base import Operator, _compute_op_id
 
 
 class Project(Operator):
@@ -19,4 +19,4 @@ class Project(Operator):
             input_schema=input_schema,
         )
         self.attributes = {"project_cols": sorted(cols)}
-        self.params_id = _compute_op_id(self.op_type, self.attributes)
+        self.op_id = _compute_op_id(self.op_type, self.attributes)

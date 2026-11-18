@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from palimpzest.query.operators.limit import LimitScanOp
 
-from ..base import Operator, _compute_op_id
+from .base import Operator, _compute_op_id
 
 
 class Limit(Operator):
@@ -20,4 +20,4 @@ class Limit(Operator):
         )
         self.n = n
         self.attributes = {"limit": n}
-        self.params_id = _compute_op_id(self.op_type, self.attributes)
+        self.op_id = _compute_op_id(self.op_type, self.attributes)

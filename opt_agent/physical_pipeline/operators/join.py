@@ -9,41 +9,23 @@ from palimpzest.core.elements.records import DataRecord, DataRecordSet
 from palimpzest.core.models import OperatorCostEstimates, RecordOpStats
 from palimpzest.query.operators.join import JoinOp
 
-from ..base import Operator, _compute_op_id, _fn_source
+from .base import Operator, _compute_op_id, _fn_source
 
 if TYPE_CHECKING:
     from ..pipeline import PhysicalPipeline
 
 
-# ------------------------------------------------------------------
-# Non-LLM join physical operator (PZ has no non-LLM join; this mirrors PZ's
-# NestedLoopsJoin structure but decides each pair with a Python predicate — the
-# join analogue of PZ's NonLLMFilter / NonLLMConvert).
-# ------------------------------------------------------------------
-
 class NonLLMJoin(JoinOp):
-    """Non-LLM nested-loops join.
-
-    Same execution structure as PZ's ``NestedLoopsJoin`` — nested loops over
-    new/stored left×right with input accumulation across calls (so the total pairs
-    across calls stay |L|×|R|), and a ``DataRecordSet`` (or ``None`` when empty) as
-    output — but each candidate pair is accepted/rejected by a deterministic predicate
-    ``join_fn(left_dict, right_dict) -> bool`` instead of an LLM call. The predicate is
-    fast and I/O-free, so pairs are evaluated sequentially (no ``ThreadPoolExecutor``).
-    """
+    """Nested-loops join decided by a Python predicate; inputs accumulate across calls."""
 
     def __init__(self, join_fn: Callable[[dict, dict], bool], *args, **kwargs):
-        # JoinOp.__init__ consumes condition/desc and forwards output_schema/input_schema/
-        # depends_on to PhysicalOperator. No model or Generator is created.
+        # JoinOp.__init__ creates no model or Generator.
         super().__init__(*args, **kwargs)
         self.join_fn = join_fn
         self.join_idx = 0
         self._left_input_records: list[DataRecord] = []
         self._right_input_records: list[DataRecord] = []
         self._fn_src = _fn_source(join_fn)
-
-    def is_image_join(self) -> bool:
-        return False
 
     def get_id_params(self):
         id_params = super().get_id_params()
@@ -96,8 +78,7 @@ class NonLLMJoin(JoinOp):
     def __call__(
         self, left_candidates: list[DataRecord], right_candidates: list[DataRecord],
     ) -> tuple[DataRecordSet | None, int]:
-        # Mirror NestedLoopsJoin.__call__: join new×new, new×stored, stored×new, then
-        # accumulate this call's inputs for future calls.
+        # Pair new inputs with each other and with the inputs stored from earlier calls.
         output_records, output_record_op_stats, num_inputs_processed = [], [], 0
 
         def _join_all(lefts, rights):
@@ -117,7 +98,7 @@ class NonLLMJoin(JoinOp):
         self._left_input_records.extend(left_candidates)
         self._right_input_records.extend(right_candidates)
 
-        # return None if no output records were produced (matches NestedLoopsJoin)
+        # None when no pairs were produced
         if len(output_records) == 0:
             return None, num_inputs_processed
         return DataRecordSet(output_records, output_record_op_stats), num_inputs_processed
@@ -138,10 +119,9 @@ class Join(Operator):
             input_schema=schema,
             depends_on=depends_on,
         )
-        self._fn = condition_fn  # preserved for make_oracle_copy
-        # For a self-join `other` is None (left run once, joined with itself). See SemJoin.
+        # For a self-join `other` is None (left run once, joined with itself).
         self.other = other
         self.self_join = self_join
         self.depends_on = depends_on
         self.attributes = {"condition": fn_src, "depends_on": depends_on}
-        self.params_id = _compute_op_id(self.op_type, self.attributes)
+        self.op_id = _compute_op_id(self.op_type, self.attributes)

@@ -9,27 +9,16 @@ from typing import Any, Callable
 
 from agent_cost_model.opt_agent import run_log
 from agent_cost_model.opt_agent.cost_model_types import ResultsStore, _dump_opt_debug_artifacts
-from agent_cost_model.opt_agent.prompts import _quality_metric_reminder, _sem_op_quality_docs
+from agent_cost_model.opt_agent.physical_pipeline.execution import MAX_OP_SAMPLES
+from agent_cost_model.opt_agent.prompts import _quality_metric_reminder
 
 from .base import Tool
 
-# ---------------------------------------------------------------------------
-# Operator input/output samples
-#
-# A sample is stored per FIELD ({field_name: value}) rather than as one flat
-# `str(DataRecord)`, which went through palimpzest's DataRecord.__str__ and cut EVERY field to 15
-# characters (palimpzest/core/elements/records.py). Per-field storage is what lets the display
-# below truncate and budget values field by field.
-#
-# A rag_map/rag_filter sample also stores `retrieved`: the chunks its LLM call actually received
-# for each field long enough to chunk, uncapped (at most num_chunks_per_field x chunk_size). The
-# display shows those in place of the original field.
-# ---------------------------------------------------------------------------
 SAMPLE_FIELD_CHARS = 1000      # per-field cap applied when a sample is STORED
 DISPLAY_BUDGET = 9000          # cap on value chars per call when samples are DISPLAYED
 RAG_DISPLAY_BUDGET = 20000     # the same, for rag_map/rag_filter
 _RAG_OP_TYPES = ("rag_map", "rag_filter")
-# Header that rag_common._format_ranked_chunks puts in front of every retrieved chunk.
+# Header that rag._format_ranked_chunks puts in front of every retrieved chunk.
 _CHUNK_SPLIT = re.compile(r"\n\n(?=\[Chunk rank \d+/\d+, )")
 _ELLIPSIS = "…"
 
@@ -57,7 +46,7 @@ def _retrieved_fields(dr: Any, contexts: dict | None) -> dict[str, list[str]] | 
 
     None when no retrieval was recorded for it (e.g. skip_if bypassed the operator); {} when no
     field was long enough to chunk, so the LLM got the input in full."""
-    from agent_cost_model.opt_agent.physical_pipeline.operators.rag_common import retrieval_context_key
+    from agent_cost_model.opt_agent.physical_pipeline.operators.rag import retrieval_context_key
     key = retrieval_context_key(dr)
     view = (contexts or {}).get(key) if key is not None else None
     if view is None:
@@ -93,19 +82,22 @@ def _unpack_op_samples(entry: Any) -> tuple[str, list]:
 
 class GetOpSamplesTool(Tool):
     name = "get_op_samples"
-    doc = """\
+    doc = f"""\
 ### get_op_samples(plan_name, op_name, n=3)
 Retrieve sample (input, output) pairs of ONE operator of an executed plan from `plan_results`.
-`op_name` is `{plan}_op{idx}_{op_type}` (e.g. "p1_op1_rag_map"), the same names `plan_str` and
-`op_results` use. Returns at most `n` samples (at most 5 are kept per operator).
+`op_name` is `{{plan}}_op{{idx}}_{{op_type}}` (e.g. "p1_op1_rag_map"), the same names `plan_str` and
+`op_results` use. Returns at most `n` samples (at most {MAX_OP_SAMPLES} are kept per operator).
 For rag_map/rag_filter, the input shows the retrieved chunks the LLM actually received (with
 their rank and score) in place of the full field, and the output only the new columns.
+For groupby/sem_agg, each sample is one group: the input shows its group_by values and row
+count, the output shows every row it produced; with keep_inputs, each aggregation output is
+shown once rather than once per input row.
 <lower_variance>
-Pass `execution=k` (1..{n_executions}) for a specific execution's samples; the default is the last one.
+Pass `execution=k` (1..{{n_executions}}) for a specific execution's samples; the default is the last one.
 </lower_variance>
 
 ```python
-get_op_samples("p1", "p1_op2_sem_map", n=5)   # up to 5 samples from one operator
+get_op_samples("p1", "p1_op2_sem_map", n={MAX_OP_SAMPLES})   # up to {MAX_OP_SAMPLES} samples from one operator
 ```"""
 
     def __init__(self, plan_results: ResultsStore) -> None:
@@ -114,10 +106,6 @@ get_op_samples("p1", "p1_op2_sem_map", n=5)   # up to 5 samples from one operato
     def __call__(self, plan_name: str, op_name: str, n: int = 3, execution: int | None = None) -> str:
         if not op_name or not isinstance(op_name, str):
             return "Pass ONE operator name (e.g. 'p1_op2_sem_map'): get_op_samples shows one operator per call."
-        # The LAST row for this plan (and execution, when one is named): re-executing a plan
-        # appends another row, and the samples have to belong to the same execution as the
-        # numbers the agent is reading. (The exploration checker resolves the same duplication
-        # the same way.)
         row = next(
             (r for r in reversed(self._plan_results.rows) if r.get("plan_name") == plan_name
              and (execution is None or r.get("execution") == execution)),
@@ -162,6 +150,15 @@ get_op_samples("p1", "p1_op2_sem_map", n=5)   # up to 5 samples from one operato
             rendered.append((f"  [{i}] {in_label}: ", _cells(inp)))
             if gate is not None:
                 rendered.append(("       output: ", f"passed {gate}" if out is not None else f"did not pass {gate}"))
+            elif isinstance(out, list) and pair.get("input_rows_per_output"):    # keep_inputs sem_agg
+                n_in = pair["input_rows_per_output"]
+                rendered.append((f"       output ({len(out)} agg output rows x {n_in} input rows = {len(out) * n_in} rows):", ""))
+                for j, row in enumerate(out):
+                    rendered.append((f"         ({j}) ", _cells(row)))
+            elif isinstance(out, list):    # barrier op: every record the group produced
+                rendered.append((f"       output ({len(out)} rows):", ""))
+                for j, row in enumerate(out):
+                    rendered.append((f"         ({j}) ", _cells(row)))
             else:
                 rendered.append(("       output: ", _cells(out)))
 
@@ -249,10 +246,10 @@ EVERY column name a `map`/`sem_map`/`rag_map` declares must be NEW — an operat
 columns, it can never overwrite one that an earlier operator produced. Re-declaring a name is
 rejected here.
 ```python
-pipe.rag_map(cols=[{"name": "Parties_rag", ...}], ...)      # NOT "Parties"
-pipe.sem_map(cols=[{"name": "Parties_llm", ...}], ...)
-pipe.map(lambda r: {"Parties": r["Parties_llm"] or r["Parties_rag"]},
-         cols=[{"name": "Parties", ...}])                   # first use of "Parties"
+pipe.rag_map(cols=[{"name": "sender_org_rag", ...}], ...)      # NOT "sender_org"
+pipe.sem_map(cols=[{"name": "sender_org_llm", ...}], ...)
+pipe.map(lambda r: {"sender_org": r["sender_org_llm"] or r["sender_org_rag"]},
+         cols=[{"name": "sender_org", ...}])                   # first use of "sender_org"
 ```
 
 Use `load_data(filename)` to read the relavent CSV and seed the pipeline's source table.
@@ -261,11 +258,21 @@ column named `image_col` (type `pz.ImageFilepath`) holding each row's image-file
 is subject to the same rule — it MUST be a fresh column name, not an existing one such as the id
 column. Then pass images to a model via `depends_on=["<image_col>"]` on the semantic op.
 
+Plan code can also use two free helpers in `map` functions over list columns:
+- `number_items(items)` returns the items as numbered lines ("1. first", "2. second", ...), so an LLM can
+  refer to items by number.
+- `keys_by_items(keys, lists)` returns, for each item, the keys whose list contains it:
+```python
+email.map(lambda r: {"emails_by_name": keys_by_items(r["list(emailId)"], r["list(names)"])},
+          cols=[{"name": "emails_by_name", "type": dict, "description": "{name: [emailId, ...]}"}])
+# list(emailId) = [7, 9], list(names) = [["Jack", "Lily"], ["Lily"]]  ->  {"Jack": [7], "Lily": [7, 9]}
+```
+
 
 ```python
 write_plan(\"\"\"
 email = PhysicalPipeline(plan_name, "emails", load_data("Emails.csv"))
-email.sem_filter("this email quotes someone outside of the the sender's company", model=pz.Model.GOOGLE_GEMINI_2_5_FLASH_LITE)
+email.sem_filter("this email quotes someone outside of the the sender's company", model=pz.Model.GEMINI_3_8_FLASH)
 email.project(["emailId"])
 email.limit(5)
 email
@@ -298,9 +305,6 @@ email
             )
 
         self._plan_codes[plan_name] = code
-        # `optimizations` is stored EXACTLY as given and never validated: its structure is a
-        # contract between the plan-writing agent and the exploration checker, both LLMs. No
-        # code here (or anywhere else) reads its keys.
         self._plans[plan_name] = {
             "plan": pipeline, "description": description, "optimizations": optimizations,
         }
@@ -343,19 +347,16 @@ The plan is executed {n_executions} times in parallel on the same sample. The re
 plan's new row in `plan_results_agg`.
 </lower_variance>
 - `quality`: 0–1 overall plan quality, scored against the ground truth. Higher is better.
-<per_op_quality>
-- `per_sem_op_quality`: per-semantic-operator quality (0–1). Use to diagnose
-  which operator is the bottleneck. `per_sem_op_quality_metric` states how that
-  score is computed for each operator type in this plan — read it before acting on
-  a low score, since the definition differs by operator type.
-</per_op_quality>
-- `quality_counts` (only for metrics built from counts): the TP/FP/FN/TN behind `quality`,
-  split by reason where a Jaccard gate applies. Use it to tell missed records from wrong ones.
+- `quality_counts` (when present): the breakdown behind `quality` (e.g., TP/FP/FN counts, or
+  per-part scores); see the Plan Quality Metric section for what each entry means.
 - `cost_usd`, `latency_s`, `input_tokens`, `output_tokens`: aggregated over all ops.
 - `op_errors` (only when something went wrong): per operator, the errors it hit, as
   "<count>x <message>". A record whose operator raised (e.g. a Python lambda that failed) was
   dropped from the run; a record whose LLM call failed went on with a failed filter verdict or
   None fields. Either way `quality` reflects the bug, not the plan's idea: fix it and re-run.
+- `full_run_price_warnings` (only when it applies): operators whose prompts could pass their
+  model's long-prompt threshold on the full dataset, where those calls cost more per token than
+  on the subset.
 <per_op_info>
 To inspect accumulated results use `plan_results.df` and `op_results.df`.
 To view sample input/output pairs use `get_op_samples(plan_name, op_name)`, where `op_name` is one
@@ -384,7 +385,6 @@ execute_plan("p1")
         eval_metric: str | None = None,
         subset_path: str | pathlib.Path | None = None,
         runcount: Any = None,
-        oracle_operator_quality: bool = True,
         per_operator_info: bool = True,
         n_executions: int = 1,
         plan_results_agg: ResultsStore | None = None,
@@ -393,7 +393,6 @@ execute_plan("p1")
     ) -> None:
         import pathlib
 
-        self._oracle_operator_quality = oracle_operator_quality
         self._per_operator_info = per_operator_info
         self._plan_codes = plan_codes
         self._plans = plans
@@ -409,9 +408,6 @@ execute_plan("p1")
         self._results_prefix = pathlib.Path(results_prefix)
         self._runcount = runcount
         self._subset_path = pathlib.Path(subset_path) if subset_path else None
-        # How many times one execute_plan call executes the plan (run_opt's --lower-variance).
-        # Above 1, each extra execution runs on a fresh copy rebuilt from the plan's code, and
-        # every call adds one aggregate row to plan_results_agg.
         self._n_executions = n_executions
         self._plan_results_agg = plan_results_agg
         self._rebuild_pipeline = rebuild_pipeline
@@ -431,9 +427,7 @@ execute_plan("p1")
                 "through query_info by the runner."
             )
 
-        # One pipeline per execution: a pipeline carries per-run operator state (join
-        # accumulators, RAG retrieval contexts), so concurrent executions cannot share one. The
-        # copies are built one at a time because the plan sandbox is not thread-safe.
+        # One pipeline per execution: a pipeline carries per-run operator state
         pipelines = [entry["plan"]]
         for _ in range(self._n_executions - 1):
             pipeline = self._rebuild_pipeline(plan_name)
@@ -447,13 +441,12 @@ execute_plan("p1")
                 runs = list(pool.map(lambda p: self._run_once(plan_name, p), pipelines))
         entry["plan"] = pipelines[0]
 
-        # Scored one at a time: the evaluator keeps per-call state (last_quality_counts, and in
-        # oracle mode a per-plan oracle cache).
+        # Scored one at a time: the evaluator keeps per-call state (last_quality_counts).
         repeated = self._n_executions > 1
         executions = [k if repeated else None for k in range(1, len(pipelines) + 1)]
         scored = [
-            self._score(plan_name, pipeline, run, execution)
-            for pipeline, run, execution in zip(pipelines, runs, executions)
+            self._score(plan_name, run, execution)
+            for run, execution in zip(runs, executions)
         ]
         error = next((run[3] for run in runs if run[3] is not None), None)
         if error is not None:
@@ -480,33 +473,22 @@ execute_plan("p1")
             }
             for row, run, (quality_result, _), execution in zip(plan_rows, runs, scored, executions)
         ]
-        quality_metric = _quality_metric_reminder(self._eval_metric, self._oracle_operator_quality)
+        quality_metric = _quality_metric_reminder(self._eval_metric)
+        long_prompt = next((row["long_prompt_warnings"] for row in plan_rows if row.get("long_prompt_warnings")), None)
+        warning = {"full_run_price_warnings": long_prompt} if long_prompt else {}
         if repeated:
             agg_row = self._aggregate(plan_name, entry, plan_rows, [out for _, out in scored])
             self._plan_results_agg.append([agg_row])
-            return {"executions": summaries, "quality_metric": quality_metric, "aggregate": agg_row}
+            return {"executions": summaries, "quality_metric": quality_metric, "aggregate": agg_row, **warning}
 
-        # Remind the agent, on every execution, what `quality` means and how it differs from
-        # per_sem_op_quality (context for why the two can diverge), plus how each per-op score in
-        # THIS plan is computed -- the definition differs by operator type, and a rag_* score in
-        # particular measures only the LLM step, not retrieval.
-        result = {**summaries[0], "quality_metric": quality_metric}
-        sem_op_docs = (
-            _sem_op_quality_docs(o.get("op_type") for o in runs[0][0])
-            if self._oracle_operator_quality else {}
-        )
-        if sem_op_docs:
-            result["per_sem_op_quality_metric"] = sem_op_docs
-        return result
+        # Remind the agent, on every execution, what `quality` means.
+        return {**summaries[0], "quality_metric": quality_metric, **warning}
 
     def _run_once(self, plan_name: str, pipeline: Any) -> tuple[list, Any, dict, Exception | None]:
         """Execute one pipeline on the subset: (per_op_list, plan_context, plan_dict, error)."""
         try:
-            # The plan is (re)executed on the subset every time — never cached — so that
-            # plan_dict["latency_s"] is a real WALL-CLOCK measurement of this run. (Only the
-            # oracle, which is used purely for quality scoring, is cached across plans.)
             per_op_list, plan_context, plan_dict = pipeline.run_subset(
-                subset_cache_path=str(self._subset_path)
+                subset_path=str(self._subset_path)
             )
             return per_op_list, plan_context, plan_dict, None
         except Exception as e:
@@ -516,9 +498,7 @@ execute_plan("p1")
             )
             return [], None, {}, e
 
-    def _score(
-        self, plan_name: str, pipeline: Any, run: tuple, execution: int | None
-    ) -> tuple[Any, "pd.DataFrame"]:
+    def _score(self, plan_name: str, run: tuple, execution: int | None) -> tuple[Any, "pd.DataFrame"]:
         """Score one execution and write its debug artifacts: (quality_result, raw output)."""
         import pandas as pd
 
@@ -526,7 +506,6 @@ execute_plan("p1")
         raw_output_df = pd.DataFrame(
             plan_context.output_records if plan_context is not None else []
         )
-        # The evaluator owns the reshaping: it is the thing that knows what its scorer reads.
         plan_output_df = (
             self._quality_evaluator.normalize(raw_output_df)
             if self._quality_evaluator is not None else raw_output_df
@@ -535,17 +514,7 @@ execute_plan("p1")
         quality_result = None
         if self._quality_evaluator is not None:
             try:
-                # Pass an empty SubsetExecutionContext when the plan failed so the oracle
-                # still runs (populating _canonical_oracle_df for later plans).
-                if plan_context is None:
-                    from agent_cost_model.opt_agent.physical_pipeline import SubsetExecutionContext
-                    plan_context = SubsetExecutionContext(
-                        sampled_records=[], output_records=[],
-                        per_sem_op_info={}, has_join=False, right_sampled_records=None,
-                    )
-                quality_result = self._quality_evaluator.evaluate(
-                    pipeline, plan_name, plan_context, plan_output_df
-                )
+                quality_result = self._quality_evaluator.evaluate(plan_output_df)
             except Exception as e:
                 print(f"[execute_plan] quality evaluation failed for {plan_name}: {type(e).__name__}: {e}")
                 run_log.log_error(
@@ -563,10 +532,6 @@ execute_plan("p1")
                     "op_summary": per_op_list,
                 },
                 runcount=self._runcount,
-                # Set by PlanQualityEvaluator.evaluate on the call just above; absent when
-                # the plan has no evaluator or evaluation raised. The ground truth is not passed
-                # here -- the evaluator owns it and writes one shared copy at the run level.
-                oracle_df=getattr(self._quality_evaluator, "last_oracle_df", None),
                 evaluator=self._quality_evaluator,
                 execution=execution,
             )
@@ -590,16 +555,33 @@ execute_plan("p1")
         for _stage_idx, info in plan_context.per_sem_op_info.items():
             op_type = info.get("op_type", "")
             samples = []
-            for inp, out in info.get("samples", [])[:5]:
+            for inp, out in info.get("samples", []):
+                if isinstance(inp, list):
+                    # Barrier op (groupby/sem_agg): the input is a whole group, shown as its
+                    # sem_agg group_by values and row count; the output is every record produced.
+                    attributes = info.get("attributes", {})
+                    group_by = attributes.get("group_by") or []
+                    group_input = {col: _cap(str(getattr(inp[0], col, None)), SAMPLE_FIELD_CHARS) for col in group_by}
+                    outputs = [_record_fields(dr) for dr in out] if out else None
+                    sample = {"input": {**group_input, "rows": str(len(inp))}, "output": outputs}
+                    if outputs and attributes.get("keep_inputs"):
+                        # Each output is added to every input row: show each output once (the
+                        # first row of each cardinality index), its generated columns only.
+                        generated = [col["name"] for col in attributes.get("cols", [])]
+                        first = {}
+                        for dr, row in zip(out, outputs):
+                            first.setdefault(dr._cardinality_idx, {col: row.get(col) for col in generated})
+                        sample["output"] = list(first.values())
+                        sample["input_rows_per_output"] = len(inp)
+                    samples.append(sample)
+                    continue
                 sample = {"input": _record_fields(inp), "output": _record_fields(out)}
                 if op_type in _RAG_OP_TYPES:
                     sample["retrieved"] = _retrieved_fields(inp, info.get("retrieval_contexts"))
                 samples.append(sample)
             op_samples[info["op_name"]] = {"op_type": op_type, "samples": samples}
-        # latency_s: SUM of per-op per-record latencies (serial-equivalent). Kept as the plan's
-        # "actual latency" for the cost-model est-vs-act comparison, whose prediction (est.time)
-        # is also a per-op sum. wall_latency_s: real WALL-CLOCK time of this subset execution
-        # (from plan_dict), which reflects the join/convert parallelism.
+        # latency_s: SUM of per-op per-record latencies (serial-equivalent)
+        # wall_latency_s: real WALL-CLOCK time of this subset execution
         return {
             "plan_name": plan_name,
             **({"execution": execution} if execution is not None else {}),
@@ -612,24 +594,30 @@ execute_plan("p1")
             "input_tokens": sum(e.get("input_tokens", 0) for e in per_op_list),
             "output_tokens": sum(e.get("output_tokens", 0) for e in per_op_list),
             "quality": quality_result.quality if quality_result is not None else float("nan"),
-            **({"per_sem_op_quality": (
-                quality_result.per_sem_op_quality if quality_result is not None else {}
-            )} if self._oracle_operator_quality else {}),
             "quality_counts": quality_result.quality_counts if quality_result is not None else None,
+            # The benchmark scorer's own LLM spend, does NOT count towards agent's cost
+            "quality_judge_cost": (
+                quality_result.quality_judge_cost_usd if quality_result is not None else 0.0
+            ),
             **({"op_samples": op_samples} if self._per_operator_info else {}),
+            # Per-operator cost/tokens, for the exploration checker's plan blocks.
+            **({"op_summary": per_op_list} if self._per_operator_info else {}),
             # Shown whatever the agent's mode: errors explain a score, they are not extra info.
             **({"op_errors": plan_dict["op_errors"]} if plan_dict.get("op_errors") else {}),
+            **({"long_prompt_warnings": plan_dict["long_prompt_warnings"]}
+               if plan_dict.get("long_prompt_warnings") else {}),
         }
 
     @staticmethod
     def _plan_summary(plan_row: dict, quality_result: Any, repeated: bool) -> dict:
         # A repeated execution's description and optimizations are the aggregate's; repeating
         # them in every execution's summary would only lengthen the observation.
-        dropped = ("op_samples", "plan_str", "execution") + (("description", "optimizations") if repeated else ())
+        # long_prompt_warnings is shown once per execute_plan call, by __call__.
+        dropped = ("op_samples", "op_summary", "plan_str", "execution", "quality_judge_cost", "long_prompt_warnings") + (("description", "optimizations") if repeated else ())
         summary = {k: v for k, v in plan_row.items() if k not in dropped}
         if summary["quality_counts"] is None:
             del summary["quality_counts"]
-        # When quality is N/A because the oracle returned no rows, explain it in the observation so
+        # When quality is N/A because there is no ground truth, explain it in the observation so
         # the agent doesn't read the bare NaN as a failed plan.
         if quality_result is not None and getattr(quality_result, "quality_note", None):
             summary["quality_note"] = quality_result.quality_note

@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 from palimpzest.constants import Model, PromptStrategy
 from palimpzest.query.operators.join import NestedLoopsJoin
 
-from ..base import Operator, _compute_op_id, _no_reasoning_prompt, _resolve_reasoning_effort
+from .base import Operator, _compute_op_id, _no_reasoning_prompt, _resolve_reasoning_effort
 
 if TYPE_CHECKING:
     from ..pipeline import PhysicalPipeline
@@ -43,11 +43,7 @@ class SemJoin(Operator):
         )
         self._pz_op.model = model
         self.depends_on = depends_on
-        # For a self-join `other` is None: the left upstream is run ONCE and its output is
-        # joined with itself (see PhysicalPipeline.sem_join / _execute_core). This is a
-        # common-subexpression optimization *beyond* PZ — PZ's Cascades groups dedupe only
-        # in the optimizer memo, and its extracted physical plan runs the upstream twice.
         self.other = other
         self.self_join = self_join
         self.attributes = {"condition": condition, "model": model.value, "reasoning_effort": eff, "join_parallelism": join_parallelism, "depends_on": depends_on}
-        self.params_id = _compute_op_id(self.op_type, self.attributes)
+        self.op_id = _compute_op_id(self.op_type, self.attributes)

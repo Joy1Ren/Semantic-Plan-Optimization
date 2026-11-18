@@ -4,18 +4,10 @@ from __future__ import annotations
 import time
 
 from palimpzest.core.elements.records import DataRecord, DataRecordSet
-from palimpzest.core.models import OperatorCostEstimates, RecordOpStats
+from palimpzest.core.models import RecordOpStats
 from palimpzest.query.operators.physical import PhysicalOperator
 
-from ..base import Operator, _compute_op_id
-
-
-# ------------------------------------------------------------------
-# Non-LLM column-suffix physical operator: append a fixed suffix to every column name
-# (a deterministic rename). Useful before a join to disambiguate columns — e.g.
-# left.add_col_suffix("_dish"); right.add_col_suffix("_table") — so the join's inputs
-# have no colliding names.
-# ------------------------------------------------------------------
+from .base import Operator, _compute_op_id
 
 class NonLLMColSuffix(PhysicalOperator):
     """Rename every field `name -> f"{name}{suffix}"`. 1:1, deterministic, zero cost."""
@@ -29,12 +21,6 @@ class NonLLMColSuffix(PhysicalOperator):
 
     def get_op_params(self):
         return {"suffix": self.suffix, **super().get_op_params()}
-
-    def naive_cost_estimates(self, source_op_cost_estimates: OperatorCostEstimates) -> OperatorCostEstimates:
-        return OperatorCostEstimates(
-            cardinality=source_op_cost_estimates.cardinality,
-            time_per_record=0.0, cost_per_record=0.0, quality=1.0,
-        )
 
     def __call__(self, candidate: DataRecord) -> DataRecordSet:
         start_time = time.time()
@@ -64,7 +50,7 @@ class NonLLMColSuffix(PhysicalOperator):
 
 class AddColSuffix(Operator):
     """Append a fixed suffix to every column name (non-LLM rename)."""
-    stage_type = "convert"   # per-record transform; dispatched like map/convert
+    stage_type = "convert"
     op_type = "add_col_suffix"
 
     def __init__(self, suffix: str, input_schema, output_schema):
@@ -74,6 +60,5 @@ class AddColSuffix(Operator):
             output_schema=output_schema,
             input_schema=input_schema,
         )
-        self.suffix = suffix   # preserved for make_oracle_copy
         self.attributes = {"suffix": suffix}
-        self.params_id = _compute_op_id(self.op_type, self.attributes)
+        self.op_id = _compute_op_id(self.op_type, self.attributes)
