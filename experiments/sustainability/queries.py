@@ -14,15 +14,6 @@ count), and benchmark.yaml's task prompts carry the same text (kept in sync by h
 Queries 1-3 are answered with a verbatim quote, graded with the answer; 4-8 are graded by F1 over
 the returned documents. The sector labels (frontier full-document labels, NACE Rev. 2 sections)
 are not a query of their own.
-
-Retired (11-12), kept under ids 100+ so their ground truth and results stay trackable:
-  100 sustainability reports with company name and sector (old 1): the report labels are the source
-      dataset's weak GPT-3.5 labels, and a model gets ~96% of sectors from the company name alone
-  101 EcoVadis medal (old 2), 103 carbon price AND SBTi (old 9), 104 SBTi AND EcoVadis (old 10):
-      saturated, little or no variance
-  102 more than 4 fatalities (old 6): replaced by 4 (1 to 4 fatalities)
-Earlier, never built as queries: reporting period (too easy) and sustainability assurance (an
-expert call). Their frontier labels are kept on disk.
 """
 from __future__ import annotations
 
@@ -71,19 +62,6 @@ DEFINITIONS = {
     "sbti_validated": (
         "it states that the Science Based Targets initiative (SBTi) has validated (also called "
         "approved) an emissions reduction target of the company that issued the document."),
-    # GLOCERT's definition of assurance, without its "greenhouse gas inventories, and net-zero
-    # claims", which are what verification covers; the distinction is Council Fire's.
-    "sustainability_assurance": (
-        "Sustainability assurance is the independent, third-party examination of an "
-        "organization's sustainability disclosures and broader ESG reporting. Assurance is not the same as "
-        "verification, which is narrower and targets a specific, defined claim, dataset, or metric "
-        "(such as a greenhouse gas inventory or a renewable energy claim) against a designated "
-        "methodology. The document qualifies if it states that sustainability information of the "
-        "company that issued it received sustainability assurance."),
-    "ecovadis_medal": (
-        "it states an EcoVadis medal (platinum, gold, silver or bronze; also called a recognition "
-        "level) received by the company that issued the document."),
-    "reporting_period": "the period whose performance the document reports on",
     "re100_member": (
         "it states that the company that issued the document is a member of RE100, the global "
         "initiative of companies committed to 100% renewable electricity."),
@@ -106,44 +84,29 @@ DEFINITIONS = {
 class Query:
     id: int
     name: str
-    kind: str        # "identify": return the qualifying documents; "classify" (100): also name and sector
     task: str        # one line, for reports
     metric: str      # benchmark.yaml's query_metrics name
-    scored: bool = True
 
 
-# Query 102's threshold and query 4's range. A count is right only for employees AND contractors,
-# in the reporting year.
-FATALITY_THRESHOLD = 4
+# Query 4's range. A count is right only for employees AND contractors, in the reporting year.
 FATALITY_RANGE = (1, 4)
 
 QUERIES = [
-    Query(1, "sustainability_re100_member", "identify",
+    Query(1, "sustainability_re100_member",
           "documents stating the company is an RE100 member", "set_f1_quote_jaccard"),
-    Query(2, "sustainability_sbti_validated", "identify",
+    Query(2, "sustainability_sbti_validated",
           "documents stating the SBTi validated the company's target", "set_f1_quote_jaccard"),
-    Query(3, "sustainability_internal_carbon_price", "identify",
+    Query(3, "sustainability_internal_carbon_price",
           "documents stating the company currently uses an internal carbon price", "set_f1_quote_jaccard"),
-    Query(4, "sustainability_fatalities_in_range", "identify",
+    Query(4, "sustainability_fatalities_in_range",
           f"companies with {FATALITY_RANGE[0]} to {FATALITY_RANGE[1]} work-related fatalities", "set_f1"),
-    Query(5, "sustainability_manufacturing_sbti", "identify",
+    Query(5, "sustainability_manufacturing_sbti",
           "manufacturers with SBTi-validated targets", "set_f1"),
-    Query(6, "sustainability_manufacturing_carbon_price", "identify",
+    Query(6, "sustainability_manufacturing_carbon_price",
           "manufacturers that currently use an internal carbon price", "set_f1"),
-    Query(7, "sustainability_sbti_no_carbon_price", "identify",
+    Query(7, "sustainability_sbti_no_carbon_price",
           "SBTi-validated targets and no internal carbon price", "set_f1"),
-    Query(8, "sustainability_carbon_price_no_sbti", "identify",
+    Query(8, "sustainability_carbon_price_no_sbti",
           "an internal carbon price and no SBTi-validated target", "set_f1"),
-    # retired (see the module docstring)
-    Query(100, "sustainability_report_sector", "classify",
-          "sustainability reports with company name and sector", "sustainability_joint_f1"),
-    Query(101, "sustainability_ecovadis_medal", "identify",
-          "documents stating an EcoVadis medal the company received", "set_f1_quote_jaccard"),
-    Query(102, "sustainability_fatalities_above_threshold", "identify",
-          f"companies with more than {FATALITY_THRESHOLD} work-related fatalities", "set_f1"),
-    Query(103, "sustainability_carbon_price_sbti", "identify",
-          "an internal carbon price and SBTi-validated targets", "set_f1"),
-    Query(104, "sustainability_sbti_ecovadis", "identify",
-          "SBTi-validated targets and an EcoVadis medal", "set_f1"),
 ]
 QUERY_BY_ID = {query.id: query for query in QUERIES}
