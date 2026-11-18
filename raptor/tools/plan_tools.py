@@ -7,10 +7,10 @@ import re
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable
 
-from agent_cost_model.opt_agent import run_log
-from agent_cost_model.opt_agent.cost_model_types import ResultsStore, _dump_opt_debug_artifacts
-from agent_cost_model.opt_agent.physical_pipeline.execution import MAX_OP_SAMPLES
-from agent_cost_model.opt_agent.prompts import _quality_metric_reminder
+from raptor import run_log
+from raptor.results_store import ResultsStore, _dump_opt_debug_artifacts
+from raptor.physical_pipeline.execution import MAX_OP_SAMPLES
+from raptor.prompts import _quality_metric_reminder
 
 from .base import Tool
 
@@ -46,7 +46,7 @@ def _retrieved_fields(dr: Any, contexts: dict | None) -> dict[str, list[str]] | 
 
     None when no retrieval was recorded for it (e.g. skip_if bypassed the operator); {} when no
     field was long enough to chunk, so the LLM got the input in full."""
-    from agent_cost_model.opt_agent.physical_pipeline.operators.rag import retrieval_context_key
+    from raptor.physical_pipeline.operators.rag import retrieval_context_key
     key = retrieval_context_key(dr)
     view = (contexts or {}).get(key) if key is not None else None
     if view is None:
@@ -291,9 +291,9 @@ email
         self, code: str, plan_name: str, description: str = "", optimizations: Any = None
     ) -> dict:
         try:
-            from agent_cost_model.opt_agent.physical_pipeline import PhysicalPipeline
+            from raptor.physical_pipeline import PhysicalPipeline
         except ImportError:
-            from agent_cost_model.opt_agent.physical_pipeline import PhysicalPipeline
+            from raptor.physical_pipeline import PhysicalPipeline
 
         self._executor.send_variables({"plan_name": plan_name})
         exec_result = self._executor(code)

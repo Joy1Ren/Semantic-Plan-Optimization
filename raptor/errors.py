@@ -1,4 +1,4 @@
-"""Errors raised by the cost-model agent's step loop."""
+"""Errors raised by RAPTOR's step loop."""
 
 from __future__ import annotations
 

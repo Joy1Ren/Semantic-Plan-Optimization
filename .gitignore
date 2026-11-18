@@ -4,12 +4,35 @@ __pycache__/
 .env
 .venv/
 .venv-*/
+*.egg-info/
+build/
+# palimpzest writes its unparseable answers to the working directory.
+parse-answer-errors/
 
-# Experiment inputs and outputs are reproducible/generated data, not source code.
-experiments/*/dataset/
-experiments/*/datasubset*/
-experiments/*/ground_truth/
+# Experiment data (dataset/, datasubset_opt/, ground_truth/) is tracked, except the subset CSVs
+# (optimization subsets and the SemBench ground truth regenerated over them), SemBench's images and
+# per-run query folder (prepare_ecomm_data.py rebuilds them from the SemBench checkout) and
+# sustainability's llm_grading/ (exported separately).
+benchmarks/**/Q*_subset_*.csv
+# ...but the one-shot subsets the experiments run on are kept: subset 1 of every query, except
+# SemBench ecomm Q7 (subset 2) and Q8 (subset 11). Each with SemBench's ground truth over it.
+!benchmarks/**/Q*_subset_one-shot-1.csv
+!benchmarks/**/Q*_subset_one-shot-1_gt.csv
+!benchmarks/SemBench/**/Q7_subset_one-shot-2.csv
+!benchmarks/SemBench/**/Q7_subset_one-shot-2_gt.csv
+!benchmarks/SemBench/**/Q8_subset_one-shot-11.csv
+!benchmarks/SemBench/**/Q8_subset_one-shot-11_gt.csv
+benchmarks/SemBench/dataset/*/sf_*/
+!benchmarks/SemBench/dataset/*/sf_*_shared/
+benchmarks/SemBench/dataset/*/sf_*_shared/images/
+benchmarks/SemBench/**/*.jpg
+benchmarks/sustainability/ground_truth/llm_grading/
+benchmarks/summary_haystack/test_plans/
+benchmarks/**/*_loop_runner.py
+analysis/
 results/
+
+PHYSICAL_PIPELINE_DESIGN.md
 
 # Keep the directory structure visible after a fresh clone.
 !results/.gitkeep

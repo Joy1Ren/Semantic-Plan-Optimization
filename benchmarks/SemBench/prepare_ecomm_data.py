@@ -1,4 +1,4 @@
-"""Prepare SemBench e-commerce query datasets for cost-model optimization."""
+"""Prepare SemBench e-commerce query datasets for plan optimization."""
 from __future__ import annotations
 
 import argparse
@@ -8,7 +8,7 @@ import tomllib
 
 import pandas as pd
 
-from agent_cost_model.experiments.SemBench.paths import DATASET_DIR, sembench_files_dir
+from benchmarks.SemBench.paths import DATASET_DIR, sembench_files_dir
 
 
 def _type_name(value) -> str | None:

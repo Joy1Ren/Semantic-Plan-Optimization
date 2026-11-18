@@ -19,8 +19,8 @@ from pathlib import Path
 
 import pandas as pd
 
-from agent_cost_model.experiments.cuad.ground_truth.cleaning.clean_cuad_gt import NON_PLACE
-from agent_cost_model.experiments.cuad.paths import (
+from benchmarks.cuad.ground_truth.cleaning.clean_cuad_gt import NON_PLACE
+from benchmarks.cuad.paths import (
     CUAD_JSON,
     DATASET_CSV,
     GROUND_TRUTH_CSV,
@@ -98,7 +98,7 @@ def main() -> None:
     frame.to_csv(DATASET_CSV, index=False)
     print(f"\nwrote {len(frame):3d} rows -> {DATASET_CSV}")
     print("\nnow rebuild the per-query ground truth: "
-          "python -m agent_cost_model.experiments.cuad.ground_truth.cleaning.per_query_gt")
+          "python -m benchmarks.cuad.ground_truth.cleaning.per_query_gt")
 
 
 if __name__ == "__main__":

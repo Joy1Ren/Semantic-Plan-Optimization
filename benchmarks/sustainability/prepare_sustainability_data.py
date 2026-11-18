@@ -5,7 +5,7 @@ dataset/source/sustainability.json) carry each document's labels next to its tex
 the dataset CSV keeps only `document` and `idx`, and the labels go to
 ground_truth/llm_grading/original_labels.csv. idx is the source dataset's own id.
 
-    python -m agent_cost_model.experiments.sustainability.prepare_sustainability_data
+    python -m benchmarks.sustainability.prepare_sustainability_data
 """
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from agent_cost_model.experiments.sustainability.paths import (
+from benchmarks.sustainability.paths import (
     DATASET_CSV,
     ORIGINAL_LABELS_CSV,
     SOURCE_JSON,

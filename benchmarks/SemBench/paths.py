@@ -8,7 +8,7 @@ from pathlib import Path
 
 import yaml
 
-from agent_cost_model.experiments.external_repo import add_repo_to_syspath, resolve_repo
+from benchmarks.external_repo import add_repo_to_syspath, resolve_repo
 
 BENCHMARK_DIR = Path(__file__).resolve().parent
 BENCHMARK_YAML = BENCHMARK_DIR / "benchmark.yaml"

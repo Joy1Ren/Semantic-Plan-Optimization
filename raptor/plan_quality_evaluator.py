@@ -1,8 +1,8 @@
-"""Plan-quality evaluation for the cost model agent.
+"""Plan-quality evaluation for RAPTOR.
 
 `PlanQualityEvaluator` owns what is the same for every benchmark: loading the ground truth once
 per run and turning a plan's output into a `QualityResult`. The benchmark-specific steps are hooks,
-implemented in experiments/*/quality_evaluator.py:
+implemented in benchmarks/*/quality_evaluator.py:
 
   `score_plan(plan_output_df, ground_truth_df, ground_truth_path, population_path)` -- turn a
     plan's output plus the ground truth into a 0-1 score. The benchmarks' scorers take genuinely
@@ -38,7 +38,7 @@ class PlanQualityEvaluator:
 
     The one step that differs per benchmark -- turning a plan's output and the ground truth into a
     quality number -- is left to `score_plan`, implemented by each adapter in
-    experiments/*/quality_evaluator.py.
+    benchmarks/*/quality_evaluator.py.
     """
 
     def __init__(
@@ -143,7 +143,7 @@ class PlanQualityEvaluator:
         """
         raise NotImplementedError(
             f"{type(self).__name__} must implement has_ground_truth(); see "
-            "experiments/*/quality_evaluator.py"
+            "benchmarks/*/quality_evaluator.py"
         )
 
     def score_plan(self, *args) -> float:
@@ -169,7 +169,7 @@ class PlanQualityEvaluator:
         """
         raise NotImplementedError(
             f"{type(self).__name__} must implement score_plan(); see "
-            "experiments/*/quality_evaluator.py"
+            "benchmarks/*/quality_evaluator.py"
         )
 
     def write_scoring_input(self, *args) -> None:
@@ -185,7 +185,7 @@ class PlanQualityEvaluator:
         """
         raise NotImplementedError(
             f"{type(self).__name__} must implement write_scoring_input(); see "
-            "experiments/*/quality_evaluator.py"
+            "benchmarks/*/quality_evaluator.py"
         )
 
     # ------------------------------------------------------------------

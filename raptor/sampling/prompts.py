@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import pandas as pd
 
-from agent_cost_model.sampling.constants import (
+from raptor.sampling.constants import (
     EXPLORE_AUTHORIZED_IMPORTS,
     EXPLORE_MAX_IMAGES,
     EXPLORE_OUTPUT_CHARS,
@@ -427,7 +427,7 @@ REPROMPT = (
 )
 
 
-# The one definition, used by the sampler and by CostModelAgent._describe_images, so an image
+# The one definition, used by the sampler and by RAPTOR._describe_images, so an image
 # reads the same way whether it is being scored for the subset or shown to the plan-writing agent.
 IMAGE_DESCRIBE_SYSTEM = (
     "You are a vision assistant helping a query-planning agent explore a dataset's images. "

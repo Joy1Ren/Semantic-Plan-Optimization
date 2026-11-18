@@ -1,0 +1,393 @@
+name,category,issue,detail
+LIMEENERGYCO_09_09_1999-EX-10-DISTRIBUTOR AGREEMENT,Agreement Date,override,7/7/99 -> 9/7/99
+LohaCompanyltd_20191209_F-1_EX-10.16_11917878_EX-10.16_Supply Agreement,Governing Law,not_a_jurisdiction,United Nations Convention on Contract for the International Sale of Goods
+LohaCompanyltd_20191209_F-1_EX-10.16_11917878_EX-10.16_Supply Agreement,Governing Law,multiple_values,"[""China"", ""non-place""]"
+"KIROMICBIOPHARMA,INC_05_11_2020-EX-10.23-CONSULTING AGREEMENT",Parties,typo_fixed,"Kriomic, Inc -> Kiromic, Inc"
+DovaPharmaceuticalsInc_20181108_10-Q_EX-10.2_11414857_EX-10.2_Promotion Agreement,Expiration Date,relative_expiration,"{""month"": ""09"", ""day"": ""26"", ""year"": ""2022""}"
+"FTENETWORKS,INC_02_18_2016-EX-99.4-STRATEGIC ALLIANCE AGREEMENT",Parties,typo_fixed,"FRE Networks, Inc. -> FTE Networks, Inc."
+DOMINIADVISORTRUST_02_18_2005-EX-99.(H)(2)-SPONSORSHIP AGREEMENT,Parties,typo_fixed,Sponser -> Sponsor
+IntegrityFunds_20200121_485BPOS_EX-99.E UNDR CONTR_11948727_EX-99.E UNDR CONTR_Service Agreement,Parties,party_not_in_spans,"The Integrity Funds, Integrity Funds Distributor, LLC"
+"SIBANNAC,INC_12_04_2017-EX-2.1-Strategic Alliance Agreement",Expiration Date,relative_expiration,"{""month"": ""11"", ""day"": ""30"", ""year"": ""2018""}"
+INTRICONCORP_03_10_2009-EX-10.22-Strategic Alliance Agreement,Expiration Date,relative_expiration,"{""month"": ""10"", ""day"": ""01"", ""year"": ""2013""}"
+BONTONSTORESINC_04_20_2018-EX-99.3-AGENCY AGREEMENT,Parties,party_not_in_spans,"The Bon-Ton Stores, Inc. and its associated chapter 11 debtors inpossession"
+"ON2TECHNOLOGIES,INC_11_17_2006-EX-10.3-SUPPORT AND MAINTENANCE AGREEMENT",Expiration Date,relative_expiration,"{""month"": ""10"", ""day"": ""??"", ""year"": ""2006""}"
+OPERALTD_04_30_2020-EX-4.14-SERVICE AGREEMENT,Renewal Term,span_without_answer,
+"BORROWMONEYCOM,INC_06_11_2020-EX-10.1-JOINT VENTURE AGREEMENT",Governing Law,span_without_answer,
+GLOBALTECHNOLOGIESLTD_06_08_2020-EX-10.16-CONSULTING AGREEMENT,Expiration Date,relative_expiration,"{""month"": ""01"", ""day"": ""02"", ""year"": ""2021""}"
+CORIOINC_07_20_2000-EX-10.5-LICENSE AND HOSTING AGREEMENT,Expiration Date,relative_expiration,"{""month"": ""10"", ""day"": ""29"", ""year"": ""2004""}"
+CYBERIANOUTPOSTINC_07_09_1998-EX-10.13-PROMOTION AGREEMENT,Expiration Date,relative_expiration,"{""month"": ""01"", ""day"": ""26"", ""year"": ""1999""}"
+SENMIAOTECHNOLOGYLTD_02_19_2019-EX-10.5-Collaboration Agreement,Expiration Date,relative_expiration,"{""month"": ""12"", ""day"": ""17"", ""year"": ""2019""}"
+HealthcareIntegratedTechnologiesInc_20190812_8-K_EX-10.1_11776966_EX-10.1_Reseller Agreement,Expiration Date,relative_expiration,"{""month"": ""07"", ""day"": ""31"", ""year"": ""2020""}"
+BNCMORTGAGEINC_05_17_1999-EX-10.4-LICENSING AND WEB SITE HOSTING AGREEMENT,Expiration Date,relative_expiration,"{""month"": ""02"", ""day"": ""26"", ""year"": ""2000""}"
+ENERGOUSCORP_03_16_2017-EX-10.24-STRATEGIC ALLIANCE AGREEMENT,Expiration Date,relative_expiration,"{""month"": ""11"", ""day"": ""06"", ""year"": ""2023""}"
+NICELTD_06_26_2003-EX-4.5-OUTSOURCING AGREEMENT,Parties,typo_fixed,Nice Systems Ltc. -> Nice Systems Ltd.
+NICELTD_06_26_2003-EX-4.5-OUTSOURCING AGREEMENT,Expiration Date,relative_expiration,"{""month"": ""01"", ""day"": ""21"", ""year"": ""2005""}"
+NICELTD_06_26_2003-EX-4.5-OUTSOURCING AGREEMENT,Renewal Term,override,3 years -> perpetual
+ImpresseCorp_20000322_S-1A_EX-10.11_5199234_EX-10.11_Co-Branding Agreement,Expiration Date,relative_expiration,"{""month"": ""06"", ""day"": ""03"", ""year"": ""2001""}"
+AlliedEsportsEntertainmentInc_20190815_8-K_EX-10.19_11788293_EX-10.19_Content License Agreement,Expiration Date,relative_expiration,"{""month"": ""02"", ""day"": ""01"", ""year"": ""2021""}"
+CHERRYHILLMORTGAGEINVESTMENTCORP_09_26_2013-EX-10.1-Strategic Alliance Agreement,Expiration Date,relative_expiration,"{""month"": ""??"", ""day"": ""??"", ""year"": ""2016""}"
+"Zounds Hearing, Inc. - MANUFACTURING DESIGN MARKETING AGREEMENT",Expiration Date,relative_expiration,"{""month"": ""10"", ""day"": ""03"", ""year"": ""2028""}"
+SouthernStarEnergyInc_20051202_SB-2A_EX-9_801890_EX-9_Affiliate Agreement,Parties,party_not_in_spans,element 5 GmbH and its subsidiaries and who wish to make use of the additional service provided by element 5
+ConformisInc_20191101_10-Q_EX-10.6_11861402_EX-10.6_Development Agreement,Parties,typo_fixed,Howmedica Ostenonics Corp. -> Howmedica Osteonics Corp.
+LegacyEducationAllianceInc_20200330_10-K_EX-10.18_12090678_EX-10.18_Development Agreement,Expiration Date,relative_expiration,"{""month"": ""12"", ""day"": ""23"", ""year"": ""2024""}"
+VERICELCORP_08_06_2019-EX-10.10-SUPPLY AGREEMENT,Expiration Date,relative_expiration,"{""month"": ""05"", ""day"": ""06"", ""year"": ""2024""}"
+"WASTE2ENERGYHOLDINGS,INC_06_03_2010-EX-10.2-STRATEGIC ALLIANCE AGREEMENT",Expiration Date,relative_expiration,"{""month"": ""05"", ""day"": ""19"", ""year"": ""2020""}"
+ORBSATCORP_08_17_2007-EX-7.3-STRATEGIC ALLIANCE AGREEMENT,Agreement Date,computed_date,"{""month"": ""09"", ""day"": ""09"", ""year"": ""2005""}"
+ORBSATCORP_08_17_2007-EX-7.3-STRATEGIC ALLIANCE AGREEMENT,Expiration Date,relative_expiration,"{""month"": ""09"", ""day"": ""09"", ""year"": ""2006""}"
+DRAGONSYSTEMSINC_01_08_1999-EX-10.17-OUTSOURCING AGREEMENT,Governing Law,questionable,"the span names court venues (Massachusetts or the Netherlands), not a governing law"
+DRAGONSYSTEMSINC_01_08_1999-EX-10.17-OUTSOURCING AGREEMENT,Governing Law,multiple_values,"[""Massachusetts"", ""Netherlands""]"
+GridironBionutrientsInc_20171206_8-K_EX-10.2_10972556_EX-10.2_Endorsement Agreement,Parties,party_not_in_spans,"Food For Athletes, Inc./ Gridiron Gridiron BioNutrients™"
+FuseMedicalInc_20190321_10-K_EX-10.43_11575454_EX-10.43_Distributor Agreement,Expiration Date,relative_expiration,"{""month"": ""03"", ""day"": ""29"", ""year"": ""2019""}"
+"OASYSMOBILE,INC_07_05_2001-EX-10.17-OUTSOURCING AGREEMENT",Agreement Date,multiple_values,"[{""month"": ""07"", ""day"": ""31"", ""year"": ""2000""}, {""month"": ""07"", ""day"": ""??"", ""year"": ""2000""}]"
+"OASYSMOBILE,INC_07_05_2001-EX-10.17-OUTSOURCING AGREEMENT",Agreement Date,different_values,"[{""month"": ""07"", ""day"": ""31"", ""year"": ""2000""}, {""month"": ""07"", ""day"": ""??"", ""year"": ""2000""}]"
+"OASYSMOBILE,INC_07_05_2001-EX-10.17-OUTSOURCING AGREEMENT",Effective Date,multiple_values,"[{""month"": ""07"", ""day"": ""31"", ""year"": ""2000""}, {""month"": ""07"", ""day"": ""??"", ""year"": ""2000""}]"
+"OASYSMOBILE,INC_07_05_2001-EX-10.17-OUTSOURCING AGREEMENT",Effective Date,different_values,"[{""month"": ""07"", ""day"": ""31"", ""year"": ""2000""}, {""month"": ""07"", ""day"": ""??"", ""year"": ""2000""}]"
+"OASYSMOBILE,INC_07_05_2001-EX-10.17-OUTSOURCING AGREEMENT",Expiration Date,relative_expiration,"{""month"": ""07"", ""day"": ""??"", ""year"": ""2003""}"
+UpjohnInc_20200121_10-12G_EX-2.6_11948692_EX-2.6_Manufacturing Agreement_ Supply Agreement,Parties,typo_fixed,Pifzer Inc. -> Pfizer Inc.
+ABILITYINC_06_15_2020-EX-4.25-SERVICES AGREEMENT,Parties,party_not_in_spans,"TELCOSTAR PTE, LTD. and Ability Computer & Software Industries Ltd"
+ABILITYINC_06_15_2020-EX-4.25-SERVICES AGREEMENT,Parties,number_parties_unclear,"names more than one party: TELCOSTAR PTE, LTD. and Ability Computer & Software Industries Ltd"
+ELECTRAMECCANICA VEHICLES CORP. - Manufacturing Agreement,Expiration Date,relative_expiration,"{""month"": ""02"", ""day"": ""??"", ""year"": ""2021""}"
+GopageCorp_20140221_10-K_EX-10.1_8432966_EX-10.1_Content License Agreement,Expiration Date,relative_expiration,"{""month"": ""02"", ""day"": ""10"", ""year"": ""2019""}"
+FreezeTagInc_20180411_8-K_EX-10.1_11139603_EX-10.1_Sponsorship Agreement,Effective Date,override,3/14/18 -> 3/15/18
+TELEGLOBEINTERNATIONALHOLDINGSLTD_03_29_2004-EX-10.10-CONSTRUCTION AND MAINTENANCE AGREEMENT,Expiration Date,relative_expiration,"{""month"": ""04"", ""day"": ""18"", ""year"": ""2025""}"
+BIOCEPTINC_08_19_2013-EX-10-COLLABORATION AGREEMENT,Expiration Date,relative_expiration,"{""month"": ""11"", ""day"": ""02"", ""year"": ""2015""}"
+PACIFICSYSTEMSCONTROLTECHNOLOGYINC_08_24_2000-EX-10.53-SPONSORSHIP AGREEMENT,Governing Law,multiple_values,"[""California"", ""Hong Kong""]"
+NANOPHASETECHNOLOGIESCORP_11_01_2005-EX-99.1-DISTRIBUTOR AGREEMENT,Parties,party_not_in_spans,"JOHNSON MATTHEY CATALOG COMPANY, INC. d/b/a ALFA AESAR"
+NANOPHASETECHNOLOGIESCORP_11_01_2005-EX-99.1-DISTRIBUTOR AGREEMENT,Expiration Date,relative_expiration,"{""month"": ""10"", ""day"": ""24"", ""year"": ""2010""}"
+NANOPHASETECHNOLOGIESCORP_11_01_2005-EX-99.1-DISTRIBUTOR AGREEMENT,Renewal Term,override,2 years -> successive 2 years
+NANOPHASETECHNOLOGIESCORP_11_01_2005-EX-99.1-DISTRIBUTOR AGREEMENT,Governing Law,multiple_values,"[""Delaware"", ""Illinois""]"
+AzulSa_20170303_F-1A_EX-10.3_9943903_EX-10.3_Maintenance Agreement1,Renewal Term,override,None -> []
+AzulSa_20170303_F-1A_EX-10.3_9943903_EX-10.3_Maintenance Agreement1,Notice Period to Terminate Renewal,override,None -> []
+PelicanDeliversInc_20200211_S-1_EX-10.3_11975895_EX-10.3_Development Agreement2,Governing Law,span_without_answer,
+NEONSYSTEMSINC_03_01_1999-EX-10.5-DISTRIBUTOR AGREEMENT_Amendment,Governing Law,span_without_answer,
+N2KINC_10_16_1997-EX-10.16-SPONSORSHIP AGREEMENT,Expiration Date,relative_expiration,"{""month"": ""09"", ""day"": ""23"", ""year"": ""1999""}"
+NUVEEN - REMARKETING AGREEMENT,Parties,party_not_in_spans,"Nuveen Investments, Inc."
+NUVEEN - REMARKETING AGREEMENT,Agreement Date,span_without_answer,
+NUVEEN - REMARKETING AGREEMENT,Governing Law,multiple_values,"[""New York"", ""Massachusetts""]"
+SECURIANFUNDSTRUST_05_01_2012-EX-99.28.H.9-NET INVESTMENT INCOME MAINTENANCE AGREEMENT,Expiration Date,relative_expiration,"{""month"": ""05"", ""day"": ""01"", ""year"": ""2013""}"
+REWALKROBOTICSLTD_07_10_2014-EX-10.2-STRATEGIC ALLIANCE AGREEMENT,Expiration Date,relative_expiration,"{""month"": ""09"", ""day"": ""24"", ""year"": ""2023""}"
+PenntexMidstreamPartnersLp_20150416_S-1A_EX-10.4_9042833_EX-10.4_Transportation Agreement,Expiration Date,relative_expiration,"{""month"": ""12"", ""day"": ""31"", ""year"": ""2030""}"
+PenntexMidstreamPartnersLp_20150416_S-1A_EX-10.4_9042833_EX-10.4_Transportation Agreement,Expiration Date,term_unclear,"the span says {'length': 15, 'unit': 'years'}, CUAD's date implies {'length': 188, 'unit': 'months'}"
+TodosMedicalLtd_20190328_20-F_EX-4.10_11587157_EX-4.10_Marketing Agreement_ Reseller Agreement,Expiration Date,relative_expiration,"{""month"": ""12"", ""day"": ""20"", ""year"": ""2023""}"
+TodosMedicalLtd_20190328_20-F_EX-4.10_11587157_EX-4.10_Marketing Agreement_ Reseller Agreement,Renewal Term,multiple_values,"[{""renewals"": 1, ""length"": 5, ""unit"": ""years""}, {""renewals"": 1, ""length"": 2, ""unit"": ""years""}]"
+"OAKTREECAPITALGROUP,LLC_03_02_2020-EX-10.8-Services Agreement",Governing Law,multiple_values,"[""England"", ""Wales""]"
+"BELLRINGBRANDS,INC_02_07_2020-EX-10.18-MASTER SUPPLY AGREEMENT",Expiration Date,relative_expiration,"{""month"": ""10"", ""day"": ""31"", ""year"": ""2024""}"
+"BELLRINGBRANDS,INC_02_07_2020-EX-10.18-MASTER SUPPLY AGREEMENT",Renewal Term,override,5 years -> successive 5 years
+AimmuneTherapeuticsInc_20200205_8-K_EX-10.3_11967170_EX-10.3_Development Agreement,Renewal Term,answer_without_span,Perpetual
+HEALTHGATEDATACORP_11_24_1999-EX-10.1-HOSTING AND MANAGEMENT AGREEMENT (1),Parties,typo_fixed,Munskgaard -> Munksgaard
+HEALTHGATEDATACORP_11_24_1999-EX-10.1-HOSTING AND MANAGEMENT AGREEMENT (1),Governing Law,multiple_values,"[""England"", ""Wales""]"
+ATMOSENERGYCORP_11_22_2002-EX-10.17-TRANSPORTATION SERVICE AGREEMENT,Notice Period to Terminate Renewal,multiple_values,"[{""length"": 60, ""unit"": ""days""}, {""length"": 180, ""unit"": ""days""}]"
+ATMOSENERGYCORP_11_22_2002-EX-10.17-TRANSPORTATION SERVICE AGREEMENT,Notice Period to Terminate Renewal,different_values,"[{""length"": 60, ""unit"": ""days""}, {""length"": 180, ""unit"": ""days""}]"
+PacificapEntertainmentHoldingsInc_20051115_8-KA_EX-1.01_4300894_EX-1.01_Content License Agreement,Governing Law,answer_without_span,California
+RgcResourcesInc_20151216_8-K_EX-10.3_9372751_EX-10.3_Franchise Agreement,Expiration Date,relative_expiration,"{""month"": ""01"", ""day"": ""01"", ""year"": ""2036""}"
+"BELLICUMPHARMACEUTICALS,INC_05_07_2019-EX-10.1-Supply Agreement",Parties,typo_fixed,"Bellicum Phamaceuticals, Inc. -> Bellicum Pharmaceuticals, Inc."
+"BELLICUMPHARMACEUTICALS,INC_05_07_2019-EX-10.1-Supply Agreement",Expiration Date,relative_expiration,"{""month"": ""03"", ""day"": ""27"", ""year"": ""2029""}"
+MARTINMIDSTREAMPARTNERSLP_01_23_2004-EX-10.3-TRANSPORTATION SERVICES AGREEMENT,Expiration Date,relative_expiration,"{""month"": ""12"", ""day"": ""23"", ""year"": ""2006""}"
+ScansourceInc_20190822_10-K_EX-10.38_11793958_EX-10.38_Distributor Agreement2,Parties,typo_fixed,"Cisco Systems, Inc. or its subsidiaries licensing the Software instead of Cisco Systems -> Cisco Systems, Inc. or its subsidiary licensing the Software instead of Cisco Systems"
+STWRESOURCESHOLDINGCORP_08_06_2014-EX-10.1-COOPERATION AGREEMENT,Expiration Date,relative_expiration,"{""month"": ""??"", ""day"": ""??"", ""year"": ""2044""}"
+SLOVAKWIRELESSFINANCECOBV_03_28_2001-EX-4.(B)(II).3-Maintenance and support contract for SICAP(R) modules,Expiration Date,relative_expiration,"{""month"": ""10"", ""day"": ""06"", ""year"": ""2002""}"
+DigitalCinemaDestinationsCorp_20111220_S-1_EX-10.10_7346719_EX-10.10_Affiliate Agreement,Expiration Date,relative_expiration,"{""month"": ""??"", ""day"": ""??"", ""year"": ""2016""}"
+VERTICALNETINC_04_01_2002-EX-10.19-MAINTENANCE AND SUPPORT AGREEMENT,Parties,party_not_in_spans,"Vertical Enterprises LLC formerly known as Tradeum, Inc. which d/b/a VerticalNet Solutions"
+VERTICALNETINC_04_01_2002-EX-10.19-MAINTENANCE AND SUPPORT AGREEMENT,Parties,typo_fixed,Coverage -> Converge
+"MIDDLEBROOKPHARMACEUTICALS,INC_03_18_2010-EX-10.1-PROMOTION AGREEMENT",Expiration Date,relative_expiration,"{""month"": ""02"", ""day"": ""03"", ""year"": ""2013""}"
+AIRSPANNETWORKSINC_04_11_2000-EX-10.5-Distributor Agreement,Expiration Date,relative_expiration,"{""month"": ""03"", ""day"": ""31"", ""year"": ""2005""}"
+ArcGroupInc_20171211_8-K_EX-10.1_10976103_EX-10.1_Sponsorship Agreement,Parties,typo_fixed,Sponser -> Sponsor
+"SightLife Surgical, Inc. - STRATEGIC SALES _ MARKETING AGREEMENT",Expiration Date,relative_expiration,"{""month"": ""04"", ""day"": ""28"", ""year"": ""2020""}"
+InmodeLtd_20190729_F-1A_EX-10.9_11743243_EX-10.9_Manufacturing Agreement,Expiration Date,relative_expiration,"{""month"": ""04"", ""day"": ""01"", ""year"": ""2012""}"
+"VIVINT SOLAR, INC. - NON-COMPETITION AGREEMENT",Parties,party_not_in_spans,"VIVINT, INC. Vivint Solar and Vivint"
+FUSIONPHARMACEUTICALSINC_06_05_2020-EX-10.17-Supply Agreement - FUSION,Notice Period to Terminate Renewal,override,None -> []
+CHIPMOSTECHNOLOGIESBERMUDALTD_04_18_2016-EX-4.72-Strategic Alliance Agreement,Expiration Date,relative_expiration,"{""month"": ""12"", ""day"": ""11"", ""year"": ""2018""}"
+CHIPMOSTECHNOLOGIESBERMUDALTD_04_18_2016-EX-4.72-Strategic Alliance Agreement,Renewal Term,override,None -> unspecified
+GpaqAcquisitionHoldingsInc_20200123_S-4A_EX-10.6_11951677_EX-10.6_License Agreement,Parties,party_not_in_spans,"NATIONAL FOOTBALL MUSEUM, INC. d/b/a Pro Football Hall of Fame"
+GpaqAcquisitionHoldingsInc_20200123_S-4A_EX-10.6_11951677_EX-10.6_License Agreement,Agreement Date,span_without_answer,
+GpaqAcquisitionHoldingsInc_20200123_S-4A_EX-10.6_11951677_EX-10.6_License Agreement,Notice Period to Terminate Renewal,multiple_values,"[{""length"": 180, ""unit"": ""days""}, {""length"": 6, ""unit"": ""months""}]"
+SalesforcecomInc_20171122_10-Q_EX-10.1_10961535_EX-10.1_Reseller Agreement,Agreement Date,answer_without_span,[]/[]/[]
+RitterPharmaceuticalsInc_20200313_S-4A_EX-10.54_12055220_EX-10.54_Development Agreement,Expiration Date,relative_expiration,"{""month"": ""05"", ""day"": ""01"", ""year"": ""2021""}"
+ScansourceInc_20190822_10-K_EX-10.38_11793958_EX-10.38_Distributor Agreement1,Expiration Date,relative_expiration,"{""month"": ""01"", ""day"": ""22"", ""year"": ""2009""}"
+"NETGEAR,INC_04_21_2003-EX-10.16-DISTRIBUTOR AGREEMENT",Expiration Date,relative_expiration,"{""month"": ""03"", ""day"": ""01"", ""year"": ""1997""}"
+EcoScienceSolutionsInc_20171117_8-K_EX-10.1_10956472_EX-10.1_Endorsement Agreement,Expiration Date,relative_expiration,"{""month"": ""11"", ""day"": ""14"", ""year"": ""2018""}"
+JINGWEIINTERNATIONALLTD_10_04_2007-EX-10.7-INTELLECTUAL PROPERTY AGREEMENT,Expiration Date,relative_expiration,"{""month"": ""02"", ""day"": ""08"", ""year"": ""2012""}"
+FEDERATEDGOVERNMENTINCOMESECURITIESINC_04_28_2020-EX-99.SERV AGREE-SERVICES AGREEMENT,Renewal Term,answer_without_span,perpetual
+MRSFIELDSORIGINALCOOKIESINC_01_29_1998-EX-10-FRANCHISE AGREEMENT,Parties,party_not_in_spans,"Pretzel Time, Inc. doing business as Pretzel Time"
+LUCIDINC_04_15_2011-EX-10.9-DISTRIBUTOR AGREEMENT,Agreement Date,span_without_answer,
+UsioInc_20040428_SB-2_EX-10.11_1723988_EX-10.11_Affiliate Agreement 2,Agreement Date,span_without_answer,
+UsioInc_20040428_SB-2_EX-10.11_1723988_EX-10.11_Affiliate Agreement 2,Governing Law,questionable,"the spans name arbitration venues (McLean, Virginia; San Antonio, Texas), not a governing law"
+UsioInc_20040428_SB-2_EX-10.11_1723988_EX-10.11_Affiliate Agreement 2,Governing Law,multiple_values,"[""Virginia"", ""Texas""]"
+EmmisCommunicationsCorp_20191125_8-K_EX-10.6_11906433_EX-10.6_Marketing Agreement,Effective Date,computed_date,"{""month"": ""11"", ""day"": ""25"", ""year"": ""2019""}"
+EmmisCommunicationsCorp_20191125_8-K_EX-10.6_11906433_EX-10.6_Marketing Agreement,Effective Date,date_differs_from_span,"answer [('11', '25', '2019')], spans [('12', '31', '2022')]"
+ENTERTAINMENTGAMINGASIAINC_02_15_2005-EX-10.5-DISTRIBUTOR AGREEMENT,Expiration Date,relative_expiration,"{""month"": ""01"", ""day"": ""21"", ""year"": ""2010""}"
+"Magenta Therapeutics, Inc. - Master Development and Manufacturing Agreement",Expiration Date,relative_expiration,"{""month"": ""02"", ""day"": ""13"", ""year"": ""2023""}"
+"Magenta Therapeutics, Inc. - Master Development and Manufacturing Agreement",Notice Period to Terminate Renewal,override,None -> []
+"GRIDIRONBIONUTRIENTS,INC_02_05_2020-EX-10.3-SUPPLY AGREEMENT",Effective Date,answer_without_span,1/27/20
+PapaJohnsInternationalInc_20190617_8-K_EX-10.1_11707365_EX-10.1_Endorsement Agreement,Renewal Term,override,None -> 1 year
+MACROGENICSINC_08_02_2013-EX-10-COLLABORATION AGREEMENT,Governing Law,span_without_answer,
+ELANDIAINTERNATIONALINC_04_25_2007-EX-10.21-Outsourcing Agreement,Expiration Date,relative_expiration,"{""month"": ""06"", ""day"": ""16"", ""year"": ""2009""}"
+PareteumCorp_20081001_8-K_EX-99.1_2654808_EX-99.1_Hosting Agreement,Effective Date,computed_date,"{""month"": ""09"", ""day"": ""18"", ""year"": ""2008""}"
+PareteumCorp_20081001_8-K_EX-99.1_2654808_EX-99.1_Hosting Agreement,Renewal Term,override,None -> []
+USASYNTHETICFUELCORP_10_21_2010-EX-10.10-STRATEGIC ALLIANCE AGREEMENT,Effective Date,answer_without_span,12/21/06
+USASYNTHETICFUELCORP_10_21_2010-EX-10.10-STRATEGIC ALLIANCE AGREEMENT,Expiration Date,relative_expiration,"{""month"": ""12"", ""day"": ""21"", ""year"": ""2011""}"
+EdietsComInc_20001030_10QSB_EX-10.4_2606646_EX-10.4_Co-Branding Agreement,Expiration Date,relative_expiration,"{""month"": ""05"", ""day"": ""22"", ""year"": ""2002""}"
+WESTERN COPPER - NON-COMPETITION AGREEMENT,Parties,party_not_in_spans,Glamis Gold Ltd. and all of its subsidiaries and other Affiliates
+WESTERN COPPER - NON-COMPETITION AGREEMENT,Parties,party_not_in_spans,Western Copper Corporation and all of its subsidiaries and other Affiliates
+WESTERN COPPER - NON-COMPETITION AGREEMENT,Effective Date,computed_date,"{""month"": ""05"", ""day"": ""03"", ""year"": ""2006""}"
+LECLANCHÉ S.A. - JOINT DEVELOPMENT AND MARKETING AGREEMENT,Expiration Date,relative_expiration,"{""month"": ""04"", ""day"": ""06"", ""year"": ""2015""}"
+"HEMISPHERX - Sales, Marketing, Distribution, and Supply Agreement",Expiration Date,relative_expiration,"{""month"": ""03"", ""day"": ""31"", ""year"": ""2019""}"
+"HEMISPHERX - Sales, Marketing, Distribution, and Supply Agreement",Notice Period to Terminate Renewal,override,None -> unspecified
+TomOnlineInc_20060501_20-F_EX-4.46_749700_EX-4.46_Co-Branding Agreement,Parties,party_not_in_spans,"Tel Online Limited . Skype, Online BVI and the Company"
+TomOnlineInc_20060501_20-F_EX-4.46_749700_EX-4.46_Co-Branding Agreement,Parties,number_parties_unclear,"names more than one party: Tel Online Limited . Skype, Online BVI and the Company"
+TomOnlineInc_20060501_20-F_EX-4.46_749700_EX-4.46_Co-Branding Agreement,Expiration Date,relative_expiration,"{""month"": ""08"", ""day"": ""22"", ""year"": ""2010""}"
+TomOnlineInc_20060501_20-F_EX-4.46_749700_EX-4.46_Co-Branding Agreement,Governing Law,multiple_values,"[""England"", ""Wales""]"
+MphaseTechnologiesInc_20030911_10-K_EX-10.15_1560667_EX-10.15_Co-Branding Agreement,Expiration Date,relative_expiration,"{""month"": ""01"", ""day"": ""21"", ""year"": ""2004""}"
+"CERES,INC_01_25_2012-EX-10.20-Collaboration Agreement",Expiration Date,relative_expiration,"{""month"": ""04"", ""day"": ""01"", ""year"": ""2022""}"
+"INTERSECTENT,INC_05_11_2020-EX-10.1-SUPPLY AGREEMENT",Expiration Date,relative_expiration,"{""month"": ""01"", ""day"": ""20"", ""year"": ""2025""}"
+"BABCOCK_WILCOXENTERPRISES,INC_08_04_2015-EX-10.17-INTELLECTUAL PROPERTY AGREEMENT between THE BABCOCK _ WILCOX COMPANY and BABCOCK _ WILCOX ENTERPRISES, INC.",Effective Date,override,6/25/15 -> 6/26/15
+"Sonos, Inc. - Manufacturing Agreement ",Expiration Date,relative_expiration,"{""month"": ""09"", ""day"": ""04"", ""year"": ""2017""}"
+"VAPOTHERM, INC. - Manufacturing and Supply Agreement",Expiration Date,relative_expiration,"{""month"": ""01"", ""day"": ""01"", ""year"": ""2016""}"
+LIGHTBRIDGECORP_11_23_2015-EX-10.26-STRATEGIC ALLIANCE AGREEMENT,Expiration Date,relative_expiration,"{""month"": ""08"", ""day"": ""16"", ""year"": ""2017""}"
+HYPERIONSOFTWARECORP_09_28_1994-EX-10.47-EXCLUSIVE DISTRIBUTOR AGREEMENT,Effective Date,answer_without_span,4/15/94
+HYPERIONSOFTWARECORP_09_28_1994-EX-10.47-EXCLUSIVE DISTRIBUTOR AGREEMENT,Expiration Date,relative_expiration,"{""month"": ""04"", ""day"": ""15"", ""year"": ""1995""}"
+HYPERIONSOFTWARECORP_09_28_1994-EX-10.47-EXCLUSIVE DISTRIBUTOR AGREEMENT,Notice Period to Terminate Renewal,override,None -> 90 days
+BUFFALOWILDWINGSINC_06_05_1998-EX-10.3-FRANCHISE AGREEMENT,Governing Law,not_a_jurisdiction,THE STATE IN WHICH THE FRANCHISED RESTAURANT IS LOCATED
+BUFFALOWILDWINGSINC_06_05_1998-EX-10.3-FRANCHISE AGREEMENT,Governing Law,not_a_jurisdiction,THE UNITED STATES TRADEMARK ACT OF 1946
+ReynoldsConsumerProductsInc_20200121_S-1A_EX-10.22_11948918_EX-10.22_Service Agreement,Expiration Date,relative_expiration,"{""month"": ""??"", ""day"": ""??"", ""year"": ""2021""}"
+"GWG HOLDINGS, INC. - ORDERLY MARKETING AGREEMENT",Expiration Date,relative_expiration,"{""month"": ""12"", ""day"": ""27"", ""year"": ""2019""}"
+BLACKROCKMUNIHOLDINGSINVESTMENTQUALITYFUND_04_07_2020-EX-99.01-JOINT FILING AGREEMENT,Parties,typo_fixed,"Bank of America Corporatino, Banc of America Preferred Funding Corporation -> Bank of America Corporation, Banc of America Preferred Funding Corporation"
+BLACKROCKMUNIHOLDINGSINVESTMENTQUALITYFUND_04_07_2020-EX-99.01-JOINT FILING AGREEMENT,Parties,party_not_in_spans,"Bank of America Corporation, Banc of America Preferred Funding Corporation"
+BLACKROCKMUNIHOLDINGSINVESTMENTQUALITYFUND_04_07_2020-EX-99.01-JOINT FILING AGREEMENT,Parties,number_parties_unclear,"names more than one party: Bank of America Corporation, Banc of America Preferred Funding Corporation"
+ALLISONTRANSMISSIONHOLDINGSINC_12_15_2014-EX-99.1-COOPERATION AGREEMENT,Parties,number_parties_unclear,"names more than one party: VA Partners I, LLC, ValueAct Capital Master Fund, L.P., ValueAct Capital Management, L.P., ValueAct Capital Management, LLC, ValueAct Holdings, L.P."
+ALLISONTRANSMISSIONHOLDINGSINC_12_15_2014-EX-99.1-COOPERATION AGREEMENT,Effective Date,override,None -> 12/12/14
+SMITHELECTRICVEHICLESCORP_04_04_2012-EX-10.26-FLEET MAINTENANCE AGREEMENT,Expiration Date,relative_expiration,"{""month"": ""10"", ""day"": ""16"", ""year"": ""2010""}"
+SMITHELECTRICVEHICLESCORP_04_04_2012-EX-10.26-FLEET MAINTENANCE AGREEMENT,Governing Law,multiple_values,"[""England"", ""Wales""]"
+CHINARECYCLINGENERGYCORP_11_14_2013-EX-10.6-Cooperation Agreement,Expiration Date,relative_expiration,"{""month"": ""07"", ""day"": ""??"", ""year"": ""2033""}"
+"KUBIENT,INC_07_02_2020-EX-10.14-MASTER SERVICES AGREEMENT_Part1",Effective Date,override,None -> 2/5/20
+"KUBIENT,INC_07_02_2020-EX-10.14-MASTER SERVICES AGREEMENT_Part1",Expiration Date,relative_expiration,"{""month"": ""02"", ""day"": ""05"", ""year"": ""2021""}"
+NeoformaInc_19991202_S-1A_EX-10.26_5224521_EX-10.26_Co-Branding Agreement,Expiration Date,relative_expiration,"{""month"": ""11"", ""day"": ""19"", ""year"": ""2001""}"
+AULAMERICANUNITTRUST_04_24_2020-EX-99.8.77-SERVICING AGREEMENT,Parties,party_not_in_spans,"American United Life Insurance Company and OneAmerica Securities, Inc."
+AULAMERICANUNITTRUST_04_24_2020-EX-99.8.77-SERVICING AGREEMENT,Parties,number_parties_unclear,"names more than one party: American United Life Insurance Company and OneAmerica Securities, Inc."
+VIOLINMEMORYINC_12_12_2012-EX-10.14-SPONSORSHIP AGREEMENT,Expiration Date,relative_expiration,"{""month"": ""06"", ""day"": ""13"", ""year"": ""2022""}"
+RaeSystemsInc_20001114_10-Q_EX-10.57_2631790_EX-10.57_Co-Branding Agreement,Expiration Date,relative_expiration,"{""month"": ""11"", ""day"": ""05"", ""year"": ""2000""}"
+RaeSystemsInc_20001114_10-Q_EX-10.57_2631790_EX-10.57_Co-Branding Agreement,Notice Period to Terminate Renewal,answer_without_span,60 days
+AgapeAtpCorp_20191202_10-KA_EX-10.1_11911128_EX-10.1_Supply Agreement,Expiration Date,relative_expiration,"{""month"": ""01"", ""day"": ""15"", ""year"": ""2028""}"
+ArcaUsTreasuryFund_20200207_N-2_EX-99.K5_11971930_EX-99.K5_Development Agreement,Effective Date,computed_date,"{""month"": ""??"", ""day"": ""??"", ""year"": ""2020""}"
+ArcaUsTreasuryFund_20200207_N-2_EX-99.K5_11971930_EX-99.K5_Development Agreement,Expiration Date,relative_expiration,"{""month"": ""??"", ""day"": ""??"", ""year"": ""2022""}"
+"XACCT Technologies, Inc.SUPPORT AND MAINTENANCE AGREEMENT",Expiration Date,relative_expiration,"{""month"": ""??"", ""day"": ""??"", ""year"": ""2001""}"
+CHANGEPOINTCORP_03_08_2000-EX-10.6-LICENSE AND HOSTING AGREEMENT,Expiration Date,relative_expiration,"{""month"": ""12"", ""day"": ""13"", ""year"": ""2004""}"
+Apollo Endosurgery - Manufacturing and Supply Agreement,Expiration Date,relative_expiration,"{""month"": ""12"", ""day"": ""05"", ""year"": ""2019""}"
+IDREAMSKYTECHNOLOGYLTD_07_03_2014-EX-10.39-Cooperation Agreement on Mobile Game Business,Expiration Date,relative_expiration,"{""month"": ""01"", ""day"": ""01"", ""year"": ""2014""}"
+PhoenixNewMediaLtd_20110421_F-1_EX-10.17_6958322_EX-10.17_Content License Agreement,Expiration Date,relative_expiration,"{""month"": ""11"", ""day"": ""24"", ""year"": ""2014""}"
+"HOSPITALITYINVESTORSTRUST,INC_04_07_2014-EX-10.26-FRANCHISE AGREEMENT",Expiration Date,relative_expiration,"{""month"": ""03"", ""day"": ""31"", ""year"": ""2029""}"
+FulucaiProductionsLtd_20131223_10-Q_EX-10.9_8368347_EX-10.9_Content License Agreement,Renewal Term,multiple_values,"[""perpetual"", {""month"": ""11"", ""day"": ""15"", ""year"": ""2014""}]"
+MPLXLP_06_17_2015-EX-10.1-TRANSPORTATION SERVICES AGREEMENT,Expiration Date,relative_expiration,"{""month"": ""06"", ""day"": ""11"", ""year"": ""2030""}"
+FuelcellEnergyInc_20191106_8-K_EX-10.1_11868007_EX-10.1_Development Agreement,Expiration Date,relative_expiration,"{""month"": ""10"", ""day"": ""31"", ""year"": ""2021""}"
+BerkshireHillsBancorpInc_20120809_10-Q_EX-10.16_7708169_EX-10.16_Endorsement Agreement,Parties,override,"Geno Auriemma (Auriemma); Berkshire Bank (Berkshire)(""Party"" or ""Parties"") -> Geno Auriemma (""Auriemma""); Berkshire Bank (""Berkshire"")"
+DYNAMEXINC_06_06_1996-EX-10.4-TRANSPORTATION SERVICES AGREEMENT,Parties,party_not_in_spans,Parcelway Courier Systems Canada Ltd. a subsidiary of Dynamex Inc.
+ULTRAGENYXPHARMACEUTICALINC_12_23_2013-EX-10.9-SUPPLY AGREEMENT,Expiration Date,relative_expiration,"{""month"": ""11"", ""day"": ""19"", ""year"": ""2015""}"
+ULTRAGENYXPHARMACEUTICALINC_12_23_2013-EX-10.9-SUPPLY AGREEMENT,Renewal Term,override,2 years -> successive 2 years
+"GIGGLESN_HUGS,INC_06_23_2016-EX-10.2-STRATEGIC ALLIANCE AGREEMENT",Expiration Date,relative_expiration,"{""month"": ""05"", ""day"": ""17"", ""year"": ""2019""}"
+Quaker Chemical Corporation - NON COMPETITION AND NON SOLICITATION AGREEMENT,Parties,party_not_in_spans,"Gulf Oil Lubricants India, Ltd , solely for purposes of Section 1(c)[Confidentiality"
+GlobalTechnologiesGroupInc_20050928_10KSB_EX-10.9_4148808_EX-10.9_Content License Agreement,Expiration Date,relative_expiration,"{""month"": ""07"", ""day"": ""13"", ""year"": ""2006""}"
+GpaqAcquisitionHoldingsInc_20200123_S-4A_EX-10.8_11951679_EX-10.8_Service Agreement,Parties,party_not_in_spans,"Constellation NewEnergy, Inc., on behalf of itself and its retail affiliates and subsidiaries"
+QuantumGroupIncFl_20090120_8-K_EX-99.2_3672910_EX-99.2_Hosting Agreement,Agreement Date,answer_without_span,12/2/08
+QuantumGroupIncFl_20090120_8-K_EX-99.2_3672910_EX-99.2_Hosting Agreement,Expiration Date,relative_expiration,"{""month"": ""12"", ""day"": ""03"", ""year"": ""2011""}"
+"PHREESIA,INC_05_28_2019-EX-10.18-STRATEGIC ALLIANCE AGREEMENT",Expiration Date,relative_expiration,"{""month"": ""12"", ""day"": ""10"", ""year"": ""2020""}"
+"PHREESIA,INC_05_28_2019-EX-10.18-STRATEGIC ALLIANCE AGREEMENT",Notice Period to Terminate Renewal,override,None -> []
+"MEDALISTDIVERSIFIEDREIT,INC_05_18_2020-EX-10.1-CONSULTING AGREEMENT",Expiration Date,relative_expiration,"{""month"": ""03"", ""day"": ""01"", ""year"": ""2021""}"
+"FOUNDATIONMEDICINE,INC_02_02_2015-EX-10.2-Collaboration Agreement",Renewal Term,override,None -> successive 3 years; 6 1 years
+"FOUNDATIONMEDICINE,INC_02_02_2015-EX-10.2-Collaboration Agreement",Renewal Term,multiple_values,"[{""renewals"": ""unlimited"", ""length"": 3, ""unit"": ""years""}, {""renewals"": 6, ""length"": 1, ""unit"": ""years""}]"
+"LEGACYTECHNOLOGYHOLDINGS,INC_12_09_2005-EX-10.2-DISTRIBUTOR AGREEMENT",Expiration Date,relative_expiration,"{""month"": ""12"", ""day"": ""08"", ""year"": ""2007""}"
+"LEGACYTECHNOLOGYHOLDINGS,INC_12_09_2005-EX-10.2-DISTRIBUTOR AGREEMENT",Notice Period to Terminate Renewal,override,None -> 60 days
+DeltathreeInc_19991102_S-1A_EX-10.19_6227850_EX-10.19_Co-Branding Agreement_ Service Agreement,Expiration Date,relative_expiration,"{""month"": ""10"", ""day"": ""01"", ""year"": ""2002""}"
+ImineCorp_20180725_S-1_EX-10.5_11275970_EX-10.5_Distributor Agreement,Effective Date,computed_date,"{""month"": ""07"", ""day"": ""19"", ""year"": ""2018""}"
+ImineCorp_20180725_S-1_EX-10.5_11275970_EX-10.5_Distributor Agreement,Expiration Date,relative_expiration,"{""month"": ""07"", ""day"": ""19"", ""year"": ""2020""}"
+SigaTechnologiesInc_20190603_8-K_EX-10.1_11695818_EX-10.1_Promotion Agreement,Expiration Date,relative_expiration,"{""month"": ""05"", ""day"": ""31"", ""year"": ""2024""}"
+VgrabCommunicationsInc_20200129_10-K_EX-10.33_11958828_EX-10.33_Development Agreement,Parties,override,"VGrab Asia Ltd. (""VAL""); Mr. Zheng Qing, Mr. Gu Xianwin and Ms. Chen Weijie (""Developer"") -> VGrab Asia Ltd. (""VAL""); Mr. Zheng Qing; Mr. Gu Xianwin; Ms. Chen Weijie"
+VgrabCommunicationsInc_20200129_10-K_EX-10.33_11958828_EX-10.33_Development Agreement,Expiration Date,relative_expiration,"{""month"": ""09"", ""day"": ""05"", ""year"": ""2019""}"
+VgrabCommunicationsInc_20200129_10-K_EX-10.33_11958828_EX-10.33_Development Agreement,Expiration Date,multiple_values,"[{""length"": 6, ""unit"": ""months""}, ""perpetual""]"
+AIRTECHINTERNATIONALGROUPINC_05_08_2000-EX-10.4-FRANCHISE AGREEMENT,Expiration Date,relative_expiration,"{""month"": ""??"", ""day"": ""??"", ""year"": ""2010""}"
+HPILHOLDING_01_07_2015-EX-99.1-COOPERATION AGREEMENT,Parties,number_parties_unclear,collective for parties listed separately: HPIL ET and GINARES
+HPILHOLDING_01_07_2015-EX-99.1-COOPERATION AGREEMENT,Expiration Date,relative_expiration,"{""month"": ""01"", ""day"": ""05"", ""year"": ""2016""}"
+DIVERSINETCORP_03_01_2012-EX-4-RESELLER AGREEMENT,Expiration Date,relative_expiration,"{""month"": ""01"", ""day"": ""11"", ""year"": ""2016""}"
+"CURAEGISTECHNOLOGIES,INC_05_26_2010-EX-1-CORPORATE SPONSORSHIP AGREEMENT",Parties,typo_fixed,Torevic Inc. -> Torvec Inc.
+GridironBionutrientsInc_20171206_8-K_EX-10.1_10972555_EX-10.1_Endorsement Agreement,Parties,party_not_in_spans,"Food For Athletes, Inc./Gridiron BioNutrients™"
+RandWorldwideInc_20010402_8-KA_EX-10.2_2102464_EX-10.2_Co-Branding Agreement,Expiration Date,relative_expiration,"{""month"": ""11"", ""day"": ""14"", ""year"": ""2003""}"
+"Loop Industries, Inc. - Marketing Agreement",Parties,number_parties_unclear,collective for parties listed separately: Loop and Joint Venture Company
+AudibleInc_20001113_10-Q_EX-10.32_2599586_EX-10.32_Co-Branding Agreement_ Marketing Agreement_ Investment Distribution Agreement,Expiration Date,relative_expiration,"{""month"": ""01"", ""day"": ""30"", ""year"": ""2003""}"
+HOLIDAYRVSUPERSTORESINC_04_15_2002-EX-10.13-ENDORSEMENT AGREEMENT,Parties,party_not_in_spans,"Holiday RV Superstores, Inc. d/b/a Recreation USA"
+HOLIDAYRVSUPERSTORESINC_04_15_2002-EX-10.13-ENDORSEMENT AGREEMENT,Expiration Date,relative_expiration,"{""month"": ""03"", ""day"": ""20"", ""year"": ""2005""}"
+WOMENSGOLFUNLIMITEDINC_03_29_2000-EX-10.13-ENDORSEMENT AGREEMENT,Expiration Date,relative_expiration,"{""month"": ""12"", ""day"": ""31"", ""year"": ""2004""}"
+CHAPARRALRESOURCESINC_03_30_2000-EX-10.66-TRANSPORTATION CONTRACT,Expiration Date,relative_expiration,"{""month"": ""11"", ""day"": ""30"", ""year"": ""2004""}"
+ScansourceInc_20190509_10-Q_EX-10.2_11661422_EX-10.2_Distributor Agreement,Parties,party_not_in_spans,"Zebra Technologies International, LLC , Zebra Technologies do Brasil - Comércio de Produtos de Informåtica Ltda. , Xplore Technologies Corporation of America"
+ScansourceInc_20190509_10-Q_EX-10.2_11661422_EX-10.2_Distributor Agreement,Parties,party_not_in_spans,"ScanSource, Inc. , ScanSource Latin America, Inc. , ScanSource Brazil Distribuidora de Technologias, Ltda. ), SCANSOURCE DE MEXICO S. DE R.L. DE C.V."
+ScansourceInc_20190509_10-Q_EX-10.2_11661422_EX-10.2_Distributor Agreement,Parties,number_parties_unclear,"names more than one party: Zebra Technologies International, LLC , Zebra Technologies do Brasil - Comércio de Produtos de Informåtica Ltda. , Xplore Technologies Corporation of America"
+ScansourceInc_20190509_10-Q_EX-10.2_11661422_EX-10.2_Distributor Agreement,Governing Law,span_without_answer,
+AURASYSTEMSINC_06_16_2010-EX-10.25-STRATEGIC ALLIANCE AGREEMENT,Expiration Date,relative_expiration,"{""month"": ""03"", ""day"": ""18"", ""year"": ""2015""}"
+IpassInc_20181203_8-K_EX-99.1_11445874_EX-99.1_Reseller Agreement,Expiration Date,relative_expiration,"{""month"": ""04"", ""day"": ""25"", ""year"": ""2019""}"
+VERSOTECHNOLOGIESINC_12_28_2007-EX-99.3-INTELLECTUAL PROPERTY AGREEMENT,Parties,typo_fixed,"Verson Backhaul Solutions, Inc. -> Verso Backhaul Solutions, Inc."
+BOLIVARMININGCORP_05_23_2003-EX-2.1-VISP WEB SITE BUILDING AND HOSTING AGREEMENT,Expiration Date,relative_expiration,"{""month"": ""05"", ""day"": ""12"", ""year"": ""2008""}"
+VirtuosoSurgicalInc_20191227_1-A_EX1A-6 MAT CTRCT_11933379_EX1A-6 MAT CTRCT_License Agreement,Parties,typo_fixed,The John Hopkins University -> The Johns Hopkins University
+SmartRxSystemsInc_20180914_1-A_EX1A-6 MAT CTRCT_11351705_EX1A-6 MAT CTRCT_Distributor Agreement,Expiration Date,relative_expiration,"{""month"": ""05"", ""day"": ""17"", ""year"": ""2022""}"
+"CORALGOLDRESOURCES,LTD_05_28_2020-EX-4.1-CONSULTING AGREEMENT",Parties,typo_fixed,CORAL GOLD RESOURCED LTD. -> CORAL GOLD RESOURCES LTD.
+"CORALGOLDRESOURCES,LTD_05_28_2020-EX-4.1-CONSULTING AGREEMENT",Expiration Date,day_month_swapped,31/01/2025
+OLDAPIWIND-DOWNLTD_01_08_2016-EX-1.3-AGENCY AGREEMENT2,Parties,override,"Tribute Pharmaceuticals Inc. (""Corporation""); [] (""Agent""); [] (""U.S. Affiliate""); U.S. registered broker-dealer affiliate of the Agent -> Tribute Pharmaceuticals Inc. (""Corporation""); [] (""Agent""); [] (""U.S. Affiliate"")"
+ATENTOSA_07_06_2020-EX-99.1-JOINT FILING AGREEMENT,Parties,typo_fixed,"HPS INVESTMENT PARTNERS, LCC -> HPS INVESTMENT PARTNERS, LLC"
+HealthcentralCom_19991108_S-1A_EX-10.27_6623292_EX-10.27_Co-Branding Agreement,Expiration Date,relative_expiration,"{""month"": ""09"", ""day"": ""01"", ""year"": ""2001""}"
+GAINSCOINC_01_21_2010-EX-10.41-SPONSORSHIP AGREEMENT,Parties,typo_fixed,Sponser -> Sponsor
+"TURNKEYCAPITAL,INC_07_20_2017-EX-1.1-Strategic Alliance Agreement",Expiration Date,relative_expiration,"{""month"": ""06"", ""day"": ""30"", ""year"": ""2019""}"
+IVILLAGEINC_03_17_1999-EX-10.16-SPONSORSHIP AGREEMENT,Parties,party_not_in_spans,J. Walter Thompson
+IVILLAGEINC_03_17_1999-EX-10.16-SPONSORSHIP AGREEMENT,Expiration Date,relative_expiration,"{""month"": ""01"", ""day"": ""04"", ""year"": ""2001""}"
+IVILLAGEINC_03_17_1999-EX-10.16-SPONSORSHIP AGREEMENT,Expiration Date,term_unclear,"the span says {'length': 2, 'unit': 'months'}, CUAD's date implies {'length': 25, 'unit': 'months'}"
+IVILLAGEINC_03_17_1999-EX-10.16-SPONSORSHIP AGREEMENT,Renewal Term,override,None -> unspecified
+PaperexchangeComInc_20000322_S-1A_EX-10.4_5202103_EX-10.4_Co-Branding Agreement,Expiration Date,relative_expiration,"{""month"": ""09"", ""day"": ""30"", ""year"": ""2003""}"
+RISEEDUCATIONCAYMANLTD_04_17_2020-EX-4.23-SERVICE AGREEMENT,Agreement Date,span_without_answer,
+RISEEDUCATIONCAYMANLTD_04_17_2020-EX-4.23-SERVICE AGREEMENT,Effective Date,span_without_answer,
+RISEEDUCATIONCAYMANLTD_04_17_2020-EX-4.23-SERVICE AGREEMENT,Governing Law,answer_without_span,Beijing
+STARTECGLOBALCOMMUNICATIONSCORP_11_16_1998-EX-10.30-CONSTRUCTION AND MAINTENANCE AGREEMENT,Expiration Date,relative_expiration,"{""month"": ""09"", ""day"": ""02"", ""year"": ""2023""}"
+TRIZETTOGROUPINC_08_18_1999-EX-10.17-TECHNICAL INFRASTRUCTURE MAINTENANCE AGREEMENT,Expiration Date,relative_expiration,"{""month"": ""03"", ""day"": ""05"", ""year"": ""1999""}"
+UAGHINC_04_14_2004-EX-10.18-MAINTENANCE AGREEMENT,Expiration Date,relative_expiration,"{""month"": ""07"", ""day"": ""23"", ""year"": ""2008""}"
+"ARMSTRONGFLOORING,INC_01_07_2019-EX-10.2-INTELLECTUAL PROPERTY AGREEMENT",Parties,party_not_in_spans,"AFI Licensing LLC together with Armstrong Flooring, Inc."
+"ARMSTRONGFLOORING,INC_01_07_2019-EX-10.2-INTELLECTUAL PROPERTY AGREEMENT",Parties,party_not_in_spans,"AHF Holding, Inc. together with Armstrong Hardwood Flooring Company"
+"ARMSTRONGFLOORING,INC_01_07_2019-EX-10.2-INTELLECTUAL PROPERTY AGREEMENT",Parties,number_parties_unclear,"names more than one party: AFI Licensing LLC together with Armstrong Flooring, Inc."
+VitalibisInc_20180316_8-K_EX-10.2_11100168_EX-10.2_Hosting Agreement,Expiration Date,relative_expiration,"{""month"": ""03"", ""day"": ""14"", ""year"": ""2019""}"
+SoupmanInc_20150814_8-K_EX-10.1_9230148_EX-10.1_Franchise Agreement1,Expiration Date,relative_expiration,"{""month"": ""??"", ""day"": ""??"", ""year"": ""2025""}"
+HEALTHGATEDATACORP_11_24_1999-EX-10.1-HOSTING AND MANAGEMENT AGREEMENT - Escrow Agreement,Parties,override,"NCC ESCROW INTERNATIONAL LIMITED (""NCC"") -> NCC ESCROW INTERNATIONAL LIMITED (""NCC""); the Owner; the Licensee"
+HEALTHGATEDATACORP_11_24_1999-EX-10.1-HOSTING AND MANAGEMENT AGREEMENT - Escrow Agreement,Governing Law,multiple_values,"[""England"", ""Wales""]"
+BNLFINANCIALCORP_03_30_2007-EX-10.8-OUTSOURCING AGREEMENT,Expiration Date,relative_expiration,"{""month"": ""05"", ""day"": ""01"", ""year"": ""2007""}"
+IntegrityMediaInc_20010329_10-K405_EX-10.17_2373875_EX-10.17_Co-Branding Agreement,Parties,party_not_in_spans,"TIME LIFE, INC. d/b/a Time Life Music"
+"IOVANCEBIOTHERAPEUTICS,INC_08_03_2017-EX-10.1-STRATEGIC ALLIANCE AGREEMENT",Parties,typo_fixed,"Loin Biotechnologies, Inc. -> Lion Biotechnologies, Inc."
+"IOVANCEBIOTHERAPEUTICS,INC_08_03_2017-EX-10.1-STRATEGIC ALLIANCE AGREEMENT",Parties,typo_fixed,MD Adnserson -> MD Anderson
+"IOVANCEBIOTHERAPEUTICS,INC_08_03_2017-EX-10.1-STRATEGIC ALLIANCE AGREEMENT",Expiration Date,relative_expiration,"{""month"": ""04"", ""day"": ""17"", ""year"": ""2021""}"
+NEONSYSTEMSINC_03_01_1999-EX-10.5-DISTRIBUTOR AGREEMENT_New,Expiration Date,relative_expiration,"{""month"": ""01"", ""day"": ""01"", ""year"": ""1998""}"
+NEONSYSTEMSINC_03_01_1999-EX-10.5-DISTRIBUTOR AGREEMENT_New,Expiration Date,term_unclear,"the span says {'length': 1, 'unit': 'years'}, CUAD's date implies {'length': 2, 'unit': 'years'}"
+"FIDELITYNATIONALINFORMATIONSERVICES,INC_08_05_2009-EX-10.3-INTELLECTUAL PROPERTY AGREEMENT",Expiration Date,answer_without_span,perpetual
+WatchitMediaInc_20061201_8-K_EX-10.1_4148672_EX-10.1_Content License Agreement,Effective Date,multiple_values,"[{""month"": ""09"", ""day"": ""01"", ""year"": ""2006""}, {""month"": ""08"", ""day"": ""31"", ""year"": ""2007""}]"
+WatchitMediaInc_20061201_8-K_EX-10.1_4148672_EX-10.1_Content License Agreement,Effective Date,different_values,"[{""month"": ""09"", ""day"": ""01"", ""year"": ""2006""}, {""month"": ""08"", ""day"": ""31"", ""year"": ""2007""}]"
+GentechHoldingsInc_20190808_1-A_EX1A-6 MAT CTRCT_11776814_EX1A-6 MAT CTRCT_Distributor Agreement,Expiration Date,relative_expiration,"{""month"": ""08"", ""day"": ""01"", ""year"": ""2022""}"
+TICKETSCOMINC_06_22_1999-EX-10.22-SPONSORSHIP AGREEMENT,Expiration Date,relative_expiration,"{""month"": ""02"", ""day"": ""17"", ""year"": ""2000""}"
+TICKETSCOMINC_06_22_1999-EX-10.22-SPONSORSHIP AGREEMENT,Renewal Term,override,None -> 1 year
+OFGBANCORP_03_28_2007-EX-10.23-OUTSOURCING AGREEMENT,Parties,typo_fixed,Melavante Corporation -> Metavante Corporation
+OFGBANCORP_03_28_2007-EX-10.23-OUTSOURCING AGREEMENT,Parties,typo_fixed,Melavante -> Metavante
+"OMINTO,INC_03_29_2004-EX-10-RESELLER AGREEMENT",Expiration Date,relative_expiration,"{""month"": ""03"", ""day"": ""19"", ""year"": ""2005""}"
+"DUOSTECHNOLOGIESGROUP,INC_04_21_2009-EX-10.1-STRATEGIC ALLIANCE AGREEMENT",Expiration Date,relative_expiration,"{""month"": ""04"", ""day"": ""15"", ""year"": ""2012""}"
+OLDAPIWIND-DOWNLTD_01_08_2016-EX-1.3-AGENCY AGREEMENT1,Parties,party_not_in_spans,Kes 7 Capital Inc. and Bloom Burton & Co. Ltd.
+OLDAPIWIND-DOWNLTD_01_08_2016-EX-1.3-AGENCY AGREEMENT1,Parties,number_parties_unclear,names more than one party: Kes 7 Capital Inc. and Bloom Burton & Co. Ltd.
+"ADIANUTRITION,INC_04_01_2005-EX-10.D2-RESELLER AGREEMENT",Expiration Date,relative_expiration,"{""month"": ""??"", ""day"": ""??"", ""year"": ""2004""}"
+MusclepharmCorp_20170208_10-KA_EX-10.38_9893581_EX-10.38_Co-Branding Agreement,Renewal Term,multiple_values,"[{""month"": ""07"", ""day"": ""22"", ""year"": ""2019""}, {""month"": ""07"", ""day"": ""22"", ""year"": ""2022""}]"
+MusclepharmCorp_20170208_10-KA_EX-10.38_9893581_EX-10.38_Co-Branding Agreement,Renewal Term,different_values,"[{""month"": ""07"", ""day"": ""22"", ""year"": ""2019""}, {""month"": ""07"", ""day"": ""22"", ""year"": ""2022""}]"
+"PAXMEDICA,INC_07_02_2020-EX-10.12-Master Service Agreement",Parties,typo_fixed,CRO Consultiong (Pty) Limited -> CRO Consulting (Pty) Limited
+"PAXMEDICA,INC_07_02_2020-EX-10.12-Master Service Agreement",Parties,typo_fixed,Purinis Pharmaceuticals LLC -> Purinix Pharmaceuticals LLC
+"PAXMEDICA,INC_07_02_2020-EX-10.12-Master Service Agreement",Agreement Date,override,5/25/08 -> 5/25/18
+"PAXMEDICA,INC_07_02_2020-EX-10.12-Master Service Agreement",Effective Date,override,5/25/18 -> 5/25/08
+StaarSurgicalCompany_20180801_10-Q_EX-10.37_11289449_EX-10.37_Distributor Agreement,Parties,typo_fixed,STARAR SURGICAL AG -> STAAR SURGICAL AG
+StaarSurgicalCompany_20180801_10-Q_EX-10.37_11289449_EX-10.37_Distributor Agreement,Agreement Date,span_without_answer,
+StaarSurgicalCompany_20180801_10-Q_EX-10.37_11289449_EX-10.37_Distributor Agreement,Effective Date,override,None -> []/[]/[]
+BEYONDCOMCORP_08_03_2000-EX-10.2-CO-HOSTING AGREEMENT,Expiration Date,relative_expiration,"{""month"": ""09"", ""day"": ""21"", ""year"": ""2001""}"
+CHEETAHMOBILEINC_04_22_2014-EX-10.43-Cooperation Agreement,Renewal Term,override,None -> unspecified
+NEOMEDIATECHNOLOGIESINC_12_15_2005-EX-16.1-DISTRIBUTOR AGREEMENT,Renewal Term,override,30 days -> unspecified
+"VISIUMTECHNOLOGIES,INC_10_20_2004-EX-10.20-DISTRIBUTOR AGREEMENT",Expiration Date,relative_expiration,"{""month"": ""04"", ""day"": ""07"", ""year"": ""2006""}"
+"HALITRON,INC_03_01_2005-EX-10.15-SPONSORSHIP AND DEVELOPMENT AGREEMENT",Expiration Date,relative_expiration,"{""month"": ""08"", ""day"": ""06"", ""year"": ""2007""}"
+"HALITRON,INC_03_01_2005-EX-10.15-SPONSORSHIP AND DEVELOPMENT AGREEMENT",Third Party Beneficiary,yes_no_differs_from_csv,"csv Yes, json No"
+CybergyHoldingsInc_20140520_10-Q_EX-10.27_8605784_EX-10.27_Affiliate Agreement,Parties,typo_fixed,Mount Kowledge Holdings Inc. -> Mount Knowledge Holdings Inc.
+CybergyHoldingsInc_20140520_10-Q_EX-10.27_8605784_EX-10.27_Affiliate Agreement,Expiration Date,relative_expiration,"{""month"": ""12"", ""day"": ""31"", ""year"": ""2014""}"
+MANAKOASERVICESCORP_11_21_2007-EX-7.5-STRATEGIC ALLIANCE AGREEMENT,Expiration Date,relative_expiration,"{""month"": ""06"", ""day"": ""14"", ""year"": ""2007""}"
+WestPharmaceuticalServicesInc_20200116_8-K_EX-10.1_11947529_EX-10.1_Supply Agreement,Parties,party_not_in_spans,"ExxonMobil Chemical Company , on behalf of itself and in the interest of the ExxonMobil affiliates listed on Attachment B"
+WestPharmaceuticalServicesInc_20200116_8-K_EX-10.1_11947529_EX-10.1_Supply Agreement,Parties,party_not_in_spans,"West Pharmaceutical Services, Inc. , on behalf of itself and the Buyer affiliates listed on Attachment C"
+WestPharmaceuticalServicesInc_20200116_8-K_EX-10.1_11947529_EX-10.1_Supply Agreement,Governing Law,multiple_values,"[""Texas"", ""Singapore"", ""Belgium""]"
+PANDIONTHERAPEUTICSHOLDCOLLC_05_22_2020-EX-10.17-CONSULTING AGREEMENT,Expiration Date,relative_expiration,"{""month"": ""03"", ""day"": ""27"", ""year"": ""2021""}"
+BizzingoInc_20120322_8-K_EX-10.17_7504499_EX-10.17_Endorsement Agreement,Expiration Date,relative_expiration,"{""month"": ""03"", ""day"": ""01"", ""year"": ""2013""}"
+KitovPharmaLtd_20190326_20-F_EX-4.15_11584449_EX-4.15_Manufacturing Agreement,Renewal Term,override,None -> []
+KitovPharmaLtd_20190326_20-F_EX-4.15_11584449_EX-4.15_Manufacturing Agreement,Notice Period to Terminate Renewal,override,None -> []
+LEJUHOLDINGSLTD_03_12_2014-EX-10.34-INTERNET CHANNEL COOPERATION AGREEMENT,Expiration Date,relative_expiration,"{""month"": ""08"", ""day"": ""01"", ""year"": ""2014""}"
+LEJUHOLDINGSLTD_03_12_2014-EX-10.34-INTERNET CHANNEL COOPERATION AGREEMENT,Expiration Date,term_unclear,"the span says {'length': 4, 'unit': 'years'}, CUAD's date implies {'length': 52, 'unit': 'months'}"
+BLACKSTONEGSOLONG-SHORTCREDITINCOMEFUND_05_11_2020-EX-99.(K)(1)-SERVICE AGREEMENT,Expiration Date,relative_expiration,"{""month"": ""01"", ""day"": ""26"", ""year"": ""2014""}"
+ADAPTIMMUNETHERAPEUTICSPLC_04_06_2017-EX-10.11-STRATEGIC ALLIANCE AGREEMENT,Expiration Date,relative_expiration,"{""month"": ""09"", ""day"": ""23"", ""year"": ""2021""}"
+NATIONALPROCESSINGINC_07_18_1996-EX-10.4-SPONSORSHIP AGREEMENT,Expiration Date,relative_expiration,"{""month"": ""06"", ""day"": ""30"", ""year"": ""2001""}"
+QIWI_06_16_2017-EX-99.(D)(2)-COOPERATION AGREEMENT,Expiration Date,relative_expiration,"{""month"": ""06"", ""day"": ""02"", ""year"": ""2020""}"
+QIWI_06_16_2017-EX-99.(D)(2)-COOPERATION AGREEMENT,Governing Law,multiple_values,"[""England"", ""Wales""]"
+RemarkHoldingsInc_20081114_10-Q_EX-10.24_2895649_EX-10.24_Content License Agreement,Renewal Term,override,None -> []
+GluMobileInc_20070319_S-1A_EX-10.09_436630_EX-10.09_Content License Agreement2,Agreement Date,override,11/18/05 -> 11/11/05
+TRICITYBANKSHARESCORP_05_15_1998-EX-10-OUTSOURCING AGREEMENT,Expiration Date,relative_expiration,"{""month"": ""11"", ""day"": ""16"", ""year"": ""2006""}"
+TRICITYBANKSHARESCORP_05_15_1998-EX-10-OUTSOURCING AGREEMENT,Expiration Date,term_unclear,"the span says {'length': 8, 'unit': 'years'}, CUAD's date implies {'length': 105, 'unit': 'months'}"
+GarrettMotionInc_20181001_8-K_EX-2.4_11364532_EX-2.4_Intellectual Property Agreement,Insurance,yes_no_differs_from_csv,"csv Yes, json No"
+EmbarkComInc_19991008_S-1A_EX-10.10_6487661_EX-10.10_Co-Branding Agreement,Effective Date,computed_date,"{""month"": ""06"", ""day"": ""08"", ""year"": ""1999""}"
+EmbarkComInc_19991008_S-1A_EX-10.10_6487661_EX-10.10_Co-Branding Agreement,Effective Date,date_differs_from_span,"answer [('06', '08', '1999')], spans [('12', '31', '2000')]"
+"COOLTECHNOLOGIES,INC_10_25_2017-EX-10.71-Strategic Alliance Agreement",Expiration Date,relative_expiration,"{""month"": ""05"", ""day"": ""26"", ""year"": ""2022""}"
+ElPolloLocoHoldingsInc_20200306_10-K_EX-10.16_12041700_EX-10.16_Development Agreement,Governing Law,not_a_jurisdiction,the state in which the breach occurs
+ElPolloLocoHoldingsInc_20200306_10-K_EX-10.16_12041700_EX-10.16_Development Agreement,Governing Law,multiple_values,"[""California"", ""non-place""]"
+IdeanomicsInc_20160330_10-K_EX-10.26_9512211_EX-10.26_Content License Agreement,Expiration Date,relative_expiration,"{""month"": ""12"", ""day"": ""21"", ""year"": ""2035""}"
+BIOAMBERINC_04_10_2013-EX-10.34-DEVELOPMENT AGREEMENT (1),Expiration Date,relative_expiration,"{""month"": ""04"", ""day"": ""15"", ""year"": ""2014""}"
+"BERKELEYLIGHTS,INC_06_26_2020-EX-10.12-COLLABORATION AGREEMENT",Parties,typo_fixed,Ginko -> Ginkgo
+"BERKELEYLIGHTS,INC_06_26_2020-EX-10.12-COLLABORATION AGREEMENT",Parties,typo_fixed,"Berkely Lights, Inc. -> Berkeley Lights, Inc."
+"BERKELEYLIGHTS,INC_06_26_2020-EX-10.12-COLLABORATION AGREEMENT",Expiration Date,relative_expiration,"{""month"": ""09"", ""day"": ""13"", ""year"": ""2026""}"
+"BERKELEYLIGHTS,INC_06_26_2020-EX-10.12-COLLABORATION AGREEMENT",Renewal Term,override,None -> [] years
+SPHERE3DCORP_06_24_2020-EX-10.12-CONSULTING AGREEMENT,Expiration Date,override,6/1/21 -> 5/31/21
+ENTERPRISEPRODUCTSPARTNERSLP_07_08_1998-EX-10.3-TRANSPORTATION CONTRACT,Expiration Date,relative_expiration,"{""month"": ""06"", ""day"": ""01"", ""year"": ""1999""}"
+HerImports_20161018_8-KA_EX-10.14_9765707_EX-10.14_Maintenance Agreement,Expiration Date,relative_expiration,"{""month"": ""10"", ""day"": ""13"", ""year"": ""2021""}"
+DYNTEKINC_07_30_1999-EX-10-ONLINE HOSTING AGREEMENT,Expiration Date,relative_expiration,"{""month"": ""06"", ""day"": ""01"", ""year"": ""2000""}"
+StampscomInc_20001114_10-Q_EX-10.47_2631630_EX-10.47_Co-Branding Agreement,Expiration Date,relative_expiration,"{""month"": ""04"", ""day"": ""27"", ""year"": ""2004""}"
+WebmdHealthCorp_20050908_S-1A_EX-10.7_1027007_EX-10.7_Content License Agreement,Renewal Term,answer_without_span,1 year
+SANDRIDGEENERGYINC_08_06_2009-EX-10.6-OPERATIONS AND MAINTENANCE AGREEMENT,Expiration Date,relative_expiration,"{""month"": ""06"", ""day"": ""30"", ""year"": ""2029""}"
+HfEnterprisesInc_20191223_S-1_EX-10.22_11931299_EX-10.22_Development Agreement,Expiration Date,relative_expiration,"{""month"": ""03"", ""day"": ""01"", ""year"": ""2019""}"
+ICORECONNECTINC_10_13_2010-EX-7.1-Strategic Alliance Agreement,Expiration Date,relative_expiration,"{""month"": ""07"", ""day"": ""15"", ""year"": ""2015""}"
+ArtaraTherapeuticsInc_20200110_8-K_EX-10.5_11943350_EX-10.5_License Agreement,Parties,party_not_in_spans,"Artara Therapeutics, Inc."
+NlsPharmaceuticsLtd_20200228_F-1_EX-10.14_12029046_EX-10.14_Development Agreement,Parties,typo_fixed,Eurofarma Laboratorios S.A. -> Eurofarma Laboratórios S.A.
+"VIRTUALSCOPICS,INC_11_12_2010-EX-10.1-STRATEGIC ALLIANCE AGREEMENT",Expiration Date,relative_expiration,"{""month"": ""10"", ""day"": ""22"", ""year"": ""2012""}"
+BLUEFLYINC_03_27_2002-EX-10.27-e-business Hosting Agreement,Renewal Term,override,None -> unspecified
+BLUEFLYINC_03_27_2002-EX-10.27-e-business Hosting Agreement,Notice Period to Terminate Renewal,override,None -> 90 days
+ASIANDRAGONGROUPINC_08_11_2005-EX-10.5-Reseller Agreement,Expiration Date,relative_expiration,"{""month"": ""06"", ""day"": ""01"", ""year"": ""2006""}"
+MANUFACTURERSSERVICESLTD_06_05_2000-EX-10.14-OUTSOURCING AGREEMENT,Expiration Date,relative_expiration,"{""month"": ""06"", ""day"": ""01"", ""year"": ""2001""}"
+MANUFACTURERSSERVICESLTD_06_05_2000-EX-10.14-OUTSOURCING AGREEMENT,Renewal Term,multiple_values,"[{""renewals"": ""unlimited"", ""length"": 12, ""unit"": ""months""}, {""renewals"": ""unlimited"", ""length"": 6, ""unit"": ""months""}]"
+MANUFACTURERSSERVICESLTD_06_05_2000-EX-10.14-OUTSOURCING AGREEMENT,Notice Period to Terminate Renewal,multiple_values,"[{""length"": 6, ""unit"": ""months""}, {""length"": 12, ""unit"": ""months""}]"
+MANUFACTURERSSERVICESLTD_06_05_2000-EX-10.14-OUTSOURCING AGREEMENT,Notice Period to Terminate Renewal,different_values,"[{""length"": 6, ""unit"": ""months""}, {""length"": 12, ""unit"": ""months""}]"
+LiquidmetalTechnologiesInc_20200205_8-K_EX-10.1_11968198_EX-10.1_Development Agreement,Expiration Date,relative_expiration,"{""month"": ""??"", ""day"": ""??"", ""year"": ""2025""}"
+ZtoExpressCaymanInc_20160930_F-1_EX-10.10_9752871_EX-10.10_Transportation Agreement,Governing Law,answer_without_span,People's Republic of China
+LOOKSMARTLTD_07_20_2012-EX-99.(D)(I)-SPONSORSHIP AGREEMENT,Parties,typo_fixed,Sponser -> Sponsor
+LOOKSMARTLTD_07_20_2012-EX-99.(D)(I)-SPONSORSHIP AGREEMENT,Parties,typo_fixed,Sponser -> Sponsor
+LOOKSMARTLTD_07_20_2012-EX-99.(D)(I)-SPONSORSHIP AGREEMENT,Expiration Date,relative_expiration,"{""month"": ""08"", ""day"": ""15"", ""year"": ""2012""}"
+2ThemartComInc_19990826_10-12G_EX-10.10_6700288_EX-10.10_Co-Branding Agreement_ Agency Agreement,Expiration Date,relative_expiration,"{""month"": ""06"", ""day"": ""21"", ""year"": ""2000""}"
+MOELIS_CO_03_24_2014-EX-10.19-STRATEGIC ALLIANCE AGREEMENT,Expiration Date,relative_expiration,"{""month"": ""01"", ""day"": ""01"", ""year"": ""2015""}"
+MOELIS_CO_03_24_2014-EX-10.19-STRATEGIC ALLIANCE AGREEMENT,Renewal Term,override,1 year -> successive 1 year
+ArmstrongFlooringInc_20190107_8-K_EX-10.2_11471795_EX-10.2_Intellectual Property Agreement,Parties,party_not_in_spans,"AHF Holding, Inc. (formerly known as Tarzan HoldCo, Inc.)"
+PFSFUNDS_06_26_2020-EX-99.H OTH MAT CONT-SERVICES AGREEMENT,Expiration Date,relative_expiration,"{""month"": ""06"", ""day"": ""24"", ""year"": ""2022""}"
+WaterNowInc_20191120_10-Q_EX-10.12_11900227_EX-10.12_Distributor Agreement,Expiration Date,relative_expiration,"{""month"": ""11"", ""day"": ""12"", ""year"": ""2024""}"
+MTITECHNOLOGYCORP_11_16_2004-EX-10.102-Reseller Agreement Premier Addendum,Expiration Date,relative_expiration,"{""month"": ""09"", ""day"": ""29"", ""year"": ""2005""}"
+SCOUTCAMINC_05_12_2020-EX-10.22-SERVICES AGREEMENT,Expiration Date,relative_expiration,"{""month"": ""04"", ""day"": ""01"", ""year"": ""2020""}"
+IMPCOTECHNOLOGIESINC_04_15_2003-EX-10.65-JOINT VENTURE AGREEMENT,Parties,party_not_in_spans,IMPCO Technologies Inc. including its successors and permitted assigns
+IMPCOTECHNOLOGIESINC_04_15_2003-EX-10.65-JOINT VENTURE AGREEMENT,Parties,party_not_in_spans,"MINDA INDUSTRIES LIMITED including its successors and permitted assigns , Nirmal K. MINDA including his heirs, executors, administrators or successors and permitted assigns"
+EbixInc_20010515_10-Q_EX-10.3_4049767_EX-10.3_Co-Branding Agreement,Governing Law,multiple_values,"[""Illinois"", ""New York""]"
+LegacyEducationAllianceInc_20141110_8-K_EX-10.9_8828866_EX-10.9_Endorsement Agreement,Governing Law,multiple_values,"[""England"", ""Wales""]"
+"GOOSEHEADINSURANCE,INC_04_02_2018-EX-10.6-Franchise Agreement",Notice Period to Terminate Renewal,override,None -> 180 days
+IMAGEWARESYSTEMSINC_12_20_1999-EX-10.22-MAINTENANCE AGREEMENT,Expiration Date,relative_expiration,"{""month"": ""12"", ""day"": ""10"", ""year"": ""1994""}"
+NakedBrandGroupInc_20150731_POS AM (on S-1)_EX-10.75_9196027_EX-10.75_Endorsement Agreement,Parties,typo_fixed,f/s/o Dwayne Wade  and together with Wade Enterprises -> f/s/o Dwyane Wade and together with Wade Enterprises
+NakedBrandGroupInc_20150731_POS AM (on S-1)_EX-10.75_9196027_EX-10.75_Endorsement Agreement,Parties,party_not_in_spans,f/s/o Dwyane Wade and together with Wade Enterprises
+NakedBrandGroupInc_20150731_POS AM (on S-1)_EX-10.75_9196027_EX-10.75_Endorsement Agreement,Expiration Date,relative_expiration,"{""month"": ""06"", ""day"": ""15"", ""year"": ""2019""}"
+IdeanomicsInc_20151124_8-K_EX-10.2_9354744_EX-10.2_Content License Agreement,Expiration Date,relative_expiration,"{""month"": ""??"", ""day"": ""??"", ""year"": ""2035""}"
+ParatekPharmaceuticalsInc_20170505_10-KA_EX-10.29_10323872_EX-10.29_Outsourcing Agreement,Renewal Term,override,None -> []
+ParatekPharmaceuticalsInc_20170505_10-KA_EX-10.29_10323872_EX-10.29_Outsourcing Agreement,Notice Period to Terminate Renewal,override,None -> []
+ParatekPharmaceuticalsInc_20170505_10-KA_EX-10.29_10323872_EX-10.29_Outsourcing Agreement,Governing Law,span_without_answer,
+JOINTCORP_09_19_2014-EX-10.15-FRANCHISE AGREEMENT,Agreement Date,span_without_answer,
+JOINTCORP_09_19_2014-EX-10.15-FRANCHISE AGREEMENT,Effective Date,override,None -> []/[]/20[]
+VnueInc_20150914_8-K_EX-10.1_9259571_EX-10.1_Promotion Agreement,Expiration Date,relative_expiration,"{""month"": ""09"", ""day"": ""10"", ""year"": ""2016""}"
+NEXSTARFINANCEHOLDINGSINC_03_27_2002-EX-10.26-OUTSOURCING AGREEMENT,Parties,party_not_in_spans,"WYZZ, Inc. and WYZZ Licensee, Inc."
+NEXSTARFINANCEHOLDINGSINC_03_27_2002-EX-10.26-OUTSOURCING AGREEMENT,Parties,number_parties_unclear,"names more than one party: WYZZ, Inc. and WYZZ Licensee, Inc."
+NEXSTARFINANCEHOLDINGSINC_03_27_2002-EX-10.26-OUTSOURCING AGREEMENT,Expiration Date,relative_expiration,"{""month"": ""11"", ""day"": ""28"", ""year"": ""2008""}"
+SUNTRONCORP_05_17_2006-EX-10.22-MAINTENANCE AGREEMENT,Parties,typo_fixed,"K*TEC OPERATING CORP., SUNCTRON GCO L.P. -> K*TEC OPERATING CORP., SUNTRON GCO L.P."
+SUNTRONCORP_05_17_2006-EX-10.22-MAINTENANCE AGREEMENT,Parties,party_not_in_spans,"K*TEC OPERATING CORP., SUNTRON GCO L.P."
+SUNTRONCORP_05_17_2006-EX-10.22-MAINTENANCE AGREEMENT,Parties,number_parties_unclear,"names more than one party: K*TEC OPERATING CORP., SUNTRON GCO L.P."
+"SPIENERGYCO,LTD_03_09_2011-EX-99.5-OPERATIONS AND MAINTENANCE AGREEMENT",Expiration Date,relative_expiration,"{""month"": ""12"", ""day"": ""11"", ""year"": ""2019""}"
+SteelVaultCorp_20081224_10-K_EX-10.16_3074935_EX-10.16_Affiliate Agreement,Expiration Date,relative_expiration,"{""month"": ""10"", ""day"": ""01"", ""year"": ""2009""}"
+PhotronicsInc_20171219_10-QA_EX-10.28_10982650_EX-10.28_Outsourcing Agreement,Parties,typo_fixed,Phototronics and DNP -> Photronics and DNP
+PhotronicsInc_20171219_10-QA_EX-10.28_10982650_EX-10.28_Outsourcing Agreement,Parties,party_not_in_spans,Shareholder and PDMC
+PhotronicsInc_20171219_10-QA_EX-10.28_10982650_EX-10.28_Outsourcing Agreement,Parties,number_parties_unclear,collective for parties listed separately: Photronics and DNP
+TubeMediaCorp_20060310_8-K_EX-10.1_513921_EX-10.1_Affiliate Agreement,Renewal Term,multiple_values,"[{""renewals"": 1, ""length"": 4, ""unit"": ""years""}, {""renewals"": 1, ""length"": 6, ""unit"": ""months""}]"
+"MARSHALLHOLDINGSINTERNATIONAL,INC_04_14_2004-EX-10.15-ENDORSEMENT AGREEMENT",Expiration Date,relative_expiration,"{""month"": ""11"", ""day"": ""01"", ""year"": ""2004""}"
+PcquoteComInc_19990721_S-1A_EX-10.11_6377149_EX-10.11_Co-Branding Agreement1,Parties,party_not_in_spans,"AB Wately, Inc. and all of its subsidiaries and related companies"
+ALCOSTORESINC_12_14_2005-EX-10.26-AGENCY AGREEMENT,Parties,party_not_in_spans,"General Electric Capital Corporation together with its successors and assigns, if any"
+ALCOSTORESINC_12_14_2005-EX-10.26-AGENCY AGREEMENT,Expiration Date,answer_without_span,perpetual
+NETZEEINC_11_14_2002-EX-10.3-MAINTENANCE AGREEMENT,Expiration Date,relative_expiration,"{""month"": ""03"", ""day"": ""01"", ""year"": ""2002""}"
+MidwestEnergyEmissionsCorp_20080604_8-K_EX-10.2_3093976_EX-10.2_Content License Agreement,Parties,party_not_in_spans,New China Media LLC (a/k/a New China Media LLC)
+MidwestEnergyEmissionsCorp_20080604_8-K_EX-10.2_3093976_EX-10.2_Content License Agreement,Expiration Date,relative_expiration,"{""month"": ""06"", ""day"": ""02"", ""year"": ""2010""}"
+"NOVOINTEGRATEDSCIENCES,INC_12_23_2019-EX-10.1-JOINT VENTURE AGREEMENT",Expiration Date,relative_expiration,"{""month"": ""12"", ""day"": ""19"", ""year"": ""2024""}"
+"NOVOINTEGRATEDSCIENCES,INC_12_23_2019-EX-10.1-JOINT VENTURE AGREEMENT",Renewal Term,override,None -> 5 years
+HYDRONTECHNOLOGIESINC_03_31_1997-EX-10.47-SPONSORSHIP AGREEMENT,Expiration Date,relative_expiration,"{""month"": ""01"", ""day"": ""01"", ""year"": ""2001""}"
+XinhuaSportsEntertainmentLtd_20070221_F-1_EX-99.4_645553_EX-99.4_Content License Agreement,Expiration Date,relative_expiration,"{""month"": ""05"", ""day"": ""18"", ""year"": ""2020""}"
+KINGPHARMACEUTICALSINC_08_09_2006-EX-10.1-PROMOTION AGREEMENT,Renewal Term,override,None -> successive 1 year

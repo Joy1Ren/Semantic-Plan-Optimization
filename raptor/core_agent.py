@@ -16,23 +16,23 @@ from typing import Any
 
 import palimpzest.query.operators.join as pz_join
 
-from agent_cost_model.opt_agent import run_log
-from agent_cost_model.subsets import load_subset
-from agent_cost_model.opt_agent.errors import ParseError, StepFailed
-from agent_cost_model.opt_agent.llm_client import (
+from raptor import run_log
+from raptor.subsets import load_subset
+from raptor.errors import ParseError, StepFailed
+from raptor.llm_client import (
     LLMClient,
     RoutedClient,
     patch_litellm_routing,
     set_prompt_fill,
 )
-from agent_cost_model.opt_agent.cost_model_types import (
+from raptor.results_store import (
     ResultsStore,
     get_op_type,
     iter_operators,
     run_key,
 )
-from agent_cost_model.opt_agent.step_parsing import _Step, _first_block_only, _parse_step
-from agent_cost_model.opt_agent.prompts import (
+from raptor.step_parsing import _Step, _first_block_only, _parse_step
+from raptor.prompts import (
     _AVAILABLE_MODELS_TEXT,
     _MODEL_CATALOG_FILE,
     _COST_AWARENESS,
@@ -43,8 +43,8 @@ from agent_cost_model.opt_agent.prompts import (
     _per_op_info_text,
     _quality_metric_section,
 )
-from agent_cost_model.opt_agent.exploration_checker_agent import ExplorationCheckerAgent
-from agent_cost_model.opt_agent.tools import (
+from raptor.exploration_checker_agent import ExplorationCheckerAgent
+from raptor.tools import (
     ExecutePlanTool,
     ExploreImagesTool,
     ExploreSampleTool,
@@ -58,7 +58,7 @@ from agent_cost_model.opt_agent.tools import (
 
 @dataclass
 class _RunContext:
-    """Everything `CostModelAgent._setup_run` wires up for the main loop to consume."""
+    """Everything `RAPTOR._setup_run` wires up for the main loop to consume."""
     executor: Any
     system: str
     checker: "ExplorationCheckerAgent | None"
@@ -67,7 +67,7 @@ class _RunContext:
     plan_results_agg: ResultsStore
 
 
-class CostModelAgent:
+class RAPTOR:
     """A bounded tool-loop agent that authors, applies, and refines semantic plans."""
     briefing = textwrap.dedent("""\
         You are a query plan engineer optimizing physical plans for an optimized query system.
@@ -497,7 +497,7 @@ class CostModelAgent:
         """
         patch_litellm_routing()
 
-        from agent_cost_model.opt_agent.local_python_executor import LocalPythonExecutor
+        from raptor.local_python_executor import LocalPythonExecutor
 
         plan_codes: dict = {}  # populated by WritePlanTool; shared with ExecutePlanTool
         data_dir = query_info["data_dir"]
@@ -532,7 +532,7 @@ class CostModelAgent:
             set_prompt_fill(quality_evaluator.prompt_fill_values(query_info["subset_path"]))
 
         import pandas as pd
-        from agent_cost_model.opt_agent.physical_pipeline import PhysicalPipeline, keys_by_items, number_items, row_id_str
+        from raptor.physical_pipeline import PhysicalPipeline, keys_by_items, number_items, row_id_str
         try:
             import palimpzest as pz
         except ImportError as exc:
@@ -678,7 +678,7 @@ class CostModelAgent:
             if not checker_model:
                 raise ValueError(
                     "use_checker=True requires a checker LLM model id: pass checker_model=... to "
-                    "CostModelAgent, or use an RoutedClient main llm exposing `.model`."
+                    "RAPTOR, or use an RoutedClient main llm exposing `.model`."
                 )
             checker = ExplorationCheckerAgent(
                 RoutedClient(checker_model, reasoning_effort=self.checker_reasoning_effort),
@@ -1213,7 +1213,7 @@ class CostModelAgent:
 
         The describer's system prompt is `sampling.prompts.image_describe_system` — the same one the
         data sampler describes images with, so an image reads the same way to both."""
-        from agent_cost_model.sampling.prompts import image_describe_system
+        from raptor.sampling.prompts import image_describe_system
 
         content: list[dict] = [{
             "type": "text",

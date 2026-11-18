@@ -10,7 +10,7 @@ import pandas as pd
 
 from palimpzest.core.elements.records import DataRecord, DataRecordCollection
 
-from agent_cost_model.subsets import load_subset
+from raptor.subsets import load_subset
 
 from .operators import RagFilter, RagMap
 
@@ -432,7 +432,7 @@ class PipelineExecution:
         rates. Token counts measured on the subset are scaled up, assuming every full-dataset
         record reaches the operator: a sem_agg's call by the number of source rows behind it, a
         sem_map's or sem_filter's per-record calls by each full-dataset record's length."""
-        from agent_cost_model.opt_agent.pricing import long_prompt_tier
+        from raptor.pricing import long_prompt_tier
 
         stats_by_op: dict[str, list] = {}
         for r in all_record_op_stats:

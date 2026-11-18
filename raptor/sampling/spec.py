@@ -17,8 +17,8 @@ from typing import Any
 
 import pandas as pd
 
-from agent_cost_model.sampling.constants import DEFAULT_ALPHA, IMAGE_FIELD, MAX_KEYPHRASES
-from agent_cost_model.sampling.text import all_text_columns, normalize_phrase, resolve_columns
+from raptor.sampling.constants import DEFAULT_ALPHA, IMAGE_FIELD, MAX_KEYPHRASES
+from raptor.sampling.text import all_text_columns, normalize_phrase, resolve_columns
 
 __all__ = ["ScorerColumns", "SamplingSpec", "Stratum", "validate_spec", "validate_plan"]
 

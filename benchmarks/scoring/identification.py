@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Callable
 
-from agent_cost_model.experiments.scoring.spans import SPAN_THRESHOLD, span_jaccard
+from benchmarks.scoring.spans import SPAN_THRESHOLD, span_jaccard
 
 
 def score_returned_set(returned: dict[str, str], wanted: set[str], judgeable: set[str],

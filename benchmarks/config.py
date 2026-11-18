@@ -9,9 +9,9 @@ from typing import Any
 
 import yaml
 
-from agent_cost_model.paths import EXPERIMENTS_DIR, RESULTS_DIR
+from benchmarks.paths import BENCHMARKS_DIR, RESULTS_DIR
 
-# Directory name under experiments/ for each benchmark, keyed by its `name:` in benchmark.yaml.
+# Directory name under benchmarks/ for each benchmark, keyed by its `name:` in benchmark.yaml.
 _BENCHMARK_DIRS = {
     "SemBench": "SemBench",
     "CUAD": "cuad",
@@ -23,7 +23,7 @@ _BENCHMARK_DIRS = {
 def benchmark_yaml_path(benchmark: str) -> Path:
     """Accepts either the benchmark's `name:` (SemBench, CUAD) or its directory name."""
     directory = _BENCHMARK_DIRS.get(benchmark, benchmark)
-    return EXPERIMENTS_DIR / directory / "benchmark.yaml"
+    return BENCHMARKS_DIR / directory / "benchmark.yaml"
 
 
 def load_benchmark(benchmark: str | Path) -> dict[str, Any]:

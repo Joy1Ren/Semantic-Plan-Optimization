@@ -12,7 +12,7 @@ from typing import Any, Iterable, Sequence
 
 import pandas as pd
 
-from agent_cost_model.sampling.constants import IMAGE_FIELD
+from raptor.sampling.constants import IMAGE_FIELD
 
 __all__ = [
     "bm25_tokenize",
@@ -27,7 +27,7 @@ __all__ = [
     "truncate_middle",
 ]
 
-# Duplicated from `physical_pipeline/operators/rag_common.py::_rag_bm25_tokenize` rather than
+# Duplicated from `physical_pipeline/operators/rag.py::_rag_bm25_tokenize` rather than
 # imported: that module does `from palimpzest.constants import Model` at module scope, and this
 # package must stay importable -- and its CLI and the analysis scripts runnable -- without
 # paying for a full palimpzest import. Keep the two byte-identical: both mirror docetl's

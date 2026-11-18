@@ -27,7 +27,7 @@ def _patch_convert_empty_field_answers() -> None:
     from palimpzest.core.elements.records import DataRecord
     from palimpzest.query.operators.convert import ConvertOp
 
-    if getattr(ConvertOp, "_agent_cost_model_empty_field_answers_patched", False):
+    if getattr(ConvertOp, "_raptor_empty_field_answers_patched", False):
         return
     _orig = ConvertOp._create_data_records_from_field_answers
 
@@ -51,7 +51,7 @@ def _patch_convert_empty_field_answers() -> None:
         return _orig(self, field_answers, candidate)
 
     ConvertOp._create_data_records_from_field_answers = _guarded
-    ConvertOp._agent_cost_model_empty_field_answers_patched = True
+    ConvertOp._raptor_empty_field_answers_patched = True
 
 
 def _flatten_dict_answer(answer: dict) -> str:
@@ -126,7 +126,7 @@ def _patch_convert_coerce_str_field_answers() -> None:
     `str` field, or a single value for a list field, does not fail validation."""
     from palimpzest.query.operators.convert import ConvertOp
 
-    if getattr(ConvertOp, "_agent_cost_model_coerce_str_field_answers_patched", False):
+    if getattr(ConvertOp, "_raptor_coerce_str_field_answers_patched", False):
         return
     _orig = ConvertOp._create_data_records_from_field_answers
 
@@ -142,7 +142,7 @@ def _patch_convert_coerce_str_field_answers() -> None:
         return _orig(self, field_answers, candidate)
 
     ConvertOp._create_data_records_from_field_answers = _coerced
-    ConvertOp._agent_cost_model_coerce_str_field_answers_patched = True
+    ConvertOp._raptor_coerce_str_field_answers_patched = True
 
 
 def _type_label(annotation) -> str | None:
@@ -163,7 +163,7 @@ def _patch_output_field_types() -> None:
     prompts ('- item_ids (type: list[int]): ...')."""
     from palimpzest.prompts.prompt_factory import PromptFactory
 
-    if getattr(PromptFactory, "_agent_cost_model_field_types_patched", False):
+    if getattr(PromptFactory, "_raptor_field_types_patched", False):
         return
     _orig = PromptFactory._get_output_fields_desc
 
@@ -180,7 +180,7 @@ def _patch_output_field_types() -> None:
         return "\n".join(lines)
 
     PromptFactory._get_output_fields_desc = _desc
-    PromptFactory._agent_cost_model_field_types_patched = True
+    PromptFactory._raptor_field_types_patched = True
 
 
 _JSON_DECODER = json.JSONDecoder()
@@ -236,7 +236,7 @@ def _patch_get_json_from_answer() -> None:
     from palimpzest.constants import Cardinality
     from palimpzest.query.generators import generators
 
-    if getattr(generators, "_agent_cost_model_get_json_patched", False):
+    if getattr(generators, "_raptor_get_json_patched", False):
         return
     _orig = generators.get_json_from_answer
 
@@ -262,7 +262,7 @@ def _patch_get_json_from_answer() -> None:
             return value
 
     generators.get_json_from_answer = _parse
-    generators._agent_cost_model_get_json_patched = True
+    generators._raptor_get_json_patched = True
 
 
 def _patch_prepare_field_answers_missing_keys() -> None:
@@ -270,7 +270,7 @@ def _patch_prepare_field_answers_missing_keys() -> None:
     from palimpzest.constants import Cardinality
     from palimpzest.query.generators.generators import Generator
 
-    if getattr(Generator, "_agent_cost_model_missing_keys_patched", False):
+    if getattr(Generator, "_raptor_missing_keys_patched", False):
         return
     _orig = Generator._prepare_field_answers
 
@@ -280,7 +280,7 @@ def _patch_prepare_field_answers_missing_keys() -> None:
         return _orig(self, field_answers, fields)
 
     Generator._prepare_field_answers = _prepare
-    Generator._agent_cost_model_missing_keys_patched = True
+    Generator._raptor_missing_keys_patched = True
 
 
 _ANSWER_SECTION = re.compile(r"answer:(.*?)(?:---|$)", re.IGNORECASE | re.DOTALL)
@@ -294,7 +294,7 @@ def _patch_bare_text_answer() -> None:
     from palimpzest.constants import Cardinality
     from palimpzest.query.generators.generators import Generator
 
-    if getattr(Generator, "_agent_cost_model_bare_text_patched", False):
+    if getattr(Generator, "_raptor_bare_text_patched", False):
         return
     _orig = Generator._parse_convert_answer
 
@@ -312,4 +312,4 @@ def _patch_bare_text_answer() -> None:
             return {next(iter(fields)): [text]}
 
     Generator._parse_convert_answer = _parse
-    Generator._agent_cost_model_bare_text_patched = True
+    Generator._raptor_bare_text_patched = True

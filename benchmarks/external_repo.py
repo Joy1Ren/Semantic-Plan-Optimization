@@ -16,7 +16,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from agent_cost_model.paths import PACKAGE_ROOT
+from benchmarks.paths import REPO_ROOT
 
 
 def resolve_repo(config: dict[str, Any] | None) -> Path | None:
@@ -31,7 +31,7 @@ def resolve_repo(config: dict[str, Any] | None) -> Path | None:
     path = Path(raw).expanduser()
     if not path.is_absolute():
         # Relative to this repository's root, so `../SemBench` means a sibling checkout.
-        path = PACKAGE_ROOT / path
+        path = REPO_ROOT / path
     return path.resolve()
 
 

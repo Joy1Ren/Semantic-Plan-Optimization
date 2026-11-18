@@ -21,8 +21,8 @@ from palimpzest.query.operators.filter import LLMFilter
 from palimpzest.query.operators.rag import RAGConvert as _PZRAGConvert
 from palimpzest.query.operators.rag import RAGFilter as _PZRAGFilter
 
-from agent_cost_model.opt_agent import routing
-from agent_cost_model.opt_agent.pricing import token_cost
+from raptor import routing
+from raptor.pricing import token_cost
 
 from .base import Operator, _cols_attribute, _compute_op_id, _no_reasoning_prompt, _resolve_reasoning_effort
 

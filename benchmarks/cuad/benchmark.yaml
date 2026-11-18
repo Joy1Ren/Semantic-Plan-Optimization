@@ -1,5 +1,5 @@
 name: CUAD
-quality_adapter: agent_cost_model.experiments.cuad.quality_evaluator
+quality_adapter: benchmarks.cuad.quality_evaluator
 
 results_prefix: "{results_dir}/CUAD/q{query_id}/{runner}"
 sampling_dir: "{results_dir}/CUAD/_sampling"

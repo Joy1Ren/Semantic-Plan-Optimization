@@ -1,4 +1,4 @@
-"""Static briefing text shared by `CostModelAgent` and `ExplorationCheckerAgent`: the physical-operator
+"""Static briefing text shared by `RAPTOR` and `ExplorationCheckerAgent`: the physical-operator
 catalog, the available-models catalog, and the plan-quality-metric documentation."""
 
 from __future__ import annotations
@@ -7,7 +7,7 @@ import os
 import pathlib
 import re
 
-from agent_cost_model.opt_agent.physical_pipeline.operators.rag import DEFAULT_RAG_EMBEDDING_MODEL
+from raptor.physical_pipeline.operators.rag import DEFAULT_RAG_EMBEDDING_MODEL
 
 _PHYSICAL_SEMANTIC_OPERATORS = {
     "sem_filter": "pipeline.sem_filter(condition: str, model: pz.Model) — LLM filter; LLM is asked to answer TRUE or FALSE for the 'condition' and only rows with response TRUE are kept.",
@@ -62,7 +62,7 @@ _PHYSICAL_NONSEMANTIC_OPERATORS = {
     "groupby": "pipeline.groupby(group_by_fields: list[str], agg_funcs: list[str], agg_fields: list[str]) — Group and aggregate. Produces schema name 'agg_func(agg_field)', e.g. 'count(emailId)' or 'average(num_recipients)'. agg_funcs: count, average, sum, min, max, list, set.",
 }
 # The model catalog offered to every agent (plan writer, exploration checker).
-_MODEL_CATALOG_FILE = os.environ.get("AGENT_MODEL_CATALOG", "available_models_openai.txt")
+_MODEL_CATALOG_FILE = os.environ.get("AGENT_MODEL_CATALOG", "available_models.txt")
 _AVAILABLE_MODELS_TEXT = (pathlib.Path(__file__).parent / _MODEL_CATALOG_FILE).read_text()
 
 # A compact restatement of the two catalogs above: operator names and the knobs each one exposes
@@ -106,7 +106,7 @@ Free operators (ordinary code, no LLM cost): filter, map (e.g., new schemas, tru
 """
 
 # Natural language explanation of the overall plan-quality metric, keyed by the query's metric name
-# in its benchmark.yaml `query_metrics` (see experiments/config.load_query). Rendered into the briefing
+# in its benchmark.yaml `query_metrics` (see benchmarks/config.load_query). Rendered into the briefing
 # so the agent knows exactly how the 0–1 `quality` score it optimizes is computed.
 _QUALITY_METRIC_DOCS = {
     "f1-score": (

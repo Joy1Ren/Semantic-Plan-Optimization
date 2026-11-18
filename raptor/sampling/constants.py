@@ -1,33 +1,19 @@
 """Tunables and defaults for the data sampler.
 
 Following the codebase convention, policy constants live as module-level names rather than in
-a shared config file (see `experiments/run_opt.py`'s MODEL/MAX_STEPS block).
+a shared config file (see `benchmarks/run_opt.py`'s MODEL/MAX_STEPS block).
 """
 from __future__ import annotations
 
-# Imported unguarded, deliberately. `opt_agent/llm_sampler.py` wrapped the equivalent import in
-# a `try/except ImportError` naming a package that has never existed in this layout (a leftover
-# from when `agent/` became `agent_cost_model/opt_agent/`). The fallback therefore fired on
-# every run, silently pinning constants that are supposed to track the pipeline's. A hard
-# import turns the next such rename into an ImportError at import time instead of values that
-# are quietly wrong. `physical_pipeline.constants` is a leaf with no palimpzest dependency, so
-# this costs nothing at import.
-from agent_cost_model.opt_agent.physical_pipeline.constants import (
-    DEFAULT_RAG_EMBEDDING_MODEL,
-    SUBSET_SEED,
-    _RAG_EMBEDDING_BASE_URL,
-)
+# Base seed for the sampler's random draws (random mode, exploration images, band selection).
+SUBSET_SEED = 42
 
-# NUM_SAMPLES is deliberately NOT imported here. It caps per-operator sample collection during
-# optimization (`_execute_core`'s max_samples), which is a judging-cost knob, not a statement
-# about how many rows the evaluation subset should hold. Borrowing it as this module's default
-# tied two unrelated numbers together and hid the subset size behind a constant nobody sets on
-# purpose. The subset size has no default: every caller states it.
+# Embedding model the sampler scores rows with.
+DEFAULT_EMBEDDING_MODEL = "google/gemini-embedding-2"
 
 __all__ = [
-    "DEFAULT_RAG_EMBEDDING_MODEL",
+    "DEFAULT_EMBEDDING_MODEL",
     "SUBSET_SEED",
-    "_RAG_EMBEDDING_BASE_URL",
     "IMAGE_FIELD",
     "MODES",
     "TOP_ANCHOR",
@@ -118,7 +104,7 @@ PREVIEW_ROWS = 5
 PREVIEW_CELL_CHARS = 100
 
 # Cheap vision model the sampler describes images with, in the feedback report and in the
-# pre-spec exploration. CostModelAgent picks its own describer independently.
+# pre-spec exploration. RAPTOR picks its own describer independently.
 IMAGE_DESCRIBER_MODEL = "google/gemini-2.5-flash-lite"
 
 # Bumped when the sampling_results.json record shape changes incompatibly.

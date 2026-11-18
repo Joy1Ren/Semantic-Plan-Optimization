@@ -15,8 +15,8 @@ from typing import Any, Protocol
 
 from openai import RateLimitError
 
-from agent_cost_model.opt_agent import routing
-from agent_cost_model.opt_agent.pricing import token_cost
+from raptor import routing
+from raptor.pricing import token_cost
 
 RATE_LIMIT_RETRIES = 6
 
@@ -69,14 +69,14 @@ def patch_litellm_routing() -> None:
     Required before any PhysicalPipeline execution: palimpzest's own generators call
     litellm.completion directly with bare provider/model strings (e.g. "openai/gpt-4o-mini").
 
-    Idempotent: safe to call more than once (e.g. once per CostModelAgent.run(), or once from
-    a standalone script that never calls run() at all -- see experiments/run_baseline.py).
+    Idempotent: safe to call more than once (e.g. once per RAPTOR.run(), or once from
+    a standalone script that never calls run() at all -- see benchmarks/run_baseline.py).
     """
     import litellm as _litellm
 
     _litellm.suppress_debug_info = True
     _litellm.drop_params = True  # OpenRouter rejects reasoning_effort for Google models
-    if getattr(_litellm, "_agent_cost_model_routing_patched", False):
+    if getattr(_litellm, "_raptor_routing_patched", False):
         return
     _orig_completion = _litellm.completion
 
@@ -108,7 +108,7 @@ def patch_litellm_routing() -> None:
         return response
 
     _litellm.completion = _routed_completion
-    _litellm._agent_cost_model_routing_patched = True
+    _litellm._raptor_routing_patched = True
 
 
 # Wall-clock seconds one OpenRouter request may take before it is abandoned and retried. A deadline

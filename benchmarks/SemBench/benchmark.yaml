@@ -1,5 +1,5 @@
 name: SemBench
-quality_adapter: agent_cost_model.experiments.SemBench.quality_evaluator
+quality_adapter: benchmarks.SemBench.quality_evaluator
 
 # SemBench is used in place, never vendored. It ships no packaging metadata, and its modules
 # import each other as top-level packages (scenario, evaluator, runner) rooted at src/.

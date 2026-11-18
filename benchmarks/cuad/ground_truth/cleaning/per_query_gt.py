@@ -2,30 +2,15 @@
 
 Query 1 (all 41 categories) is scored against CUAD's master_clauses.csv as released, so Q1_gt.csv
 is that file's rows for the dataset's contracts, unchanged. Queries 2-8 read the clause-level
-ground truth (ground_truth/cuad_gt.csv, written by clean_cuad_gt.py), split so each query's ground
-truth can be read on its own:
-
-  extraction query   name, {category}, span -- one row per contract. {category} holds the answer;
-                     an empty answer ("[]") is an answer, meaning the contract has no such clause.
-                     A checker should take the one column that is neither "name" nor "span" as the
-                     answer, whatever it is called. "span" holds the text CUAD highlighted, but
-                     only where the answer alone cannot show the plan read the right clause -- an
-                     answer of "unspecified", "redacted" or "relative", which says the contract
-                     states no value. Elsewhere it reads "not needed", or "[]" where the contract
-                     has no such clause.
-  identification     name[, span]      -- one row per contract that satisfies the condition, i.e.
-                     the set a plan is scored against by F1. Contracts that do not qualify are
-                     absent rather than listed as false. A query that also asks why a contract
-                     qualifies (queries.py's `evidence`) adds "span": the text CUAD highlighted for
-                     that category, which the plan's reason must match.
+ground truth (ground_truth/cuad_gt.csv, written by clean_cuad_gt.py): name[, span], one row per
+contract that satisfies the query's condition, i.e. the set a plan is scored against by F1. A query
+that also asks why a contract qualifies (queries.py's `evidence`) adds "span": the text CUAD
+highlighted for that category, which the plan's reason must match.
 
 Contracts whose ground truth cannot settle a query (cuad_gt.csv's `unusable` column) are left out
-of that query's file entirely, since neither answering nor skipping them can be graded.
+of that query's file entirely.
 
-The answer written for an extraction query is the value the scorer compares against: the number
-of parties for a Parties query, and cuad_gt.csv's own JSON answer for the rest.
-
-    python -m agent_cost_model.experiments.cuad.ground_truth.cleaning.per_query_gt
+    python -m benchmarks.cuad.ground_truth.cleaning.per_query_gt
 """
 from __future__ import annotations
 
@@ -35,24 +20,18 @@ from pathlib import Path
 
 import pandas as pd
 
-from agent_cost_model.experiments.cuad.category_scoring import SPAN_BACKED
-from agent_cost_model.experiments.cuad.paths import (
+from benchmarks.cuad.paths import (
     DATASET_CSV,
     GROUND_TRUTH_CSV,
     GROUND_TRUTH_DIR as OUTPUT_DIR,
     IDX_TO_NAME_JSON,
     MASTER_CLAUSES_CSV,
 )
-from agent_cost_model.experiments.cuad.queries import QUERIES, Query, gradable
-from agent_cost_model.experiments.cuad.scoring import contract_key
+from benchmarks.cuad.queries import QUERIES, Query, gradable
+from benchmarks.cuad.scoring import contract_key
 
 NAME_COL = "name"
 SPAN_COL = "span"
-# Governing Law and Parties are judged on the answer alone (a place list, a count), so their rows
-# never carry a span to check.
-SPAN_CHECKED_CATEGORIES = {"Effective Date", "Expiration Date", "Renewal Term",
-                           "Notice Period to Terminate Renewal"}
-NOT_NEEDED = "not needed"
 
 
 def _contracts_in_dataset(path: Path) -> set[str]:
@@ -61,31 +40,8 @@ def _contracts_in_dataset(path: Path) -> set[str]:
     return {mapping[str(i)].removesuffix(".txt") for i in pd.read_csv(path, usecols=["idx"])["idx"]}
 
 
-def _answer(query: Query, row: pd.Series):
-    answer = json.loads(row[f"{query.category} Answer"])
-    if query.category == "Parties":          # the query asks for the count, not the names
-        return answer["number_parties"]
-    return json.dumps(answer, ensure_ascii=False)
-
-
-def _span(query: Query, row: pd.Series) -> str:
-    """The text a checker needs for this row, or why it needs none."""
-    answer = json.loads(row[f"{query.category} Answer"])
-    if not answer:                           # the contract has no such clause
-        return "[]"
-    if query.category not in SPAN_CHECKED_CATEGORIES:
-        return NOT_NEEDED
-    items = answer if isinstance(answer, list) else [answer]
-    if not any(isinstance(item, str) and item in SPAN_BACKED for item in items):
-        return NOT_NEEDED                    # the answer itself settles it
-    return row[query.category]               # cuad_gt.csv's own JSON list of spans
-
-
 def build(query: Query, ground_truth: pd.DataFrame) -> pd.DataFrame:
     rows = [row for _, row in ground_truth.iterrows() if gradable(query, row)]
-    if query.kind == "extract":
-        return pd.DataFrame([{NAME_COL: r[NAME_COL], query.category: _answer(query, r),
-                              SPAN_COL: _span(query, r)} for r in rows])
     return pd.DataFrame([{NAME_COL: r[NAME_COL], **({SPAN_COL: r[query.evidence]} if query.evidence else {})}
                          for r in rows if query.holds(r)])
 
@@ -132,10 +88,8 @@ def main() -> None:
         table = build(query, ground_truth)
         path = args.out / f"Q{query.id}_gt.csv"
         table.to_csv(path, index=False)
-        skipped = len(ground_truth) - (len(table) if query.kind == "extract"
-                                       else sum(1 for _, r in ground_truth.iterrows() if gradable(query, r)))
-        print(f"Q{query.id:<2} {query.name:<40} {len(table):3d} rows"
-              f"{'' if query.kind == 'extract' else ' (the contracts that qualify)'}"
+        skipped = len(ground_truth) - sum(1 for _, r in ground_truth.iterrows() if gradable(query, r))
+        print(f"Q{query.id:<2} {query.name:<40} {len(table):3d} rows (the contracts that qualify)"
               f"{f', {skipped} not gradable' if skipped else ''}"
               f" -> {path.name}")
 

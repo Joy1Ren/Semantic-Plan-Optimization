@@ -1,6 +1,6 @@
 """Parsing of one LLM reply into either a tool-call step or a final-answer step.
 
-Shared by `CostModelAgent` and `ExplorationCheckerAgent` — both agents run the same
+Shared by `RAPTOR` and `ExplorationCheckerAgent` — both agents run the same
 "emit exactly one fenced ```python``` or ```json``` block per turn" protocol.
 """
 
@@ -11,7 +11,7 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
-from agent_cost_model.opt_agent.errors import ParseError
+from raptor.errors import ParseError
 
 _FENCE_RE = re.compile(r"```([a-zA-Z0-9_]*)\n(.*?)```", re.DOTALL)
 

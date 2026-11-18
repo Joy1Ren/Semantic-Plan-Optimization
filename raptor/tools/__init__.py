@@ -1,4 +1,4 @@
-"""Tools exposed to `CostModelAgent`'s python sandbox."""
+"""Tools exposed to `RAPTOR`'s python sandbox."""
 
 from .base import Tool
 from .exploration_tools import (

@@ -1,5 +1,5 @@
 """The exploration checker: a single-call LLM reviewer that judges whether the main
-`CostModelAgent` has explored the optimization space far enough.
+`RAPTOR` has explored the optimization space far enough.
 
 The main agent self-reports, per plan, an `optimizations` record naming which optimizations
 that plan uses and how far each is pushed (see `WritePlanTool`). This reviewer reads those
@@ -26,17 +26,17 @@ import textwrap
 from dataclasses import dataclass
 from typing import Any
 
-from agent_cost_model.opt_agent.cost_model_types import ResultsStore, get_op_type, iter_operators
-from agent_cost_model.opt_agent import run_log
-from agent_cost_model.opt_agent.errors import ParseError
-from agent_cost_model.opt_agent.llm_client import LLMClient
-from agent_cost_model.opt_agent.prompts import (
+from raptor.results_store import ResultsStore, get_op_type, iter_operators
+from raptor import run_log
+from raptor.errors import ParseError
+from raptor.llm_client import LLMClient
+from raptor.prompts import (
     _AVAILABLE_MODELS_TEXT,
     _OPERATOR_CATALOG_BRIEF,
     _lower_variance_text,
     _quality_metric_section,
 )
-from agent_cost_model.opt_agent.step_parsing import _first_block_only, _parse_step
+from raptor.step_parsing import _first_block_only, _parse_step
 
 
 @dataclass

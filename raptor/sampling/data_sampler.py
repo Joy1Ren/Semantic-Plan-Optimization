@@ -13,9 +13,8 @@ Four modes share one scoring core (see `scoring.py` for the formula); a fifth by
                      straight out of `_random_ids`. The no-signal floor the others are
                      measured against.
 
-`sample()` never raises. Any failure -- transport, parse, scoring -- is logged and falls back
-to that same seeded uniform draw rather than garbage, and the subset CSV and results record are
-still written. The plan search downstream depends on that file existing.
+Any failure -- transport, parse, scoring -- raises, and no subset is written: a random subset
+saved under an LLM mode's label would be compared as if that mode had produced it.
 """
 from __future__ import annotations
 
@@ -27,17 +26,16 @@ from typing import Any, Sequence
 import numpy as np
 import pandas as pd
 
-from agent_cost_model.opt_agent.errors import ParseError
-from agent_cost_model.opt_agent.step_parsing import _parse_step
-from agent_cost_model.sampling import prompts
-from agent_cost_model.sampling.constants import (
-    _RAG_EMBEDDING_BASE_URL,
+from raptor.errors import ParseError
+from raptor.step_parsing import _parse_step
+from raptor.sampling import prompts
+from raptor.sampling.constants import (
     DEFAULT_ALPHA,
     DEFAULT_EMBED_WORKERS,
     FEEDBACK_CHAR_CEILING,
     FEEDBACK_ROW_CHARS,
     DEFAULT_MAX_ROUNDS,
-    DEFAULT_RAG_EMBEDDING_MODEL,
+    DEFAULT_EMBEDDING_MODEL,
     EXPLORE_AUTHORIZED_IMPORTS,
     EXPLORE_MAX_IMAGES,
     EXPLORE_OUTPUT_CHARS,
@@ -48,10 +46,10 @@ from agent_cost_model.sampling.constants import (
     RESULTS_SCHEMA_VERSION,
     SUBSET_SEED,
 )
-from agent_cost_model.sampling.embeddings import EmbeddingCache, EmbeddingClient
-from agent_cost_model.sampling.feedback import build_feedback, describe_images
-from agent_cost_model.sampling.filters import compile_filter, filter_mask
-from agent_cost_model.sampling.results import (
+from raptor.sampling.embeddings import EmbeddingCache, EmbeddingClient
+from raptor.sampling.feedback import build_feedback, describe_images
+from raptor.sampling.filters import compile_filter, filter_mask
+from raptor.sampling.results import (
     CostLedger,
     RoundRecord,
     SamplingResult,
@@ -64,7 +62,7 @@ from agent_cost_model.sampling.results import (
     write_scores_csv,
     write_subset,
 )
-from agent_cost_model.sampling.scoring import (
+from raptor.sampling.scoring import (
     ScoredPool,
     gradient_bands,
     select_band,
@@ -76,8 +74,8 @@ from agent_cost_model.sampling.scoring import (
     select_topk,
     summarize,
 )
-from agent_cost_model.sampling.spec import SamplingSpec, Stratum, validate_plan
-from agent_cost_model.sampling.text import (
+from raptor.sampling.spec import SamplingSpec, Stratum, validate_plan
+from raptor.sampling.text import (
     all_text_columns,
     column_fingerprint,
     norm_id,
@@ -110,7 +108,7 @@ class StratumScore:
 
 
 # One reprompt: the contract is a single fenced block, and a model that misses it once usually
-# gets it when told. Beyond that, fall back rather than keep paying for retries.
+# gets it when told. Beyond that, fail rather than keep paying for retries.
 _PARSE_ATTEMPTS = 2
 
 
@@ -129,7 +127,7 @@ class DataSampler:
         mode: str = "agentic",
         subset_id: int | None = None,
         llm_client: Any = None,
-        embedding_model: str = DEFAULT_RAG_EMBEDDING_MODEL,
+        embedding_model: str = DEFAULT_EMBEDDING_MODEL,
         id_col: str = "idx",
         image_dir: str | None = None,
         text_cols: list[str] | None = None,
@@ -145,7 +143,7 @@ class DataSampler:
         idx_specification: bool = False,
         embed_workers: int = DEFAULT_EMBED_WORKERS,
         seed: int = SUBSET_SEED,
-        base_url: str = _RAG_EMBEDDING_BASE_URL,
+        base_url: str | None = None,
         api_key: str | None = None,
         verbose: bool = True,
     ) -> None:
@@ -239,9 +237,9 @@ class DataSampler:
 
         self._image_describer = None
         if image_describer_model and self.has_images and mode != "random":
-            from agent_cost_model.opt_agent.llm_client import OpenRouterClient
+            from raptor.llm_client import RoutedClient
 
-            self._image_describer = OpenRouterClient(image_describer_model, api_key=api_key, reasoning_effort="low")
+            self._image_describer = RoutedClient(image_describer_model, api_key=api_key, reasoning_effort="low")
 
         self.cost = CostLedger()
         self._messages: list[dict] = []
@@ -438,7 +436,7 @@ class DataSampler:
         """Execute one exploration snippet. Returns (output, error); never raises."""
         t0 = time.time()
         try:
-            from agent_cost_model.opt_agent.local_python_executor import LocalPythonExecutor
+            from raptor.local_python_executor import LocalPythonExecutor
 
             executor = LocalPythonExecutor(
                 additional_authorized_imports=list(EXPLORE_AUTHORIZED_IMPORTS)
@@ -637,9 +635,7 @@ class DataSampler:
     def _random_ids(self, keep: Sequence[str] = ()) -> list[str]:
         """A uniform draw of `sample_size` rows, `keep` first.
 
-        `keep` is the preselection: rows the agent named outright. They survive the fallback
-        to a uniform draw, because "no scorer could rank these rows" says nothing about the
-        rows the agent picked by hand.
+        `keep` is the preselection: rows the agent named outright, which come first.
         """
         kept = [rid for rid in dict.fromkeys(keep)][: self.sample_size]
         rng = np.random.default_rng(self.seed)
@@ -699,25 +695,9 @@ class DataSampler:
         # and frame work, so their sum is a lower bound on how long this actually took.
         run_start = time.time()
         rounds: list[RoundRecord] = []
-        sampled: list[str] = []
-        accepted_round = 1
-        stop_reason = "accepted"
-
-        try:
-            sampled, rounds, accepted_round, stop_reason = self._run(rounds)
-        except Exception as e:
-            stop_reason = f"error:{type(e).__name__}"
-            # Printed regardless of `verbose`: the run still produces a subset, but a random
-            # one, and a comparison that silently comes from the wrong sampler is worse than
-            # a loud failure. `rounds` keeps whatever completed before the error.
-            print(
-                f"[sampling] WARNING: Q{self.query_id} [{self.mode}] failed "
-                f"({type(e).__name__}: {e}) — falling back to a uniform random subset."
-            )
-            sampled = self._random_ids()
-
+        sampled, rounds, accepted_round, stop_reason = self._run(rounds)
         if not sampled:
-            sampled = self._random_ids()
+            raise RuntimeError(f"Q{self.query_id} [{self.mode}] selected no rows")
 
         # random never constructs a cache (see __init__): nothing was embedded, so the cost/
         # latency fields stay at CostLedger's zero defaults, which is the accurate answer.

@@ -5,7 +5,7 @@ rather than swallowed, because the agentic loop shows it to the model so it can 
 expression on the next round.
 
 Trust model: the expression comes from the LLM and is evaluated with empty `__builtins__`.
-That is the same seam the rest of the codebase already accepts -- `CostModelAgent` executes
+That is the same seam the rest of the codebase already accepts -- `RAPTOR` executes
 LLM-written Python in `local_python_executor.LocalPythonExecutor` -- so this is not a new
 exposure, just a much narrower one (a single boolean expression over one row).
 """

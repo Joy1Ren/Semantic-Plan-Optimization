@@ -1,43 +1,44 @@
 Available LLM Models for Semantic Operators
 ============================================
 Costs are per 1M tokens. Latency is seconds per output token.
-Grouped by cost/speed tier (within each tier, sorted by input cost):
+A call whose prompt is longer than a model's long-prompt threshold is billed at the
+long-prompt rates listed under it, for the whole call.
+Grouped by model family (within each family, sorted by input cost):
+Within a family, the pricier model is the more capable one. Across families, prices follow each
+provider's pricing and are not a ranking of quality.
 
---- Weaker / Cheap ---
-pz.Model.GPT_5_NANO
-  input: $0.050/1M   output: $0.400/1M   latency: 0.0069 s/output-token
+--- GPT-6 family ---
+pz.Model.GPT_6_LUNA
+  input: $0.100/1M   output: $0.500/1M   latency: 0.0090 s/output-token
+  above 272k prompt tokens: input $0.200/1M   output $0.750/1M
 
-pz.Model.GOOGLE_GEMINI_2_5_FLASH_LITE
-  input: $0.100/1M   output: $0.400/1M   latency: 0.0044 s/output-token
+pz.Model.GPT_6_SOL
+  input: $2.000/1M   output: $10.000/1M  latency: 0.0125 s/output-token
+  above 272k prompt tokens: input $4.000/1M   output $15.000/1M
 
-pz.Model.GPT_4_1_NANO
-  input: $0.100/1M   output: $0.400/1M   latency: 0.0068 s/output-token
+--- GPT-5.6 family ---
+pz.Model.GPT_5_6_LUNA
+  input: $0.200/1M   output: $1.200/1M   latency: 0.0079 s/output-token
+  above 272k prompt tokens: input $0.400/1M   output $1.800/1M
 
---- Medium ---
-pz.Model.GPT_4o_MINI
-  input: $0.150/1M   output: $0.600/1M   latency: 0.0140 s/output-token
+pz.Model.GPT_5_6_TERRA
+  input: $2.000/1M   output: $12.000/1M  latency: 0.0088 s/output-token
+  above 272k prompt tokens: input $4.000/1M   output $18.000/1M
 
-pz.Model.GPT_5_MINI
-  input: $0.250/1M   output: $2.000/1M   latency: 0.0105 s/output-token
+--- Claude 5.5 family ---
+pz.Model.CLAUDE_HAIKU_5_5
+  input: $0.100/1M   output: $0.500/1M   latency: 0.0057 s/output-token
+  above 100k prompt tokens: input $0.500/1M   output $2.500/1M
 
-pz.Model.GOOGLE_GEMINI_2_5_FLASH
-  input: $0.300/1M   output: $2.500/1M   latency: 0.0048 s/output-token
+pz.Model.CLAUDE_SONNET_5_5
+  input: $2.000/1M   output: $10.000/1M  latency: 0.0096 s/output-token
 
-pz.Model.GPT_4_1_MINI
-  input: $0.400/1M   output: $1.600/1M   latency: 0.0128 s/output-token
+--- Gemini family ---
+pz.Model.GEMINI_3_5_FLASH_LITE
+  input: $0.300/1M   output: $2.500/1M   latency: 0.0023 s/output-token
 
---- Stronger / More Expensive ---
-pz.Model.o4_MINI
-  input: $1.100/1M   output: $4.400/1M   latency: 0.0060 s/output-token
+pz.Model.GEMINI_3_8_FLASH
+  input: $0.750/1M   output: $3.750/1M   latency: 0.0071 s/output-token
 
-pz.Model.GOOGLE_GEMINI_2_5_PRO
-  input: $1.250/1M   output: $10.000/1M  latency: 0.0074 s/output-token
-
-pz.Model.GPT_5
-  input: $1.250/1M   output: $10.000/1M  latency: 0.0144 s/output-token
-
-pz.Model.GPT_4_1
-  input: $2.000/1M   output: $8.000/1M   latency: 0.0072 s/output-token
-
-pz.Model.GPT_4o
-  input: $2.500/1M   output: $10.000/1M  latency: 0.0050 s/output-token
+pz.Model.GEMINI_4_ARGON
+  input: $2.000/1M   output: $10.000/1M  latency: 0.0127 s/output-token

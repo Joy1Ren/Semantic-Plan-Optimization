@@ -1,5 +1,5 @@
 name: Sustainability Reports
-quality_adapter: agent_cost_model.experiments.sustainability.quality_evaluator
+quality_adapter: benchmarks.sustainability.quality_evaluator
 
 # Eight questions over the SAME 140 company documents (docetl's sustainability train 40 + test
 # 100, copied into dataset/source/; dataset/sustainability_140.csv carries only idx and document).

@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "raptor"
+version = "0.1.0"
+description = "An LLM agent that optimizes semantic query plans by executing candidate plans on a data subset."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "palimpzest==1.5.3",
+    "litellm>=1.82",
+    "openai>=1.0",
+    "httpx>=0.24",
+    "pandas>=2.0,<3.0",
+    "numpy",
+    "pydantic>=2.0",
+    "rank-bm25>=0.2.2",
+]
+
+[project.optional-dependencies]
+# What this repository's benchmark adapters, experiment runners and analysis scripts need on top.
+benchmarks = [
+    "pyyaml>=6.0",
+    "duckdb",
+    "tomli",
+    "matplotlib>=3.5",
+    "scipy",
+    "tiktoken",
+    "anthropic",
+]
+
+[tool.setuptools.packages.find]
+include = ["raptor*"]
+
+[tool.setuptools.package-data]
+# The model catalogs shown to the agent.
+raptor = ["*.txt"]

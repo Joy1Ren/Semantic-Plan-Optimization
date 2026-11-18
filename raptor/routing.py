@@ -1,4 +1,4 @@
-"""Which API, and which key, serves each model -- for the cost model agent and MOAR alike.
+"""Which API, and which key, serves each model -- for RAPTOR and MOAR alike.
 
 Models are named by OpenRouter id ("openai/gpt-6-luna", "google/gemini-3.8-flash"; a leading
 "openrouter/" is ignored). A provider in DIRECT is called on its own API with its own key; every

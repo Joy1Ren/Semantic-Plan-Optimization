@@ -15,15 +15,15 @@ from typing import Any, Sequence
 
 import pandas as pd
 
-from agent_cost_model.sampling.constants import (
+from raptor.sampling.constants import (
     FEEDBACK_CHAR_CEILING,
     IMAGE_FIELD,
     MAX_CELL_CHARS,
 )
-from agent_cost_model.sampling.prompts import SCORING_EXPLAINER
-from agent_cost_model.sampling.scoring import ScoredPool
-from agent_cost_model.sampling.spec import SamplingSpec
-from agent_cost_model.sampling.text import truncate_middle
+from raptor.sampling.prompts import SCORING_EXPLAINER
+from raptor.sampling.scoring import ScoredPool
+from raptor.sampling.spec import SamplingSpec
+from raptor.sampling.text import truncate_middle
 
 __all__ = ["allocate_cell_budgets", "describe_images", "build_stratum_section", "build_feedback"]
 
@@ -71,7 +71,7 @@ def describe_images(
     """One batched vision call describing each row's image. Returns (by_id, cost_usd).
 
     The sampler's own describer, used by the feedback report and by the pre-spec exploration.
-    `CostModelAgent._describe_images` is a separate implementation for the optimizer's
+    `RAPTOR._describe_images` is a separate implementation for the optimizer's
     explore_images tool -- same idea, no shared code, deliberately free to diverge. Never
     raises: a missing description is not a reason to abandon a sampling round.
     """
@@ -192,7 +192,7 @@ def build_stratum_section(
     parts.append("")
     parts.append(f"SCORE DISTRIBUTION over the {len(pool):,} scored rows")
     parts.append("               " + "  ".join(f" p{p}" for p in _PCTS))
-    from agent_cost_model.sampling.scoring import percentiles
+    from raptor.sampling.scoring import percentiles
 
     parts.append("  bm25_norm    " + _fmt_pcts(percentiles(pool.bm25_norm)))
     parts.append("  dense_norm   " + _fmt_pcts(percentiles(pool.dense_norm)))

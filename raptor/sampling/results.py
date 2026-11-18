@@ -212,12 +212,8 @@ def mode_subset_path(path: pathlib.Path | str, mode: str) -> pathlib.Path:
 def write_subset(
     df: pd.DataFrame, id_col: str, sampled_ids: list[str], out_path: pathlib.Path
 ) -> None:
-    """Write the sampled rows, in selection order, to the benchmark's subset path.
-
-    Written on every code path including the error fallback: downstream quality scoring reads
-    this file, so leaving a previous run's subset in place would silently score new plans
-    against stale rows.
-    """
+    """Write the sampled ids, in selection order, to the benchmark's subset path: the id column
+    only, since raptor.subsets.load_subset rebuilds the rows from the dataset."""
     order = {rid: pos for pos, rid in enumerate(sampled_ids)}
     subset = df[df[id_col].isin(set(order))].copy()
     subset = (
@@ -227,7 +223,7 @@ def write_subset(
         .drop(columns="_ord")
     )
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    subset.to_csv(out_path, index=False)
+    subset[[id_col]].to_csv(out_path, index=False)
 
 
 def write_scores_csv(path: pathlib.Path, frames: list[pd.DataFrame]) -> None:

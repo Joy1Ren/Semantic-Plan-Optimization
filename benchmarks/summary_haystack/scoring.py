@@ -10,7 +10,7 @@ from typing import Callable
 
 import pandas as pd
 
-from agent_cost_model.experiments.summary_haystack.paths import (
+from benchmarks.summary_haystack.paths import (
     SUMMHAY_PROMPTS_DIR,
     ground_truth_csv,
     summhay_utils_eval,
@@ -240,7 +240,7 @@ class QualityJudge:
 
     def __call__(self, prompt: str) -> tuple[str, float]:
         if self._client is None:
-            from agent_cost_model.opt_agent.llm_client import RoutedClient
+            from raptor.llm_client import RoutedClient
             self._client = RoutedClient(self.model, reasoning_effort=self.reasoning_effort)
         # User-only, as populate_eval.evaluate_insights sends it.
         reply, _, info = self._client.generate(system="", messages=[{"role": "user", "content": prompt}])

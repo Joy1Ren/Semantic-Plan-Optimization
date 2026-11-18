@@ -26,9 +26,10 @@ from typing import Any, Iterable, Sequence
 import numpy as np
 import pandas as pd
 
-from agent_cost_model.opt_agent.pricing import token_cost
-from agent_cost_model.sampling.constants import DEFAULT_EMBED_WORKERS, _RAG_EMBEDDING_BASE_URL
-from agent_cost_model.sampling.text import column_fingerprint
+from raptor.pricing import token_cost
+from raptor import routing
+from raptor.sampling.constants import DEFAULT_EMBED_WORKERS
+from raptor.sampling.text import column_fingerprint
 
 __all__ = ["EmbedCost", "EmbeddingClient", "EmbeddingCache", "model_slug"]
 
@@ -62,20 +63,21 @@ class EmbeddingClient:
         self,
         model: str,
         *,
-        base_url: str = _RAG_EMBEDDING_BASE_URL,
+        base_url: str | None = None,
         api_key: str | None = None,
         timeout: float = 120.0,
     ) -> None:
         import httpx
 
         self.model = model
-        self._base_url = base_url.rstrip("/")
-        self._api_key = api_key or os.environ["OPENROUTER_API_KEY"]
+        self._api_model, routed_url, routed_key = routing.endpoint(model)
+        self._base_url = (base_url or routed_url).rstrip("/")
+        self._api_key = api_key or routed_key
         self._http = httpx.Client(timeout=timeout)
 
     def _call(self, input_value: Any) -> tuple[np.ndarray, float, float]:
         body = {
-            "model": self.model,
+            "model": self._api_model,
             "input": input_value,
             "encoding_format": "float",
         }
@@ -90,6 +92,7 @@ class EmbeddingClient:
         )
         latency = time.time() - t0
         if resp.status_code != 200:
+            routing.exit_if_out_of_quota(resp.text)
             raise RuntimeError(
                 f"Embedding request failed ({resp.status_code}) for model "
                 f"{self.model!r}: {resp.text[:800]}"
@@ -318,7 +321,7 @@ class EmbeddingCache:
         self, df: pd.DataFrame, columns: Sequence[str], id_col: str, ids: Iterable[str]
     ) -> str:
         """Embed any of `ids` missing from `columns`' group. Returns the group fingerprint."""
-        from agent_cost_model.sampling.text import norm_id, row_text
+        from raptor.sampling.text import norm_id, row_text
 
         fp = column_fingerprint(columns)
         group = self._groups.get(fp)

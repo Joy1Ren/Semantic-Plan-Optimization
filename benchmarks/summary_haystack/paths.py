@@ -1,7 +1,7 @@
 """Where the Summary of a Haystack (SummHay) benchmark reads from.
 
 One use case per haystack, one query per subtopic. The haystacks, prompts and scoring code are
-SummHay's own, read from the summary-of-a-haystack checkout beside agent_cost_model/.
+SummHay's own, read from the summary-of-a-haystack checkout beside this repository.
 """
 
 from __future__ import annotations

@@ -6,7 +6,7 @@ import litellm
 from palimpzest.constants import Model
 from palimpzest.utils.model_info_helpers import ModelMetricsManager
 
-from agent_cost_model.opt_agent.pricing import _price_key
+from raptor.pricing import _price_key
 
 # pz.Model attribute -> provider/model id. All take text and images, and all reason.
 NEW_MODELS = {
@@ -59,7 +59,7 @@ def _strip_cache_markers_for_other_providers() -> None:
     the providers it knows, so a Qwen model would get the marker as prompt text."""
     from palimpzest.prompts.prompt_manager import PromptManager
 
-    if getattr(PromptManager, "_agent_cost_model_markers_patched", False):
+    if getattr(PromptManager, "_raptor_markers_patched", False):
         return
     _orig = PromptManager.update_messages_for_caching
 
@@ -69,7 +69,7 @@ def _strip_cache_markers_for_other_providers() -> None:
         return self._remove_cache_boundary_markers(messages)
 
     PromptManager.update_messages_for_caching = update_messages_for_caching
-    PromptManager._agent_cost_model_markers_patched = True
+    PromptManager._raptor_markers_patched = True
 
 
 def _patch_generator_cost() -> None:
@@ -77,9 +77,9 @@ def _patch_generator_cost() -> None:
     tiers; pz itself charges flat per-token rates."""
     from palimpzest.query.generators.generators import Generator
 
-    from agent_cost_model.opt_agent.pricing import token_cost
+    from raptor.pricing import token_cost
 
-    if getattr(Generator, "_agent_cost_model_cost_patched", False):
+    if getattr(Generator, "_raptor_cost_patched", False):
         return
     _orig = Generator.__call__
     priced = set(NEW_MODELS.values())
@@ -94,4 +94,4 @@ def _patch_generator_cost() -> None:
         return output
 
     Generator.__call__ = _call
-    Generator._agent_cost_model_cost_patched = True
+    Generator._raptor_cost_patched = True

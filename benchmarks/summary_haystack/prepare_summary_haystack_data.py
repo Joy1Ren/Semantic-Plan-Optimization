@@ -11,7 +11,7 @@ idx is SummHay's own citation number: populate_summaries.py labels the i-th docu
 {i+1}", and utils_eval.build_ref_insight2docids keys documents by i + 1. A summary's [n] therefore
 means the same document here as in SummHay, and an optimization subset's rows keep their idx.
 
-Usage: PYTHONPATH=. python -m agent_cost_model.experiments.summary_haystack.prepare_summary_haystack_data
+Usage: python -m benchmarks.summary_haystack.prepare_summary_haystack_data
 """
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ import json
 
 import pandas as pd
 
-from agent_cost_model.experiments.summary_haystack.paths import (
+from benchmarks.summary_haystack.paths import (
     TOPICS,
     dataset_csv,
     ground_truth_csv,

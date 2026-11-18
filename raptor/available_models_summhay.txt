@@ -1,0 +1,41 @@
+Available LLM Models for Semantic Operators
+============================================
+Costs are per 1M tokens. Latency is seconds per output token.
+A call whose prompt is longer than a model's long-prompt threshold is billed at the
+long-prompt rates listed under it, for the whole call.
+Grouped by model family (within each family, sorted by input cost):
+Within a family, the pricier model is the more capable one. Across families, prices follow each
+provider's pricing and are not a ranking of quality.
+
+--- GPT-6 family ---
+pz.Model.GPT_6_LUNA
+  input: $0.100/1M   output: $0.500/1M   latency: 0.0090 s/output-token
+  above 272k prompt tokens: input $0.200/1M   output $0.750/1M
+
+pz.Model.GPT_6_SOL
+  input: $2.000/1M   output: $10.000/1M  latency: 0.0125 s/output-token
+  above 272k prompt tokens: input $4.000/1M   output $15.000/1M
+
+--- GPT-5.6 family ---
+pz.Model.GPT_5_6_LUNA
+  input: $0.200/1M   output: $1.200/1M   latency: 0.0079 s/output-token
+  above 272k prompt tokens: input $0.400/1M   output $1.800/1M
+
+pz.Model.GPT_5_6_TERRA
+  input: $2.000/1M   output: $12.000/1M  latency: 0.0088 s/output-token
+  above 272k prompt tokens: input $4.000/1M   output $18.000/1M
+
+--- Claude 5.5 family ---
+pz.Model.CLAUDE_HAIKU_5_5
+  input: $0.100/1M   output: $0.500/1M   latency: 0.0057 s/output-token
+  above 100k prompt tokens: input $0.500/1M   output $2.500/1M
+
+pz.Model.CLAUDE_SONNET_5_5
+  input: $2.000/1M   output: $10.000/1M  latency: 0.0096 s/output-token
+
+--- Qwen 3.8 family ---
+pz.Model.QWEN_3_8_FLASH
+  input: $0.150/1M   output: $0.470/1M   latency: 0.0154 s/output-token
+
+pz.Model.QWEN_3_8_MAX
+  input: $2.000/1M   output: $6.000/1M   latency: 0.0274 s/output-token

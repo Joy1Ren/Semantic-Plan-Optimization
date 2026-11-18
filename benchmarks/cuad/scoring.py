@@ -7,7 +7,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from agent_cost_model.experiments.cuad.paths import IDX_TO_NAME_JSON
+from benchmarks.cuad.paths import IDX_TO_NAME_JSON
 
 CATEGORIES = [
     "document_name", "parties", "agreement_date", "effective_date",
@@ -71,7 +71,7 @@ def _idx(value) -> str:
 
 
 def predictions_from_wide(df: pd.DataFrame) -> dict[str, dict[str, str]]:
-    """idx -> category -> text, from the cost model agent's output: one column per category."""
+    """idx -> category -> text, from RAPTOR's output: one column per category."""
     columns = {category_key(c): c for c in df.columns}
     predictions: dict[str, dict[str, list[str]]] = {}
     for _, row in df.iterrows():

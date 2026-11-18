@@ -1,7 +1,6 @@
 """Word-set overlap between a plan's quoted text and the ground truth's.
 
-Token-set Jaccard is the measure docetl's CUAD scorer uses: lowercase, punctuation to spaces, and
-compare the sets of words.
+Token-set Jaccard: lowercase, punctuation to spaces, and compare the sets of words.
 """
 from __future__ import annotations
 

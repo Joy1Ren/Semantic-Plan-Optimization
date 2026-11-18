@@ -20,22 +20,22 @@ from typing import Any
 
 import pandas as pd
 
-from agent_cost_model.experiments.config import (
+from benchmarks.config import (
     build_context,
     format_path,
     load_benchmark,
     load_query,
 )
-from agent_cost_model.experiments.external_repo import activate
-from agent_cost_model.opt_agent import routing
-from agent_cost_model.opt_agent.cost_model_agent import CostModelAgent, RoutedClient, ResultsStore
-from agent_cost_model.sampling import (
+from benchmarks.external_repo import activate
+from raptor import routing
+from raptor.core_agent import RAPTOR, RoutedClient, ResultsStore
+from raptor.sampling import (
     MODES as SAMPLER_MODES,
     DataSampler,
     mode_subset_path,
     subset_label,
 )
-from agent_cost_model.sampling.constants import (
+from raptor.sampling.constants import (
     DEFAULT_ALPHA,
     DEFAULT_EMBED_WORKERS,
     DEFAULT_EMBEDDING_MODEL,
@@ -350,7 +350,7 @@ def main() -> None:
     else:
         _report_reused_subset(benchmark, context, subset_path, args.query_id, label)
 
-    agent = CostModelAgent(
+    agent = RAPTOR(
         llm, max_steps=MAX_STEPS, verbose=True,
         agent_dir=args.agent_type, results_prefix=results_prefix,
         use_case=args.use_case,

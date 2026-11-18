@@ -3,17 +3,17 @@
 Two ways to say where things go:
 
   --config (recommended) resolves every path from a benchmark.yaml exactly as
-  experiments/run_opt.py does -- same dataset, same subset_path, same embedding cache, same
+  benchmarks/run_opt.py does -- same dataset, same subset_path, same embedding cache, same
   task prompt. A later `run_opt.py` run **without** `--opt-subsample` then picks that subset up
   as-is, so sampling and optimization can be paid for separately:
 
-      python -m agent_cost_model.sampling.cli \\
-        --config agent_cost_model/experiments/SemBench/benchmark.yaml \\
+      python -m raptor.sampling.cli \\
+        --config benchmarks/SemBench/benchmark.yaml \\
         --use-case ecomm --scale-factor 500 --query-id 11 \\
         --mode agentic --embedding-model qwen/qwen3-embedding-8b
 
-      python -m agent_cost_model.experiments.run_opt \\
-        --config agent_cost_model/experiments/SemBench/benchmark.yaml \\
+      python -m benchmarks.run_opt \\
+        --config benchmarks/SemBench/benchmark.yaml \\
         --use-case ecomm --scale-factor 500 --query-id 11        # reuses the subset above
 
   Explicit paths (--csv/--subset-out/--results/--cache-dir) for a table that is not part of a
@@ -30,25 +30,25 @@ from pathlib import Path
 
 import pandas as pd
 
-from agent_cost_model.sampling.constants import (
+from raptor.sampling.constants import (
     DEFAULT_ALPHA,
     DEFAULT_EMBED_WORKERS,
-    DEFAULT_RAG_EMBEDDING_MODEL,
+    DEFAULT_EMBEDDING_MODEL,
     MODES,
 )
-from agent_cost_model.sampling.data_sampler import DataSampler
-from agent_cost_model.sampling.results import mode_subset_path, subset_label
+from raptor.sampling.data_sampler import DataSampler
+from raptor.sampling.results import mode_subset_path, subset_label
 
 
 def _from_benchmark(args, qid, parser) -> dict:
     """Resolve dataset, paths, and task prompt the way run_opt.py does."""
-    from agent_cost_model.experiments.config import (
+    from benchmarks.config import (
         build_context,
         format_path,
         load_benchmark,
         load_query,
     )
-    from agent_cost_model.experiments.external_repo import activate
+    from benchmarks.external_repo import activate
 
     config_path = Path(args.config).resolve()
     benchmark = load_benchmark(config_path)
@@ -115,7 +115,7 @@ def main() -> None:
                          "Q{id}_subset_{mode}-2.csv (default: unnumbered)")
     ap.add_argument("--id-col", default="idx")
     ap.add_argument("--model", default="openai/gpt-5", help="planning LLM (OpenRouter id)")
-    ap.add_argument("--embedding-model", default=DEFAULT_RAG_EMBEDDING_MODEL)
+    ap.add_argument("--embedding-model", default=DEFAULT_EMBEDDING_MODEL)
     ap.add_argument("--sample-size", type=int, required=True,
                     help="rows to select into the optimization subset")
     ap.add_argument("--alpha", type=float, default=DEFAULT_ALPHA)
@@ -166,9 +166,9 @@ def main() -> None:
 
         llm = None
         if args.mode not in ("baseline", "random"):
-            from agent_cost_model.opt_agent.llm_client import OpenRouterClient
+            from raptor.llm_client import RoutedClient
 
-            llm = OpenRouterClient(args.model, reasoning_effort="medium")
+            llm = RoutedClient(args.model, reasoning_effort="medium")
 
         df = pd.read_csv(resolved["source_csv"], dtype={args.id_col: str})
         result = DataSampler(

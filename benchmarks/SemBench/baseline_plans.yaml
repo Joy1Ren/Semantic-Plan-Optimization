@@ -1,5 +1,5 @@
 # Hand-written baseline plans for SemBench: one reasonable, unoptimized plan per query, the
-# comparison point for what the optimizer finds. Run with experiments/run_baseline.py.
+# comparison point for what the optimizer finds. Run with benchmarks/run_baseline.py.
 #
 # Keyed by use case, then query id. Each value is plan code, executed in the same sandbox
 # WritePlanTool uses, plus `source_csv` -- the query's source file name as benchmark.yaml

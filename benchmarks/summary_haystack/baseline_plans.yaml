@@ -1,6 +1,6 @@
 # Baseline plans for Summary of a Haystack: one sem_agg reading every document, with SummHay's prompt
 # as its instruction (benchmark.yaml's task prompt minus its placeholder note and output spec).
-# Run with experiments/run_baseline.py. Keyed by use case, then query id.
+# Run with benchmarks/run_baseline.py. Keyed by use case, then query id.
 #
 # Every LLM operator uses gpt-6-luna.
 

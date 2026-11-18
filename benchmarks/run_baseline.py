@@ -9,15 +9,15 @@ benchmark's results_prefix with runner "baseline" (e.g. results/CUAD/q{id}/basel
     raw_results/Q{id}_{k}.csv  the plan's raw output, run k
 
 Usage:
-    PYTHONPATH=. python -m agent_cost_model.experiments.run_baseline \\
+    python -m benchmarks.run_baseline \\
         --benchmark cuad --query-ids 2 3
-    PYTHONPATH=. python -m agent_cost_model.experiments.run_baseline \\
+    python -m benchmarks.run_baseline \\
         --benchmark SemBench --use-case ecomm --scale-factors 500 2000 --query-ids 1 3
     # 3 more runs, saved as runs 3-5, keeping runs 1-2
-    PYTHONPATH=. python -m agent_cost_model.experiments.run_baseline \
+    python -m benchmarks.run_baseline \
         --benchmark cuad --runs 3 --first-run 3
     # every (scale factor, query, run) is an independent job; --workers runs that many at once
-    PYTHONPATH=. python -m agent_cost_model.experiments.run_baseline \
+    python -m benchmarks.run_baseline \
         --benchmark SemBench --use-case ecomm --scale-factors 2000 --workers 3
 """
 from __future__ import annotations
@@ -34,16 +34,16 @@ from pathlib import Path
 import pandas as pd
 import yaml
 
-from agent_cost_model.experiments.config import (
+from benchmarks.config import (
     build_context, format_path, load_benchmark,
 )
-from agent_cost_model.experiments.external_repo import activate
-from agent_cost_model.opt_agent import routing
-from agent_cost_model.opt_agent.llm_client import patch_litellm_routing, set_prompt_fill
-from agent_cost_model.opt_agent.local_python_executor import LocalPythonExecutor
-from agent_cost_model.opt_agent.physical_pipeline import PhysicalPipeline, row_id_str
+from benchmarks.external_repo import activate
+from raptor import routing
+from raptor.llm_client import patch_litellm_routing, set_prompt_fill
+from raptor.local_python_executor import LocalPythonExecutor
+from raptor.physical_pipeline import PhysicalPipeline, row_id_str
 
-# CostModelAgent's default authorized_imports, so baseline plans run in the same sandbox.
+# RAPTOR's default authorized_imports, so baseline plans run in the same sandbox.
 PLAN_AUTHORIZED_IMPORTS = ["json", "palimpzest", "pandas", "numpy"]
 
 

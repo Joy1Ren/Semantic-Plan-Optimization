@@ -14,8 +14,8 @@ from pathlib import Path
 
 import pandas as pd
 
-from agent_cost_model.experiments.summary_haystack.paths import TOPICS, dataset_csv, ground_truth_csv
-from agent_cost_model.experiments.summary_haystack.scoring import (
+from benchmarks.summary_haystack.paths import TOPICS, dataset_csv, ground_truth_csv
+from benchmarks.summary_haystack.scoring import (
     QualityJudge,
     agent_counts,
     exposed_insight,
@@ -25,7 +25,7 @@ from agent_cost_model.experiments.summary_haystack.scoring import (
     summary_bullets,
     with_example,
 )
-from agent_cost_model.opt_agent.plan_quality_evaluator import PlanQualityEvaluator
+from raptor.plan_quality_evaluator import PlanQualityEvaluator
 
 class QualityEvaluator(PlanQualityEvaluator):
     """Scores one subtopic of one haystack: the use case picks the haystack, the query id the

@@ -37,7 +37,7 @@ Columns of cuad_gt.csv:
 cuad_gt_issues.csv lists every (contract, category) whose ground truth cannot be checked cleanly
 against the contract text, one row per issue. See ISSUE_CODES.
 
-    python -m agent_cost_model.experiments.cuad.ground_truth.cleaning.clean_cuad_gt
+    python -m benchmarks.cuad.ground_truth.cleaning.clean_cuad_gt
 """
 from __future__ import annotations
 
@@ -48,7 +48,7 @@ import re
 
 import pandas as pd
 
-from agent_cost_model.experiments.cuad.paths import (
+from benchmarks.cuad.paths import (
     CATEGORY_DESCRIPTIONS_CSV,
     CUAD_JSON,
     GROUND_TRUTH_CSV as OUTPUT_CSV,

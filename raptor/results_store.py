@@ -1,7 +1,7 @@
 """Duck-typed plan/operator introspection helpers, per-run artifact naming, and the
 observed-execution results store.
 
-These are shared by `cost_model_agent.py`, `exploration_checker_agent.py`, and the tool
+These are shared by `core_agent.py`, `exploration_checker_agent.py`, and the tool
 modules under `tools/`.
 """
 
@@ -15,15 +15,11 @@ from typing import Any
 # Duck-typed plan/operator helpers.
 # ---------------------------------------------------------------------------
 def iter_operators(plan: Any) -> list[Any]:
-    """All operators in a plan. Real `PhysicalPipeline` is iterable (topological order over
-    the operator tree). Falls back to a `.operators` / `.ops` attribute, else treats `plan`
-    as already-a-list."""
+    """All operators in a plan, in topological order (`PhysicalPipeline` is iterable over its
+    operator tree)."""
     try:
         return list(plan)
     except TypeError:
-        # for attr in ("operators", "ops"):
-        #     if hasattr(plan, attr):
-        #         return list(getattr(plan, attr))
         raise TypeError(f"don't know how to iterate operators of {plan!r}")
 
 
@@ -48,30 +44,21 @@ def _dump_opt_debug_artifacts(
     quality_result: Any,
     plan_metrics: dict | None = None,
     runcount: Any = None,
-    oracle_df: Any = None,
     evaluator: Any = None,
     execution: int | None = None,
 ) -> None:
     """Write execute_plan's intermediate state under the run's opt_results directory, for
-    debugging quality/per_sem_op_quality mysteries (e.g. comparing against a standalone re-run
-    via experiments/cuad/run_single_plan.py).
+    debugging quality mysteries (e.g. comparing against a standalone re-run via
+    benchmarks/run_baseline.py --plans).
 
         opt_results/Q1_2/                  <- one directory per (query, runcount)
-            oracle_ground_truth.csv        <- the run's oracle ground truth, ONE copy shared by
-                                              every plan (written and read by
-                                              PlanQualityEvaluator, in whatever shape the
-                                              benchmark's scorer reads back). Oracle mode only:
-                                              in direct mode the benchmark's own ground-truth
-                                              file is scored against in place, never copied.
             p1/
                 raw_output.csv             the plan's own output, before normalization
                 normalized_output.json     exactly what the benchmark's scorer was handed
                                            (written by evaluator.write_scoring_input)
-                oracle_result.csv          THIS plan's own oracle-substituted output
-                plan_result.json           the plan's quality (overall and per semantic
-                                           operator), cost, and latency (both the wall-clock
-                                           time of the subset run and the sum of per-op
-                                           per-record latencies)
+                plan_result.json           the plan's quality, cost, and latency (both the
+                                           wall-clock time of the subset run and the sum of
+                                           per-op per-record latencies)
                 per_sem_op_info.json       per-semantic-operator input/output samples
             p2/ ...
             p3/e1/, p3/e2/, ...            the same files once per execution, when each plan is
@@ -81,11 +68,6 @@ def _dump_opt_debug_artifacts(
     instead of overwriting the first run's (matching how trajectory/ and metrics/ filenames are
     keyed). Within one run a plan's directory is overwritten on re-execution, so it reflects
     that plan's most recent run -- scratch debug output, not accumulated history.
-
-    `oracle_result.csv` is per-plan and is NOT the ground truth: in oracle mode the first plan's
-    oracle output becomes the canonical ground truth for the whole run, so every later plan's
-    own oracle result diverges from it. Comparing the two is often what explains a surprising
-    quality score.
     """
     import json as _json
     import pathlib as _pathlib
@@ -101,8 +83,6 @@ def _dump_opt_debug_artifacts(
     # whole point of this artifact is to read a surprising score back to what produced it.
     if evaluator is not None:
         evaluator.write_scoring_input(normalized_output_df, out_dir / "normalized_output.json")
-    if oracle_df is not None:
-        oracle_df.to_csv(out_dir / "oracle_result.csv", index=False)
 
     # One record per plan: what the plan scored AND what it cost/took, so a plan directory can be
     # read on its own without cross-referencing the run's metrics CSVs.
@@ -110,9 +90,6 @@ def _dump_opt_debug_artifacts(
     plan_summary.update(plan_metrics or {})
     plan_summary.update({
         "quality": quality_result.quality if quality_result is not None else None,
-        "per_sem_op_quality": (
-            quality_result.per_sem_op_quality if quality_result is not None else None
-        ),
         "quality_note": quality_result.quality_note if quality_result is not None else None,
         "quality_counts": quality_result.quality_counts if quality_result is not None else None,
     })
@@ -132,22 +109,6 @@ def _dump_opt_debug_artifacts(
             ],
         }
     (out_dir / "per_sem_op_info.json").write_text(_json.dumps(per_sem_op_info, indent=2, default=str))
-
-
-def _normalize_plan_df(
-    df: "pd.DataFrame",
-    use_case: str,
-    query_id: int,
-) -> "pd.DataFrame":
-    """Identity fallback when a benchmark supplies no `normalize_eval_df`.
-
-    Reshaping a plan's output into the shape a benchmark's evaluator expects is inherently
-    benchmark-specific, so the real implementation lives in each adapter
-    (experiments/*/quality_evaluator.py) and reaches the engine via
-    query_info["normalize_eval_df"]. A benchmark whose evaluator already accepts the plan's
-    natural output needs no override.
-    """
-    return df
 
 
 # ===========================================================================
@@ -180,15 +141,19 @@ class ResultsStore:
         self.rows.extend(new_rows)
         return len(new_rows)
 
-    _LARGE_COLS = frozenset({"op_samples", "plan_str"})
+    _LARGE_COLS = frozenset({"op_samples", "op_summary", "plan_str"})
+    # Recorded for the run's metrics, not for the agent, which can read `.df`: the benchmark
+    # scorer's own LLM spend is not a cost of the plans it is optimizing.
+    _HIDDEN_COLS = frozenset({"quality_judge_cost"})
 
     @property
     def df(self):
         """pandas view (requires pandas). Use `.rows` if you don't have pandas.
-        Large blob columns (op_samples, plan_str) are excluded — use get_op_samples() instead."""
+        Large blob columns (op_samples, op_summary, plan_str) are excluded — use get_op_samples() instead."""
         import pandas as pd
 
-        rows = [{k: v for k, v in r.items() if k not in self._LARGE_COLS} for r in self.rows]
+        excluded = self._LARGE_COLS | self._HIDDEN_COLS
+        rows = [{k: v for k, v in r.items() if k not in excluded} for r in self.rows]
         return pd.DataFrame(rows)
 
     def summary(self) -> dict:

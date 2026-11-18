@@ -1,5 +1,5 @@
 name: Summary of a Haystack
-quality_adapter: agent_cost_model.experiments.summary_haystack.quality_evaluator
+quality_adapter: benchmarks.summary_haystack.quality_evaluator
 results_prefix: '{results_dir}/summary_haystack/{use_case}/q{query_id}/{runner}'
 sampling_dir: '{results_dir}/summary_haystack/{use_case}/_sampling'
 sampling_results_path: '{results_dir}/summary_haystack/{use_case}/_sampling/sampling_results.json'

@@ -16,13 +16,13 @@ from typing import Sequence
 
 import numpy as np
 
-from agent_cost_model.sampling.constants import (
+from raptor.sampling.constants import (
     FLAT_DECIMALS,
     MIDDLE_ANCHOR,
     NEGATIVE_ANCHOR,
     TOP_ANCHOR,
 )
-from agent_cost_model.sampling.text import bm25_tokenize, normalize_phrase
+from raptor.sampling.text import bm25_tokenize, normalize_phrase
 
 __all__ = [
     "ScoredPool",
