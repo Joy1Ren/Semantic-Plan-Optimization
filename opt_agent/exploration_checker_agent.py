@@ -3,19 +3,20 @@
 
 The main agent self-reports, per plan, an `optimizations` record naming which optimizations
 that plan uses and how far each is pushed (see `WritePlanTool`). This reviewer reads those
-records next to the plans' MEASURED cost/quality/latency and answers one question: is any
-optimization the agent itself opened still underexplored, and what should it try next?
+records next to the plans' MEASURED cost/quality/latency and answers one question: is the search
+done, and if not, what one or two plans should the agent try next?
 
-The reviewer IS shown the space that exists -- the operator/knob catalog and the model catalog
-the main agent already has in its own briefing. It is shown no catalog of OPTIMIZATIONS (no
-"try truncation", no "try reordering"): those it must still infer from what the agent reported,
-so its verdict is not an echo of a lever list. The distinction matters, and the failure mode it
-fixes is real: a reviewer that knows only what the agent reported cannot tell an untried model
-family from a nonexistent one, so it re-suggests the axis already in play (observed on CUAD Q1
-run 2, where the agent sampled only the 4o family and the reviewer kept proposing moves within
-it) and it cannot see a knob that every plan pinned to the same value. Since the main agent
-already holds both catalogs, showing them here adds no information to the system -- it only
-stops the reviewer from being the one actor that cannot distinguish "untried" from "impossible".
+The reviewer IS shown the space that exists -- the operator brief (operators, their knobs, and notes
+on how some of them behave) and the model catalog the main agent already has in its own briefing.
+It is shown no catalog of OPTIMIZATIONS (no "try truncation", no "try reordering"): those it must
+still infer from what the agent reported, so its verdict is not an echo of a lever list. The
+distinction matters, and the failure mode it fixes is real: a reviewer that knows only what the
+agent reported cannot tell an untried model family from a nonexistent one, so it re-suggests the
+axis already in play (observed on CUAD Q1 run 2, where the agent sampled only the 4o family and the
+reviewer kept proposing moves within it) and it cannot see a knob that every plan pinned to the same
+value. Since the main agent already holds both catalogs, showing them here adds no information to
+the system -- it only stops the reviewer from being the one actor that cannot distinguish "untried"
+from "impossible".
 """
 
 from __future__ import annotations
@@ -33,11 +34,9 @@ from agent_cost_model.opt_agent.prompts import (
     _AVAILABLE_MODELS_TEXT,
     _OPERATOR_CATALOG_BRIEF,
     _lower_variance_text,
-    _per_op_quality_text,
     _quality_metric_section,
-    _sem_op_quality_docs,
 )
-from agent_cost_model.opt_agent.step_parsing import _parse_step
+from agent_cost_model.opt_agent.step_parsing import _first_block_only, _parse_step
 
 
 @dataclass
@@ -101,13 +100,19 @@ class ExplorationCheckerAgent:
         Another agent is searching for the plan with the best cost/quality trade-off for one
         query. It writes many plans, each embodying different optimizations, executes them, and
         observes what each one cost and how well it scored on a small optimization
-        SUBSET of the dataset. For every plan it also records an `optimizations` field of its own writing: free-form, in its own vocabulary, naming each
-        optimization the plan uses and HOW FAR that optimization is pushed. There is no fixed
-        catalog of optimizations — read the ones it reported and reason about those.
+        SUBSET of the dataset. For every plan it also records an `optimizations` field of its own
+        writing: free-form, in its own vocabulary, naming each optimization the plan uses and
+        HOW FAR that optimization is pushed. There is no fixed catalog of optimizations — read the
+        ones it reported and reason about those. The chosen plan is then run on the full dataset,
+        so consider how its cost will scale there (e.g., filter selectivity, and the price increase
+        for operators whose input exceeds a model's long-prompt threshold).
 
-        YOUR JOB. Looking at all executed plans together, decide whether the search should keep
-        going, and if it should, name the 1-2 optimizations the agent should try next. You are
-        judging coverage of the search, not the correctness of any one plan.
+        YOUR JOB. Use the plan results to understand what limits quality, identify what the search
+        hasn't tried yet, and suggest high-potential optimization improvements: decide whether the
+        search should keep going, and if it should, name the 1-2 optimizations the agent should try
+        next. You are called every few executed plans, and when the agent wants to finish -- marked
+        "trigger: final-answer" with the plan it wants to submit. At that final call, an
+        "underexplored" verdict sends the agent back to write at least one more plan.
 
 
         "MEANINGFULLY" IS RELATIVE TO THIS RUN. There is no fixed threshold and you must not
@@ -121,26 +126,29 @@ class ExplorationCheckerAgent:
 
         THE BAR RISES AS THE SEARCH MATURES. Early on — few plans, and the cheap and expensive
         extremes not yet measured — breadth is genuinely valuable and a coarse gap is worth
-        naming. Once the frontier has several points and recent plans have stopped advancing it,
+        naming. Once the frontier has several points and recent plans have stopped advancing it
+        after trying different kinds of fix (model/model family, wording, input context, logical structure,
+        ensembles (separate runs of one operator with one final consolidator operator) or per-row
+        verifiers (one call per input row that checks the operator's output against that row; return
+        a typed answer, such as a list of item numbers, when code downstream combines the results),
         the search is near done, and only a clearly promising move justifies another plan.
-        "Exhausted" is the EXPECTED verdict for a mature search, not a failure to find something.
-        The burden of proof is on continuing, not on stopping.
+        Concluding requires understanding the bottleneck and having tried the optimizations that
+        could plausibly address it.
         {cost_budget}
         THE SPACE THAT EXISTS. Below are the operators and models the agent is allowed to use.
         This is NOT a list of optimizations to recommend, and the agent has it already — it is
         here only so you can tell which choices are POSSIBLE, so that you never propose something
         that does not exist, and never dismiss something that was in fact available. An option no
         plan has touched is a CANDIDATE worth weighing, not automatically a gap: it still has to
-        clear THE BAR above.
+        be likely to improve the frontier.
 
         {operator_catalog}
         {model_catalog}
 
         HOW TO READ THE EVIDENCE:
-        - HAS THE FRONTIER MOVED LATELY? This is the strongest signal about whether the search is
-          done. Several plans in a row that landed inside the frontier means the agent has
-          stopped learning; unless there exists an optimization choice that has potential to improve
-          the frontier, stop.
+        - HAS THE FRONTIER MOVED LATELY? Several plans in a row that landed inside the frontier
+          means the agent has stopped learning from its current approach; stop only once the
+          bottleneck has been attacked by the optimizations that could plausibly address it.
         - A CONSTANT MAY BE A DIMENSION. Settings identical in every plan — one model family, one
           retrieval method, one context budget, one logical shape — have no evidence behind them,
           however many plans there are, and will never show up in the agent's `optimizations`
@@ -151,12 +159,6 @@ class ExplorationCheckerAgent:
           whatever it cost. Never treat it as evidence for or against a direction, and do not ask
           for a more elaborate version of it. If that direction still looks worth testing, ask
           for the SIMPLEST plan that would actually score.
-        <per_op_quality>
-        - PER-OPERATOR QUALITY IS NOT PLAN QUALITY. It measures one operator against the input it
-          actually received, so it can be high while the plan scores badly (and the reverse).
-          Plan `quality` is the objective. Never recommend a direction on per-operator scores
-          alone when plan quality points the other way.
-        </per_op_quality>
         <lower_variance>
         - EACH PLAN WAS EXECUTED {{n_executions}} TIMES. Its block shows every execution's quality,
           the mean and std, and how many records' output differed between executions. Read the
@@ -165,31 +167,42 @@ class ExplorationCheckerAgent:
           objective in its own right: a plan with a similar mean and clearly lower std improves
           the frontier. If the strongest plans have high variance, a variance-reduction move is a
           valid suggestion; suggest the simplest one first (a more precise condition or column
-          description, a different model) before added structure (verifiers, extra filters,
+          description, a different model/model family) before added structure (per-row verifiers, extra filters,
           ensembles). An added operator advances the frontier only if it beats the simpler plan
           by more than the noise; if it does not, point the agent back to the simpler plan.
         </lower_variance>
 
         HOW TO JUDGE (guidance, not rules — weigh the whole picture):
+
+        Diagnose
+        - Find the bottleneck. Before suggesting a fix, understand or propose what is keeping quality low:
+          which part of quality is low (e.g., the counts in quality_counts) and which aspects of the plan
+          (e.g., logical structure, a particular operator, poor input context). Then target the
+          optimization at it -- e.g., a better model/model family, better input context, or better wording for
+          the bottleneck operator, or adding/removing operators and verifiers.
+          Consider interacting effects between operators when identifying the bottleneck: evaluate
+          the plan as a whole rather than individual operators. A poorly performing operator may be
+          due to its own configuration, or to poor input from upstream operators.
+
+        What to try next
         - Make sure to also execute BASELINE plans to understand the range of possible quality/cost.
           For example, run a plan with no cost optimizations, on a cheap model, to see what quality is achievable.
           Similarly, run a plan with more significant cost optimizations to see what quality a cheap
           plan can get.
-        - Follow the gradient. If pushing an optimization further kept paying off — quality
-          rising, or cost falling with quality intact — it is underexplored. Name the concrete
-          next setting along that same dimension.
-        - When quality has stopped improving, check if cost can be reduced (e.g., cheaper model,
-          smaller input length) while maintaining close quality.
-        - Respect diminishing returns. If an optimization has been pushed two steps with no
-          further gain, or pushing it started costing quality, it is done. Do not ask for more.
-        - One setting is not exploration. An optimization tried at exactly a single extent is
-          untested: one more point, in the direction the evidence favors, settles it.
+        - Push each optimization far enough to judge it. One extent is untested: try one more point
+          in the direction the evidence favors. Keep going while it pays off (quality rising, or cost
+          falling with quality intact); stop once two steps bring no further gain or it starts
+          costing quality.
         - Make sure to try different optimization strategies instead of chasing one lever. For example,
-          consider different logical structures, different model choices, and different context reduction strategies
+          consider different logical structures, different models/model families, and different context reduction strategies
           (truncation, bm25 retrieval, embedding retrieval, regex window selection).
+        - When quality has stopped improving, check if cost can be reduced (e.g., cheaper model/model family,
+          smaller input length) while maintaining close quality.
         - Check both directions. If every plan has been chasing cost and none has genuinely
           tried to raise quality (or the reverse), say so — the trade-off has only been mapped
           from one side.
+
+        Guardrails
         - Do not ask for micro-tuning. Plans are measured on a small subsample, so nudging a
           numeric knob by a little overfits and teaches nothing.
         - Do not chase a few records. A move aimed at flipping one or a few records (e.g. recovering
@@ -209,15 +222,16 @@ class ExplorationCheckerAgent:
           Expensive models with the right optimizations may help increase quality, but weigh the
           tradeoffs between exploring with cheap and expensive models.
         </no_lower_variance>
-        - Be concrete and be brief: at most 1-2 suggestions, most valuable first. Point at the
-          specific optimization and the specific next extent to take it to. Each suggestion must
-          describe ONE plan the agent could write next, in a couple of sentences — not a program
-          of work, and never a long enumeration of per-field or per-record specifics.
 
-        Concluding the search is a real and useful verdict. If the optimizations the agent has
-        reported have each been pushed to the point of diminishing returns, say so rather than
-        inventing work. Do not suggest plans that have a low likelihood of improving the current
-        cost-quality frontier.
+        Concluding the search is a real and useful verdict once the bottleneck has been attacked by
+        the optimizations that could plausibly address it, including ones the agent has not tried.
+        Then say so rather than inventing work. Do not suggest plans that have a low likelihood of
+        improving the current cost-quality frontier.
+
+        OUTPUT. Be concrete and be brief: at most 1-2 suggestions, most valuable first. Point at
+        the specific optimization and the specific next extent to take it to. Each suggestion must
+        describe ONE plan the agent could write next, in a couple of sentences — not a program of
+        work, and never a long enumeration of per-field or per-record specifics.
 
         RESPOND with EXACTLY ONE fenced ```json``` block and nothing else:
           {{"underexplored": true,  "suggestion": "<what to try next, and why the evidence supports it>"}}
@@ -235,7 +249,6 @@ class ExplorationCheckerAgent:
         verbose: bool = True,
         context_budget_chars: int = 80_000,
         cost_aware: bool = False,
-        per_op_quality: bool = True,
         lower_variance: bool = False,
         n_executions: int = 1,
         plan_results_agg: ResultsStore | None = None,
@@ -251,17 +264,16 @@ class ExplorationCheckerAgent:
         # the two catalogs are not. A second .format() pass would eat the `{{...}}` escapes that
         # hold the JSON output contract.
         self.cost_aware = cost_aware
-        self.per_op_quality = per_op_quality
         # Lower-variance run: each plan was executed `n_executions` times, and the reviewer
         # reads one aggregate row per plan alongside that plan's individual executions.
         self.lower_variance = lower_variance
         self.n_executions = n_executions
         self.plan_results_agg = plan_results_agg
-        self._system = _lower_variance_text(_per_op_quality_text(self._SYSTEM_TEMPLATE.format(
+        self._system = _lower_variance_text(self._SYSTEM_TEMPLATE.format(
             operator_catalog=_OPERATOR_CATALOG_BRIEF.rstrip(),
             model_catalog=_AVAILABLE_MODELS_TEXT.strip(),
             cost_budget=self._COST_BUDGET if cost_aware else "",
-        ), per_op_quality), lower_variance, n_executions)
+        ), lower_variance, n_executions)
 
         self.cost_usd: float = 0.0
         # Every verdict this run produced — saved to exploration_check/Q{id}_{rc}.json so a run
@@ -276,7 +288,8 @@ class ExplorationCheckerAgent:
             print(msg)
 
     # -- public entry point ------------------------------------------------
-    def check(self, *, reason: str, budget: dict | None = None) -> ExplorationCheck:
+    def check(self, *, reason: str, budget: dict | None = None,
+              final_plan: str | None = None) -> ExplorationCheck:
         """Ask the reviewer for one verdict. Never raises: any transport, parse, or shape
         problem is logged and returns "not underexplored", so a checker failure can never
         break the plan search that depends on it.
@@ -285,7 +298,7 @@ class ExplorationCheckerAgent:
         (see `_budget_section`); passed only in cost-aware runs."""
         n_executed = len(self._executed_rows())
         try:
-            result = self._check(reason=reason, budget=budget)
+            result = self._check(reason=reason, budget=budget, final_plan=final_plan)
         except Exception as e:
             self._log(f"[explore-check] failed ({reason}): {type(e).__name__}: {e}")
             run_log.log_error(
@@ -304,17 +317,19 @@ class ExplorationCheckerAgent:
         })
         return result
 
-    def _check(self, *, reason: str, budget: dict | None = None) -> ExplorationCheck:
+    def _check(self, *, reason: str, budget: dict | None = None,
+               final_plan: str | None = None) -> ExplorationCheck:
         if not self._executed_rows():
             # Nothing has been measured yet, so there is nothing to judge coverage of.
             self._log(f"[explore-check] skipped ({reason}): no executed plans yet")
             return ExplorationCheck(False, "")
 
-        msgs: list[dict] = [{"role": "user", "content": self._build_context(reason, budget)}]
+        msgs: list[dict] = [{"role": "user", "content": self._build_context(reason, budget, final_plan)}]
         # One reprompt: the contract is a single json block, and a model that missed it once
         # usually gets it on being told. Beyond that, treat the check as inconclusive.
         for attempt in (1, 2):
             raw, reasoning = self._llm_step(msgs)
+            raw, n_cut = _first_block_only(raw)
             msgs.append({"role": "assistant", "content": raw})
             if reasoning:
                 self._log(
@@ -324,6 +339,7 @@ class ExplorationCheckerAgent:
             self._log(
                 run_log.header("[explore-check] reviewer", f"attempt {attempt}, reason={reason}")
                 + f"{raw}\n"
+                + (f"[{n_cut} additional characters beyond first code block removed]\n" if n_cut else "")
             )
             try:
                 parsed = _parse_step(raw)
@@ -389,6 +405,36 @@ class ExplorationCheckerAgent:
         except Exception:
             return "(unavailable)"
 
+    def _op_lines(self, plan_name: str, executions: list[dict]) -> list[str]:
+        """One line per operator: its name/type and, for an LLM operator, its model, the columns
+        it reads, and (when per-operator stats were recorded) its cost and tokens averaged over
+        `executions`."""
+        entry = self.plans.get(plan_name)
+        try:
+            flat = entry["plan"]._flat_ops()
+        except Exception:
+            return [f"  ({self._op_chain(plan_name)})"]
+        measured = [r["op_summary"] for r in executions if r.get("op_summary")]
+        lines = []
+        for i, (op_name, op) in enumerate(flat):
+            attrs = getattr(op, "attributes", None) or {}
+            parts = [f"  {op_name}"]
+            if "model" in attrs:
+                parts.append(f"model={attrs['model']}")
+                parts.append(f"depends_on={attrs.get('depends_on') or 'all columns'}")
+                stats = []
+                for ops in measured:
+                    hit = ops[i] if i < len(ops) and ops[i].get("op_name") == op_name else next(
+                        (o for o in ops if o.get("op_name") == op_name), None)
+                    if hit:
+                        stats.append(hit)
+                if stats:
+                    mean = lambda k: sum(float(o.get(k) or 0) for o in stats) / len(stats)
+                    parts.append(f"cost_usd {mean('cost_usd'):.4f}, input_tokens {mean('input_tokens'):.0f}, "
+                                 f"output_tokens {mean('output_tokens'):.0f}")
+            lines.append(" | ".join(parts))
+        return lines
+
     @staticmethod
     def _fmt_optimizations(value: Any) -> str:
         if not value:
@@ -410,16 +456,10 @@ class ExplorationCheckerAgent:
 
     def _measured_lines(self, row: dict) -> list[str]:
         """What one execution of the plan measured."""
-        per_op = row.get("per_sem_op_quality") or {}
-        try:
-            per_op_s = json.dumps(per_op, default=str)
-        except Exception:
-            per_op_s = str(per_op)
         return [
             f"quality: {self._fmt_num(row.get('quality'), '.3f')}",
             *([f"quality counts: {json.dumps(row['quality_counts'], default=str)}"]
               if row.get("quality_counts") else []),
-            *([f"per-operator quality: {per_op_s}"] if self.per_op_quality else []),
             f"cost_usd: {self._fmt_num(row.get('cost_usd'), '.6f')}",
             f"latency_s (sum of per-operator times): {self._fmt_num(row.get('latency_s'), '.3f')}",
             f"wall_latency_s (wall-clock time of the run): {self._fmt_num(row.get('wall_latency_s'), '.3f')}",
@@ -461,44 +501,21 @@ class ExplorationCheckerAgent:
         if op_errors:
             measured.append(f"operator errors (the score reflects these, not the idea): "
                             f"{json.dumps(op_errors, default=str)}")
+        long_prompt = next((r["long_prompt_warnings"] for r in executions if r.get("long_prompt_warnings")), None)
+        if long_prompt:
+            measured.extend(f"full-run price warning: {w}" for w in long_prompt)
         return "\n".join([
             f"--- plan {name} ---",
             f"description: {row.get('description', '') or '(none)'}",
-            f"operators: ({self._op_chain(name)})",
+            "operators" + (f" (cost and tokens averaged over {len(executions)} executions)"
+                           if len(executions) > 1 else "") + ":",
+            *self._op_lines(name, executions),
             f"optimizations (recorded by the plan-writing agent):\n{self._fmt_optimizations(optimizations)}",
             *measured,
             *([f"search cost to write + execute this plan: ${search_cost:.4f} "
                "(includes its cost_usd plus the other optimization costs of writing and executing it)"]
               if search_cost is not None else []),
         ])
-
-    def _per_op_quality_legend(self, rows: list[dict]) -> str:
-        """What the `per-operator quality` numbers in each plan block actually mean, for the
-        operator types that appear in these plans.
-
-        The main agent gets this on every execute_plan result (see plan_tools); without it the
-        reviewer is reading bare numbers whose definition it can only guess at -- and guessing
-        wrong is consequential, because a rag_* per-op score deliberately excludes retrieval
-        misses, so a high one is not evidence that the plan's retrieval is working."""
-        if not self.per_op_quality:
-            return ""
-        op_types: list[str] = []
-        for row in rows:
-            entry = self.plans.get(row.get("plan_name"))
-            if entry is None:
-                continue
-            try:
-                op_types.extend(get_op_type(op) for op in iter_operators(entry["plan"]))
-            except Exception:
-                continue
-        docs = _sem_op_quality_docs(op_types)
-        if not docs:
-            return ""
-        lines = "\n".join(f"- {op_type}: {doc}" for op_type, doc in docs.items())
-        return (
-            "How each `per-operator quality` score below is computed (it is a per-operator "
-            f"diagnostic, NOT the plan's objective):\n{lines}"
-        )
 
     @staticmethod
     def _budget_section(budget: dict | None, plan_costs: list[float]) -> str:
@@ -521,23 +538,25 @@ class ExplorationCheckerAgent:
             f"full dataset: {budget['dataset_n']} records",
         ])
 
-    def _build_context(self, reason: str, budget: dict | None = None) -> str:
+    def _build_context(self, reason: str, budget: dict | None = None,
+                       final_plan: str | None = None) -> str:
+        """`final_plan`: at a final-answer check, the plan the agent wants to submit."""
         rows = self._executed_rows()
         costs = (budget or {}).get("plan_search_cost") or {}
         block = lambda r: self._plan_block(r, costs.get(r.get("plan_name")))
         parts = [
-            f"=== Exploration review (trigger: {reason}) ===",
+            f"=== Exploration review (trigger: {reason}{f' {final_plan}' if final_plan else ''}) ===",
             f"The query being answered:\n{self.task}",
             "\n\n".join(
                 s for s in (_quality_metric_section(self.eval_metric),
-                            self._per_op_quality_legend(rows),
                             self._budget_section(
                                 budget, [costs[r["plan_name"]] for r in rows if r.get("plan_name") in costs]
                             )) if s
             ),
             f"Executed plans so far ({len(rows)}), in execution order:",
             "\n\n".join(block(r) for r in rows),
-            "Judge whether any optimization these plans have opened is still underexplored. "
+            "Judge whether the search has understood what limits quality and tried the optimizations "
+            "that could plausibly address it, including ones no plan has tried yet. "
             "Reply with exactly one ```json``` block.",
         ]
         context = "\n\n".join(parts)
