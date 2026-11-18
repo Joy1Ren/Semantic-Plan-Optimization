@@ -1,29 +1,12 @@
-"""Resolve the external benchmark checkouts this repo reads from, without vendoring them.
-
-Both benchmark repos are used in place rather than copied, so their evaluators stay the
-single source of truth for how a benchmark is scored. Neither is pip-installable for our
-purposes:
-
-  - SemBench ships no packaging metadata at all, and its modules import each other as
-    top-level packages (``scenario``, ``evaluator``, ``runner``) rooted at ``src/``.
-  - docetl *is* packaged, but its build only includes ``docetl/**`` and ``server/**``
-    (see its pyproject ``[tool.hatch.build]``), so the CUAD scorer we call --
-    ``experiments.reasoning.evaluation.cuad`` -- is not in the installed distribution.
-
-So each benchmark declares, in its ``benchmark.yaml``, where its checkout lives and which
-subdirectory belongs on ``sys.path``:
+"""Resolve the external benchmark checkouts this repo reads from, used in place so their
+evaluators stay the source of truth. A benchmark declares its checkout in benchmark.yaml:
 
     external_repo:
       env_var: SEMBENCH_ROOT     # optional override of the default location
       default: ../SemBench       # relative to this repository's root (a sibling checkout)
       python_path: src           # subdir to put on sys.path ('.' for the repo root)
 
-This is the only place that puts an *external repository* on ``sys.path``. (The scripts under
-``analysis/`` still self-bootstrap the package root so they can be run directly from any
-working directory; packaging this repo would remove that.)
-
-External checkouts are read-only inputs: everything this repo writes goes under
-``results/`` (see each benchmark's ``results_prefix``).
+Checkouts are read-only: everything this repo writes goes under ``results/``.
 """
 
 from __future__ import annotations

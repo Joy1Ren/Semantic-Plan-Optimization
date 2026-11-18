@@ -1,9 +1,5 @@
-"""Load a benchmark configuration and resolve its path templates.
-
-Both the runner (which writes results) and the analysis scripts (which read them) go through
-here, so a change to a `results_prefix` template in a benchmark.yaml moves the writer and the
-reader together instead of leaving one behind.
-"""
+"""Load a benchmark configuration and resolve its path templates, for the runner and the analysis
+scripts alike."""
 
 from __future__ import annotations
 
@@ -64,17 +60,11 @@ def format_path(template: str, context: dict[str, Any]) -> Path:
 
 
 def load_query(config: dict[str, Any], context: dict[str, Any]) -> tuple[str, str, list[str]]:
-    """One query's (task prompt, evaluation metric, modalities) from a use case's config.
+    """One query's (task prompt, evaluation metric, modalities) from a use case's config, shared
+    by the runner and the sampler CLI.
 
-    Lives here rather than in the runner because the sampler CLI resolves the same query the
-    same way -- a subset built from a different prompt than the one the optimizer later runs
-    would be silently wrong.
-
-    The PROMPT always comes from `task_prompts`, whatever the source type; `query_source` only
-    says where the query's MODALITIES are declared. So `path` is read for type "toml" (the
-    modalities live in the file's `metadata.modalities`) and is meaningless for type "text",
-    which declares them inline -- do not add one to a text source, since nothing would read it.
-    """
+    The prompt always comes from `task_prompts`; `query_source` only says where the modalities
+    are declared: a toml file's `metadata.modalities` (type "toml") or inline (type "text")."""
     import tomllib
 
     source = config["query_source"]
