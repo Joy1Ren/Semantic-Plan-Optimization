@@ -1,0 +1,375 @@
+name: Summary of a Haystack
+quality_adapter: agent_cost_model.experiments.summary_haystack.quality_evaluator
+results_prefix: '{results_dir}/summary_haystack/{use_case}/q{query_id}/{runner}'
+sampling_dir: '{results_dir}/summary_haystack/{use_case}/_sampling'
+sampling_results_path: '{results_dir}/summary_haystack/{use_case}/_sampling/sampling_results.json'
+use_cases:
+  news1:
+    query_source:
+      type: text
+      modalities:
+      - text
+    task_prompts:
+      '1': |-
+        You are given news articles about the main subject "Comprehensive Analysis of Dodge V8 Muscle Cars: Evolution, Performance, and Future Trends."
+
+        Each article is one input row: idx is its ID and document is its text.
+
+        In some of the conversation the following topic is discussed: "Fuel types and their impact on performance".
+        Your objective is to summarize the [N_insights] main insights from the conversations regarding that topic.
+        One of the insights to be summarized is "When running on E85, the Dodge Challenger SRT Demon 170 can reach 1,025 hp because E85 has a higher octane rating, allowing for better knock resistance and more power output." Return all insights on the topic, including this one; the others are about different aspects of the topic than this example.
+        Careful:
+        - [Format] You should format your summary as a bullet point list, where each bullet point is a different insight consisting of a single sentence.
+        - [References] For each insight, you should refer to the relevant articles by using the IDs given in the article list. For example: "Increased demand for vaccines may strain already fragile supply chains [1][4]" which means that the insight is supported by Document 1 and Document 4. No need to say "Article 14", you can just use the following structure: "[14]".
+        - [Length] Your summary should be no longer than 300 words in total.
+
+        N_insights, in square brackets above, is a placeholder: on every LLM call it is replaced by the number of the topic's insights that the documents the plan runs on hold. Copy it verbatim, brackets included, into any instruction that needs it.
+
+        Output a single row with:
+          summary   the bullet point list, one bullet per line
+      '2': |-
+        You are given news articles about the main subject "Comprehensive Analysis of Dodge V8 Muscle Cars: Evolution, Performance, and Future Trends."
+
+        Each article is one input row: idx is its ID and document is its text.
+
+        In some of the conversation the following topic is discussed: "Vehicle performance metrics and comparisons".
+        Your objective is to summarize the [N_insights] main insights from the conversations regarding that topic.
+        One of the insights to be summarized is "The 2023 Dodge Challenger SRT Demon 170 is reported to achieve a 0-60 mph time of 1.66 seconds, making it one of the fastest production cars in this metric." Return all insights on the topic, including this one; the others are about different aspects of the topic than this example.
+        Careful:
+        - [Format] You should format your summary as a bullet point list, where each bullet point is a different insight consisting of a single sentence.
+        - [References] For each insight, you should refer to the relevant articles by using the IDs given in the article list. For example: "Increased demand for vaccines may strain already fragile supply chains [1][4]" which means that the insight is supported by Document 1 and Document 4. No need to say "Article 14", you can just use the following structure: "[14]".
+        - [Length] Your summary should be no longer than 300 words in total.
+
+        N_insights, in square brackets above, is a placeholder: on every LLM call it is replaced by the number of the topic's insights that the documents the plan runs on hold. Copy it verbatim, brackets included, into any instruction that needs it.
+
+        Output a single row with:
+          summary   the bullet point list, one bullet per line
+      '3': |-
+        You are given news articles about the main subject "Comprehensive Analysis of Dodge V8 Muscle Cars: Evolution, Performance, and Future Trends."
+
+        Each article is one input row: idx is its ID and document is its text.
+
+        In some of the conversation the following topic is discussed: "Historical significance and context of the Dodge V8 muscle cars".
+        Your objective is to summarize the [N_insights] main insights from the conversations regarding that topic.
+        One of the insights to be summarized is "The Dodge V8 muscle cars have been a symbol of American performance engineering since the 1950s, starting with the first Red Ram Hemi engine in 1953, producing 140 horsepower." Return all insights on the topic, including this one; the others are about different aspects of the topic than this example.
+        Careful:
+        - [Format] You should format your summary as a bullet point list, where each bullet point is a different insight consisting of a single sentence.
+        - [References] For each insight, you should refer to the relevant articles by using the IDs given in the article list. For example: "Increased demand for vaccines may strain already fragile supply chains [1][4]" which means that the insight is supported by Document 1 and Document 4. No need to say "Article 14", you can just use the following structure: "[14]".
+        - [Length] Your summary should be no longer than 300 words in total.
+
+        N_insights, in square brackets above, is a placeholder: on every LLM call it is replaced by the number of the topic's insights that the documents the plan runs on hold. Copy it verbatim, brackets included, into any instruction that needs it.
+
+        Output a single row with:
+          summary   the bullet point list, one bullet per line
+      '4': |-
+        You are given news articles about the main subject "Comprehensive Analysis of Dodge V8 Muscle Cars: Evolution, Performance, and Future Trends."
+
+        Each article is one input row: idx is its ID and document is its text.
+
+        In some of the conversation the following topic is discussed: "Optional features and customization available for the vehicle".
+        Your objective is to summarize the [N_insights] main insights from the conversations regarding that topic.
+        One of the insights to be summarized is "Customers can enhance safety for high-speed drag racing by purchasing a parachute assembly directly from Dodge's Direct Connection parts catalog." Return all insights on the topic, including this one; the others are about different aspects of the topic than this example.
+        Careful:
+        - [Format] You should format your summary as a bullet point list, where each bullet point is a different insight consisting of a single sentence.
+        - [References] For each insight, you should refer to the relevant articles by using the IDs given in the article list. For example: "Increased demand for vaccines may strain already fragile supply chains [1][4]" which means that the insight is supported by Document 1 and Document 4. No need to say "Article 14", you can just use the following structure: "[14]".
+        - [Length] Your summary should be no longer than 300 words in total.
+
+        N_insights, in square brackets above, is a placeholder: on every LLM call it is replaced by the number of the topic's insights that the documents the plan runs on hold. Copy it verbatim, brackets included, into any instruction that needs it.
+
+        Output a single row with:
+          summary   the bullet point list, one bullet per line
+      '5': |-
+        You are given news articles about the main subject "Comprehensive Analysis of Dodge V8 Muscle Cars: Evolution, Performance, and Future Trends."
+
+        Each article is one input row: idx is its ID and document is its text.
+
+        In some of the conversation the following topic is discussed: "Compliance with NHRA regulations and associated requirements".
+        Your objective is to summarize the [N_insights] main insights from the conversations regarding that topic.
+        One of the insights to be summarized is "Despite the Demon 170's factory performance, it requires additional modifications such as a roll cage and parachute to meet NHRA compliance for cars running under 9 seconds in the quarter-mile." Return all insights on the topic, including this one; the others are about different aspects of the topic than this example.
+        Careful:
+        - [Format] You should format your summary as a bullet point list, where each bullet point is a different insight consisting of a single sentence.
+        - [References] For each insight, you should refer to the relevant articles by using the IDs given in the article list. For example: "Increased demand for vaccines may strain already fragile supply chains [1][4]" which means that the insight is supported by Document 1 and Document 4. No need to say "Article 14", you can just use the following structure: "[14]".
+        - [Length] Your summary should be no longer than 300 words in total.
+
+        N_insights, in square brackets above, is a placeholder: on every LLM call it is replaced by the number of the topic's insights that the documents the plan runs on hold. Copy it verbatim, brackets included, into any instruction that needs it.
+
+        Output a single row with:
+          summary   the bullet point list, one bullet per line
+      '6': |-
+        You are given news articles about the main subject "Comprehensive Analysis of Dodge V8 Muscle Cars: Evolution, Performance, and Future Trends."
+
+        Each article is one input row: idx is its ID and document is its text.
+
+        In some of the conversation the following topic is discussed: "Production limits and manufacturing timelines".
+        Your objective is to summarize the [N_insights] main insights from the conversations regarding that topic.
+        One of the insights to be summarized is "Dodge intends to produce 3,000 units of the Demon 170 for the U.S. and 300 for Canada, matching the same production run from 2018." Return all insights on the topic, including this one; the others are about different aspects of the topic than this example.
+        Careful:
+        - [Format] You should format your summary as a bullet point list, where each bullet point is a different insight consisting of a single sentence.
+        - [References] For each insight, you should refer to the relevant articles by using the IDs given in the article list. For example: "Increased demand for vaccines may strain already fragile supply chains [1][4]" which means that the insight is supported by Document 1 and Document 4. No need to say "Article 14", you can just use the following structure: "[14]".
+        - [Length] Your summary should be no longer than 300 words in total.
+
+        N_insights, in square brackets above, is a placeholder: on every LLM call it is replaced by the number of the topic's insights that the documents the plan runs on hold. Copy it verbatim, brackets included, into any instruction that needs it.
+
+        Output a single row with:
+          summary   the bullet point list, one bullet per line
+      '7': |-
+        You are given news articles about the main subject "Comprehensive Analysis of Dodge V8 Muscle Cars: Evolution, Performance, and Future Trends."
+
+        Each article is one input row: idx is its ID and document is its text.
+
+        In some of the conversation the following topic is discussed: "Branding strategies and marketing themes for the Demon 170".
+        Your objective is to summarize the [N_insights] main insights from the conversations regarding that topic.
+        One of the insights to be summarized is "Dodge is leveraging E85 fuel as a central branding theme for the Demon 170, incorporating the 'ALCOHOL INJECTED' phrase on the hood scoop and using yellow hues to draw attention to the ethanol component." Return all insights on the topic, including this one; the others are about different aspects of the topic than this example.
+        Careful:
+        - [Format] You should format your summary as a bullet point list, where each bullet point is a different insight consisting of a single sentence.
+        - [References] For each insight, you should refer to the relevant articles by using the IDs given in the article list. For example: "Increased demand for vaccines may strain already fragile supply chains [1][4]" which means that the insight is supported by Document 1 and Document 4. No need to say "Article 14", you can just use the following structure: "[14]".
+        - [Length] Your summary should be no longer than 300 words in total.
+
+        N_insights, in square brackets above, is a placeholder: on every LLM call it is replaced by the number of the topic's insights that the documents the plan runs on hold. Copy it verbatim, brackets included, into any instruction that needs it.
+
+        Output a single row with:
+          summary   the bullet point list, one bullet per line
+      '8': |-
+        You are given news articles about the main subject "Comprehensive Analysis of Dodge V8 Muscle Cars: Evolution, Performance, and Future Trends."
+
+        Each article is one input row: idx is its ID and document is its text.
+
+        In some of the conversation the following topic is discussed: "Plans for future electric models and transition from V8 engines".
+        Your objective is to summarize the [N_insights] main insights from the conversations regarding that topic.
+        One of the insights to be summarized is "Dodge is gearing up for a future dominated by electric vehicles with the upcoming launch of its electric Charger Daytona SRT in 2024." Return all insights on the topic, including this one; the others are about different aspects of the topic than this example.
+        Careful:
+        - [Format] You should format your summary as a bullet point list, where each bullet point is a different insight consisting of a single sentence.
+        - [References] For each insight, you should refer to the relevant articles by using the IDs given in the article list. For example: "Increased demand for vaccines may strain already fragile supply chains [1][4]" which means that the insight is supported by Document 1 and Document 4. No need to say "Article 14", you can just use the following structure: "[14]".
+        - [Length] Your summary should be no longer than 300 words in total.
+
+        N_insights, in square brackets above, is a placeholder: on every LLM call it is replaced by the number of the topic's insights that the documents the plan runs on hold. Copy it verbatim, brackets included, into any instruction that needs it.
+
+        Output a single row with:
+          summary   the bullet point list, one bullet per line
+      '9': |-
+        You are given news articles about the main subject "Comprehensive Analysis of Dodge V8 Muscle Cars: Evolution, Performance, and Future Trends."
+
+        Each article is one input row: idx is its ID and document is its text.
+
+        In some of the conversation the following topic is discussed: "Detailed changes and improvements in engine design".
+        Your objective is to summarize the [N_insights] main insights from the conversations regarding that topic.
+        One of the insights to be summarized is "The new Demon 170 engine underwent extensive revisions, including the replacement of significant components such as pistons, connecting rods, and billet main caps to handle the higher power output." Return all insights on the topic, including this one; the others are about different aspects of the topic than this example.
+        Careful:
+        - [Format] You should format your summary as a bullet point list, where each bullet point is a different insight consisting of a single sentence.
+        - [References] For each insight, you should refer to the relevant articles by using the IDs given in the article list. For example: "Increased demand for vaccines may strain already fragile supply chains [1][4]" which means that the insight is supported by Document 1 and Document 4. No need to say "Article 14", you can just use the following structure: "[14]".
+        - [Length] Your summary should be no longer than 300 words in total.
+
+        N_insights, in square brackets above, is a placeholder: on every LLM call it is replaced by the number of the topic's insights that the documents the plan runs on hold. Copy it verbatim, brackets included, into any instruction that needs it.
+
+        Output a single row with:
+          summary   the bullet point list, one bullet per line
+    query_metrics:
+      '1': summary_citation
+      '2': summary_citation
+      '3': summary_citation
+      '4': summary_citation
+      '5': summary_citation
+      '6': summary_citation
+      '7': summary_citation
+      '8': summary_citation
+      '9': summary_citation
+    dataset:
+      directory: '{benchmark_dir}/dataset/news1'
+      source_csv: haystack.csv
+      id_col: idx
+    subset_path: '{benchmark_dir}/datasubset_opt/news1/Q{query_id}_subset.csv'
+    ground_truth_path: '{benchmark_dir}/ground_truth/news1/Q{query_id}_gt.csv'
+  conv1:
+    query_source:
+      type: text
+      modalities:
+      - text
+    task_prompts:
+      '1': |-
+        You are given conversations within the following scenario: "A 25-minute meeting between a doctor and a patient discussing the patient's recent health concerns and treatment options.".
+        The conversations involve the following participants: doctor, patient. In each conversation, the participants might be different, with different names, but all the conversations fall into the same scenario.
+
+        Each conversation is one input row: idx is its ID and document is its text.
+
+        Your objective is to produce a summary of all the document with [N_insights] bullet points covering the main insights regarding the following query: Are recent symptoms being discussed?.
+        One of the insights to be summarized is "The doctor asks when the recent symptoms first appeared, and the patient responds that the symptoms started roughly 10 days ago." Return all insights on the topic, including this one; the others are about different aspects of the topic than this example.
+        Careful:
+        - [Format] You should format your summary as a bullet point list, where each bullet point is a different insight.
+        - [References] For each insight, you should refer to the relevant conversations by using the IDs given in the conversation list. For example: "some of the doctors ask patients for their medical history[1][4]" which means that the insight is supported by Document 1 and Document 4. No need to say "Conversation 14", you can just use the following structure: "[14]".
+        - [Length] Your summary should be no longer than 300 words in total.
+
+        N_insights, in square brackets above, is a placeholder: on every LLM call it is replaced by the number of the query's insights that the documents the plan runs on hold. Copy it verbatim, brackets included, into any instruction that needs it.
+
+        Output a single row with:
+          summary   the bullet point list, one bullet per line
+      '2': |-
+        You are given conversations within the following scenario: "A 25-minute meeting between a doctor and a patient discussing the patient's recent health concerns and treatment options.".
+        The conversations involve the following participants: doctor, patient. In each conversation, the participants might be different, with different names, but all the conversations fall into the same scenario.
+
+        Each conversation is one input row: idx is its ID and document is its text.
+
+        Your objective is to produce a summary of all the document with [N_insights] bullet points covering the main insights regarding the following query: Are treatment options being discussed?.
+        One of the insights to be summarized is "The patient asks the doctor about the different medication options available, including brand names and generics." Return all insights on the topic, including this one; the others are about different aspects of the topic than this example.
+        Careful:
+        - [Format] You should format your summary as a bullet point list, where each bullet point is a different insight.
+        - [References] For each insight, you should refer to the relevant conversations by using the IDs given in the conversation list. For example: "some of the doctors ask patients for their medical history[1][4]" which means that the insight is supported by Document 1 and Document 4. No need to say "Conversation 14", you can just use the following structure: "[14]".
+        - [Length] Your summary should be no longer than 300 words in total.
+
+        N_insights, in square brackets above, is a placeholder: on every LLM call it is replaced by the number of the query's insights that the documents the plan runs on hold. Copy it verbatim, brackets included, into any instruction that needs it.
+
+        Output a single row with:
+          summary   the bullet point list, one bullet per line
+      '3': |-
+        You are given conversations within the following scenario: "A 25-minute meeting between a doctor and a patient discussing the patient's recent health concerns and treatment options.".
+        The conversations involve the following participants: doctor, patient. In each conversation, the participants might be different, with different names, but all the conversations fall into the same scenario.
+
+        Each conversation is one input row: idx is its ID and document is its text.
+
+        Your objective is to produce a summary of all the document with [N_insights] bullet points covering the main insights regarding the following query: Are medication changes being reviewed?.
+        One of the insights to be summarized is "The doctor reviews the patient's current dosage of a heart medication and considers increasing it based on recent blood pressure readings." Return all insights on the topic, including this one; the others are about different aspects of the topic than this example.
+        Careful:
+        - [Format] You should format your summary as a bullet point list, where each bullet point is a different insight.
+        - [References] For each insight, you should refer to the relevant conversations by using the IDs given in the conversation list. For example: "some of the doctors ask patients for their medical history[1][4]" which means that the insight is supported by Document 1 and Document 4. No need to say "Conversation 14", you can just use the following structure: "[14]".
+        - [Length] Your summary should be no longer than 300 words in total.
+
+        N_insights, in square brackets above, is a placeholder: on every LLM call it is replaced by the number of the query's insights that the documents the plan runs on hold. Copy it verbatim, brackets included, into any instruction that needs it.
+
+        Output a single row with:
+          summary   the bullet point list, one bullet per line
+      '4': |-
+        You are given conversations within the following scenario: "A 25-minute meeting between a doctor and a patient discussing the patient's recent health concerns and treatment options.".
+        The conversations involve the following participants: doctor, patient. In each conversation, the participants might be different, with different names, but all the conversations fall into the same scenario.
+
+        Each conversation is one input row: idx is its ID and document is its text.
+
+        Your objective is to produce a summary of all the document with [N_insights] bullet points covering the main insights regarding the following query: Was the diagnosis explanation given?.
+        One of the insights to be summarized is "The doctor explains that the diagnosis is based on the results of a recent blood test indicating elevated inflammatory markers." Return all insights on the topic, including this one; the others are about different aspects of the topic than this example.
+        Careful:
+        - [Format] You should format your summary as a bullet point list, where each bullet point is a different insight.
+        - [References] For each insight, you should refer to the relevant conversations by using the IDs given in the conversation list. For example: "some of the doctors ask patients for their medical history[1][4]" which means that the insight is supported by Document 1 and Document 4. No need to say "Conversation 14", you can just use the following structure: "[14]".
+        - [Length] Your summary should be no longer than 300 words in total.
+
+        N_insights, in square brackets above, is a placeholder: on every LLM call it is replaced by the number of the query's insights that the documents the plan runs on hold. Copy it verbatim, brackets included, into any instruction that needs it.
+
+        Output a single row with:
+          summary   the bullet point list, one bullet per line
+      '5': |-
+        You are given conversations within the following scenario: "A 25-minute meeting between a doctor and a patient discussing the patient's recent health concerns and treatment options.".
+        The conversations involve the following participants: doctor, patient. In each conversation, the participants might be different, with different names, but all the conversations fall into the same scenario.
+
+        Each conversation is one input row: idx is its ID and document is its text.
+
+        Your objective is to produce a summary of all the document with [N_insights] bullet points covering the main insights regarding the following query: Were lifestyle changes recommended?.
+        One of the insights to be summarized is "The doctor recommends the patient integrate 30 minutes of moderate-intensity exercise, such as brisk walking or cycling, at least 5 days a week to improve overall health." Return all insights on the topic, including this one; the others are about different aspects of the topic than this example.
+        Careful:
+        - [Format] You should format your summary as a bullet point list, where each bullet point is a different insight.
+        - [References] For each insight, you should refer to the relevant conversations by using the IDs given in the conversation list. For example: "some of the doctors ask patients for their medical history[1][4]" which means that the insight is supported by Document 1 and Document 4. No need to say "Conversation 14", you can just use the following structure: "[14]".
+        - [Length] Your summary should be no longer than 300 words in total.
+
+        N_insights, in square brackets above, is a placeholder: on every LLM call it is replaced by the number of the query's insights that the documents the plan runs on hold. Copy it verbatim, brackets included, into any instruction that needs it.
+
+        Output a single row with:
+          summary   the bullet point list, one bullet per line
+      '6': |-
+        You are given conversations within the following scenario: "A 25-minute meeting between a doctor and a patient discussing the patient's recent health concerns and treatment options.".
+        The conversations involve the following participants: doctor, patient. In each conversation, the participants might be different, with different names, but all the conversations fall into the same scenario.
+
+        Each conversation is one input row: idx is its ID and document is its text.
+
+        Your objective is to produce a summary of all the document with [N_insights] bullet points covering the main insights regarding the following query: Are they discussing lab tests?.
+        One of the insights to be summarized is "The doctor suggests ordering specific lab tests, including a complete blood count (CBC) and thyroid function tests, to get a better understanding of the patient's condition." Return all insights on the topic, including this one; the others are about different aspects of the topic than this example.
+        Careful:
+        - [Format] You should format your summary as a bullet point list, where each bullet point is a different insight.
+        - [References] For each insight, you should refer to the relevant conversations by using the IDs given in the conversation list. For example: "some of the doctors ask patients for their medical history[1][4]" which means that the insight is supported by Document 1 and Document 4. No need to say "Conversation 14", you can just use the following structure: "[14]".
+        - [Length] Your summary should be no longer than 300 words in total.
+
+        N_insights, in square brackets above, is a placeholder: on every LLM call it is replaced by the number of the query's insights that the documents the plan runs on hold. Copy it verbatim, brackets included, into any instruction that needs it.
+
+        Output a single row with:
+          summary   the bullet point list, one bullet per line
+      '7': |-
+        You are given conversations within the following scenario: "A 25-minute meeting between a doctor and a patient discussing the patient's recent health concerns and treatment options.".
+        The conversations involve the following participants: doctor, patient. In each conversation, the participants might be different, with different names, but all the conversations fall into the same scenario.
+
+        Each conversation is one input row: idx is its ID and document is its text.
+
+        Your objective is to produce a summary of all the document with [N_insights] bullet points covering the main insights regarding the following query: Was a referral to a specialist discussed?.
+        One of the insights to be summarized is "The doctor explains that based on the patient's symptomatology and recent test results, a referral to a cardiologist might be necessary to rule out any underlying heart conditions." Return all insights on the topic, including this one; the others are about different aspects of the topic than this example.
+        Careful:
+        - [Format] You should format your summary as a bullet point list, where each bullet point is a different insight.
+        - [References] For each insight, you should refer to the relevant conversations by using the IDs given in the conversation list. For example: "some of the doctors ask patients for their medical history[1][4]" which means that the insight is supported by Document 1 and Document 4. No need to say "Conversation 14", you can just use the following structure: "[14]".
+        - [Length] Your summary should be no longer than 300 words in total.
+
+        N_insights, in square brackets above, is a placeholder: on every LLM call it is replaced by the number of the query's insights that the documents the plan runs on hold. Copy it verbatim, brackets included, into any instruction that needs it.
+
+        Output a single row with:
+          summary   the bullet point list, one bullet per line
+      '8': |-
+        You are given conversations within the following scenario: "A 25-minute meeting between a doctor and a patient discussing the patient's recent health concerns and treatment options.".
+        The conversations involve the following participants: doctor, patient. In each conversation, the participants might be different, with different names, but all the conversations fall into the same scenario.
+
+        Each conversation is one input row: idx is its ID and document is its text.
+
+        Your objective is to produce a summary of all the document with [N_insights] bullet points covering the main insights regarding the following query: Did they discuss managing symptoms daily?.
+        One of the insights to be summarized is "The patient asks the doctor for advice on how to adjust their daily routine to better manage symptoms, and the doctor suggests incorporating regular breaks and structured activities." Return all insights on the topic, including this one; the others are about different aspects of the topic than this example.
+        Careful:
+        - [Format] You should format your summary as a bullet point list, where each bullet point is a different insight.
+        - [References] For each insight, you should refer to the relevant conversations by using the IDs given in the conversation list. For example: "some of the doctors ask patients for their medical history[1][4]" which means that the insight is supported by Document 1 and Document 4. No need to say "Conversation 14", you can just use the following structure: "[14]".
+        - [Length] Your summary should be no longer than 300 words in total.
+
+        N_insights, in square brackets above, is a placeholder: on every LLM call it is replaced by the number of the query's insights that the documents the plan runs on hold. Copy it verbatim, brackets included, into any instruction that needs it.
+
+        Output a single row with:
+          summary   the bullet point list, one bullet per line
+      '9': |-
+        You are given conversations within the following scenario: "A 25-minute meeting between a doctor and a patient discussing the patient's recent health concerns and treatment options.".
+        The conversations involve the following participants: doctor, patient. In each conversation, the participants might be different, with different names, but all the conversations fall into the same scenario.
+
+        Each conversation is one input row: idx is its ID and document is its text.
+
+        Your objective is to produce a summary of all the document with [N_insights] bullet points covering the main insights regarding the following query: Are home health monitoring tips discussed?.
+        One of the insights to be summarized is "The doctor advises the patient to track their blood pressure twice daily, once in the morning and once in the evening, using a home blood pressure monitor." Return all insights on the topic, including this one; the others are about different aspects of the topic than this example.
+        Careful:
+        - [Format] You should format your summary as a bullet point list, where each bullet point is a different insight.
+        - [References] For each insight, you should refer to the relevant conversations by using the IDs given in the conversation list. For example: "some of the doctors ask patients for their medical history[1][4]" which means that the insight is supported by Document 1 and Document 4. No need to say "Conversation 14", you can just use the following structure: "[14]".
+        - [Length] Your summary should be no longer than 300 words in total.
+
+        N_insights, in square brackets above, is a placeholder: on every LLM call it is replaced by the number of the query's insights that the documents the plan runs on hold. Copy it verbatim, brackets included, into any instruction that needs it.
+
+        Output a single row with:
+          summary   the bullet point list, one bullet per line
+      '10': |-
+        You are given conversations within the following scenario: "A 25-minute meeting between a doctor and a patient discussing the patient's recent health concerns and treatment options.".
+        The conversations involve the following participants: doctor, patient. In each conversation, the participants might be different, with different names, but all the conversations fall into the same scenario.
+
+        Each conversation is one input row: idx is its ID and document is its text.
+
+        Your objective is to produce a summary of all the document with [N_insights] bullet points covering the main insights regarding the following query: Is physical health impacting mental well-being?.
+        One of the insights to be summarized is "The doctor discusses how their recent study shows that 78% of patients with chronic pain also experience significant stress, thereby affecting their mental well-being." Return all insights on the topic, including this one; the others are about different aspects of the topic than this example.
+        Careful:
+        - [Format] You should format your summary as a bullet point list, where each bullet point is a different insight.
+        - [References] For each insight, you should refer to the relevant conversations by using the IDs given in the conversation list. For example: "some of the doctors ask patients for their medical history[1][4]" which means that the insight is supported by Document 1 and Document 4. No need to say "Conversation 14", you can just use the following structure: "[14]".
+        - [Length] Your summary should be no longer than 300 words in total.
+
+        N_insights, in square brackets above, is a placeholder: on every LLM call it is replaced by the number of the query's insights that the documents the plan runs on hold. Copy it verbatim, brackets included, into any instruction that needs it.
+
+        Output a single row with:
+          summary   the bullet point list, one bullet per line
+    query_metrics:
+      '1': summary_citation
+      '2': summary_citation
+      '3': summary_citation
+      '4': summary_citation
+      '5': summary_citation
+      '6': summary_citation
+      '7': summary_citation
+      '8': summary_citation
+      '9': summary_citation
+      '10': summary_citation
+    dataset:
+      directory: '{benchmark_dir}/dataset/conv1'
+      source_csv: haystack.csv
+      id_col: idx
+    subset_path: '{benchmark_dir}/datasubset_opt/conv1/Q{query_id}_subset.csv'
+    ground_truth_path: '{benchmark_dir}/ground_truth/conv1/Q{query_id}_gt.csv'
+expose_insight: true

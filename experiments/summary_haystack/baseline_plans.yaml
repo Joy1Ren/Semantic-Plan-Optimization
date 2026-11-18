@@ -1,0 +1,369 @@
+# Baseline plans for Summary of a Haystack: one sem_agg reading every document, with SummHay's prompt
+# as its instruction (benchmark.yaml's task prompt minus its placeholder note and output spec).
+# Run with experiments/run_baseline.py. Keyed by use case, then query id.
+#
+# Every LLM operator uses gpt-6-luna.
+
+news1:
+  '1': |
+    agg = """You are given news articles about the main subject "Comprehensive Analysis of Dodge V8 Muscle Cars: Evolution, Performance, and Future Trends."
+
+    Each article is one input row: idx is its ID and document is its text.
+
+    In some of the conversation the following topic is discussed: "Fuel types and their impact on performance".
+    Your objective is to summarize the [N_insights] main insights from the conversations regarding that topic.
+    Careful:
+    - [Format] You should format your summary as a bullet point list, where each bullet point is a different insight consisting of a single sentence.
+    - [References] For each insight, you should refer to the relevant articles by using the IDs given in the article list. For example: "Increased demand for vaccines may strain already fragile supply chains [1][4]" which means that the insight is supported by Document 1 and Document 4. No need to say "Article 14", you can just use the following structure: "[14]".
+    - [Length] Your summary should be no longer than 300 words in total."""
+    pipe = PhysicalPipeline(plan_name, "articles", load_data(source_csv))
+    pipe.sem_agg(
+        cols=[{"name": "summary", "type": str, "description": "The bullet point list, one bullet per line."}],
+        agg=agg,
+        model=pz.Model.GPT_6_LUNA,
+        depends_on=["idx", "document"],
+    )
+    pipe
+  '2': |
+    agg = """You are given news articles about the main subject "Comprehensive Analysis of Dodge V8 Muscle Cars: Evolution, Performance, and Future Trends."
+
+    Each article is one input row: idx is its ID and document is its text.
+
+    In some of the conversation the following topic is discussed: "Vehicle performance metrics and comparisons".
+    Your objective is to summarize the [N_insights] main insights from the conversations regarding that topic.
+    Careful:
+    - [Format] You should format your summary as a bullet point list, where each bullet point is a different insight consisting of a single sentence.
+    - [References] For each insight, you should refer to the relevant articles by using the IDs given in the article list. For example: "Increased demand for vaccines may strain already fragile supply chains [1][4]" which means that the insight is supported by Document 1 and Document 4. No need to say "Article 14", you can just use the following structure: "[14]".
+    - [Length] Your summary should be no longer than 300 words in total."""
+    pipe = PhysicalPipeline(plan_name, "articles", load_data(source_csv))
+    pipe.sem_agg(
+        cols=[{"name": "summary", "type": str, "description": "The bullet point list, one bullet per line."}],
+        agg=agg,
+        model=pz.Model.GPT_6_LUNA,
+        depends_on=["idx", "document"],
+    )
+    pipe
+  '3': |
+    agg = """You are given news articles about the main subject "Comprehensive Analysis of Dodge V8 Muscle Cars: Evolution, Performance, and Future Trends."
+
+    Each article is one input row: idx is its ID and document is its text.
+
+    In some of the conversation the following topic is discussed: "Historical significance and context of the Dodge V8 muscle cars".
+    Your objective is to summarize the [N_insights] main insights from the conversations regarding that topic.
+    Careful:
+    - [Format] You should format your summary as a bullet point list, where each bullet point is a different insight consisting of a single sentence.
+    - [References] For each insight, you should refer to the relevant articles by using the IDs given in the article list. For example: "Increased demand for vaccines may strain already fragile supply chains [1][4]" which means that the insight is supported by Document 1 and Document 4. No need to say "Article 14", you can just use the following structure: "[14]".
+    - [Length] Your summary should be no longer than 300 words in total."""
+    pipe = PhysicalPipeline(plan_name, "articles", load_data(source_csv))
+    pipe.sem_agg(
+        cols=[{"name": "summary", "type": str, "description": "The bullet point list, one bullet per line."}],
+        agg=agg,
+        model=pz.Model.GPT_6_LUNA,
+        depends_on=["idx", "document"],
+    )
+    pipe
+  '4': |
+    agg = """You are given news articles about the main subject "Comprehensive Analysis of Dodge V8 Muscle Cars: Evolution, Performance, and Future Trends."
+
+    Each article is one input row: idx is its ID and document is its text.
+
+    In some of the conversation the following topic is discussed: "Optional features and customization available for the vehicle".
+    Your objective is to summarize the [N_insights] main insights from the conversations regarding that topic.
+    Careful:
+    - [Format] You should format your summary as a bullet point list, where each bullet point is a different insight consisting of a single sentence.
+    - [References] For each insight, you should refer to the relevant articles by using the IDs given in the article list. For example: "Increased demand for vaccines may strain already fragile supply chains [1][4]" which means that the insight is supported by Document 1 and Document 4. No need to say "Article 14", you can just use the following structure: "[14]".
+    - [Length] Your summary should be no longer than 300 words in total."""
+    pipe = PhysicalPipeline(plan_name, "articles", load_data(source_csv))
+    pipe.sem_agg(
+        cols=[{"name": "summary", "type": str, "description": "The bullet point list, one bullet per line."}],
+        agg=agg,
+        model=pz.Model.GPT_6_LUNA,
+        depends_on=["idx", "document"],
+    )
+    pipe
+  '5': |
+    agg = """You are given news articles about the main subject "Comprehensive Analysis of Dodge V8 Muscle Cars: Evolution, Performance, and Future Trends."
+
+    Each article is one input row: idx is its ID and document is its text.
+
+    In some of the conversation the following topic is discussed: "Compliance with NHRA regulations and associated requirements".
+    Your objective is to summarize the [N_insights] main insights from the conversations regarding that topic.
+    Careful:
+    - [Format] You should format your summary as a bullet point list, where each bullet point is a different insight consisting of a single sentence.
+    - [References] For each insight, you should refer to the relevant articles by using the IDs given in the article list. For example: "Increased demand for vaccines may strain already fragile supply chains [1][4]" which means that the insight is supported by Document 1 and Document 4. No need to say "Article 14", you can just use the following structure: "[14]".
+    - [Length] Your summary should be no longer than 300 words in total."""
+    pipe = PhysicalPipeline(plan_name, "articles", load_data(source_csv))
+    pipe.sem_agg(
+        cols=[{"name": "summary", "type": str, "description": "The bullet point list, one bullet per line."}],
+        agg=agg,
+        model=pz.Model.GPT_6_LUNA,
+        depends_on=["idx", "document"],
+    )
+    pipe
+  '6': |
+    agg = """You are given news articles about the main subject "Comprehensive Analysis of Dodge V8 Muscle Cars: Evolution, Performance, and Future Trends."
+
+    Each article is one input row: idx is its ID and document is its text.
+
+    In some of the conversation the following topic is discussed: "Production limits and manufacturing timelines".
+    Your objective is to summarize the [N_insights] main insights from the conversations regarding that topic.
+    Careful:
+    - [Format] You should format your summary as a bullet point list, where each bullet point is a different insight consisting of a single sentence.
+    - [References] For each insight, you should refer to the relevant articles by using the IDs given in the article list. For example: "Increased demand for vaccines may strain already fragile supply chains [1][4]" which means that the insight is supported by Document 1 and Document 4. No need to say "Article 14", you can just use the following structure: "[14]".
+    - [Length] Your summary should be no longer than 300 words in total."""
+    pipe = PhysicalPipeline(plan_name, "articles", load_data(source_csv))
+    pipe.sem_agg(
+        cols=[{"name": "summary", "type": str, "description": "The bullet point list, one bullet per line."}],
+        agg=agg,
+        model=pz.Model.GPT_6_LUNA,
+        depends_on=["idx", "document"],
+    )
+    pipe
+  '7': |
+    agg = """You are given news articles about the main subject "Comprehensive Analysis of Dodge V8 Muscle Cars: Evolution, Performance, and Future Trends."
+
+    Each article is one input row: idx is its ID and document is its text.
+
+    In some of the conversation the following topic is discussed: "Branding strategies and marketing themes for the Demon 170".
+    Your objective is to summarize the [N_insights] main insights from the conversations regarding that topic.
+    Careful:
+    - [Format] You should format your summary as a bullet point list, where each bullet point is a different insight consisting of a single sentence.
+    - [References] For each insight, you should refer to the relevant articles by using the IDs given in the article list. For example: "Increased demand for vaccines may strain already fragile supply chains [1][4]" which means that the insight is supported by Document 1 and Document 4. No need to say "Article 14", you can just use the following structure: "[14]".
+    - [Length] Your summary should be no longer than 300 words in total."""
+    pipe = PhysicalPipeline(plan_name, "articles", load_data(source_csv))
+    pipe.sem_agg(
+        cols=[{"name": "summary", "type": str, "description": "The bullet point list, one bullet per line."}],
+        agg=agg,
+        model=pz.Model.GPT_6_LUNA,
+        depends_on=["idx", "document"],
+    )
+    pipe
+  '8': |
+    agg = """You are given news articles about the main subject "Comprehensive Analysis of Dodge V8 Muscle Cars: Evolution, Performance, and Future Trends."
+
+    Each article is one input row: idx is its ID and document is its text.
+
+    In some of the conversation the following topic is discussed: "Plans for future electric models and transition from V8 engines".
+    Your objective is to summarize the [N_insights] main insights from the conversations regarding that topic.
+    Careful:
+    - [Format] You should format your summary as a bullet point list, where each bullet point is a different insight consisting of a single sentence.
+    - [References] For each insight, you should refer to the relevant articles by using the IDs given in the article list. For example: "Increased demand for vaccines may strain already fragile supply chains [1][4]" which means that the insight is supported by Document 1 and Document 4. No need to say "Article 14", you can just use the following structure: "[14]".
+    - [Length] Your summary should be no longer than 300 words in total."""
+    pipe = PhysicalPipeline(plan_name, "articles", load_data(source_csv))
+    pipe.sem_agg(
+        cols=[{"name": "summary", "type": str, "description": "The bullet point list, one bullet per line."}],
+        agg=agg,
+        model=pz.Model.GPT_6_LUNA,
+        depends_on=["idx", "document"],
+    )
+    pipe
+  '9': |
+    agg = """You are given news articles about the main subject "Comprehensive Analysis of Dodge V8 Muscle Cars: Evolution, Performance, and Future Trends."
+
+    Each article is one input row: idx is its ID and document is its text.
+
+    In some of the conversation the following topic is discussed: "Detailed changes and improvements in engine design".
+    Your objective is to summarize the [N_insights] main insights from the conversations regarding that topic.
+    Careful:
+    - [Format] You should format your summary as a bullet point list, where each bullet point is a different insight consisting of a single sentence.
+    - [References] For each insight, you should refer to the relevant articles by using the IDs given in the article list. For example: "Increased demand for vaccines may strain already fragile supply chains [1][4]" which means that the insight is supported by Document 1 and Document 4. No need to say "Article 14", you can just use the following structure: "[14]".
+    - [Length] Your summary should be no longer than 300 words in total."""
+    pipe = PhysicalPipeline(plan_name, "articles", load_data(source_csv))
+    pipe.sem_agg(
+        cols=[{"name": "summary", "type": str, "description": "The bullet point list, one bullet per line."}],
+        agg=agg,
+        model=pz.Model.GPT_6_LUNA,
+        depends_on=["idx", "document"],
+    )
+    pipe
+conv1:
+  '1': |
+    agg = """You are given conversations within the following scenario: "A 25-minute meeting between a doctor and a patient discussing the patient's recent health concerns and treatment options.".
+    The conversations involve the following participants: doctor, patient. In each conversation, the participants might be different, with different names, but all the conversations fall into the same scenario.
+
+    Each conversation is one input row: idx is its ID and document is its text.
+
+    Your objective is to produce a summary of all the document with [N_insights] bullet points covering the main insights regarding the following query: Are recent symptoms being discussed?.
+    Careful:
+    - [Format] You should format your summary as a bullet point list, where each bullet point is a different insight.
+    - [References] For each insight, you should refer to the relevant conversations by using the IDs given in the conversation list. For example: "some of the doctors ask patients for their medical history[1][4]" which means that the insight is supported by Document 1 and Document 4. No need to say "Conversation 14", you can just use the following structure: "[14]".
+    - [Length] Your summary should be no longer than 300 words in total."""
+    pipe = PhysicalPipeline(plan_name, "conversations", load_data(source_csv))
+    pipe.sem_agg(
+        cols=[{"name": "summary", "type": str, "description": "The bullet point list, one bullet per line."}],
+        agg=agg,
+        model=pz.Model.GPT_6_LUNA,
+        depends_on=["idx", "document"],
+    )
+    pipe
+  '2': |
+    agg = """You are given conversations within the following scenario: "A 25-minute meeting between a doctor and a patient discussing the patient's recent health concerns and treatment options.".
+    The conversations involve the following participants: doctor, patient. In each conversation, the participants might be different, with different names, but all the conversations fall into the same scenario.
+
+    Each conversation is one input row: idx is its ID and document is its text.
+
+    Your objective is to produce a summary of all the document with [N_insights] bullet points covering the main insights regarding the following query: Are treatment options being discussed?.
+    Careful:
+    - [Format] You should format your summary as a bullet point list, where each bullet point is a different insight.
+    - [References] For each insight, you should refer to the relevant conversations by using the IDs given in the conversation list. For example: "some of the doctors ask patients for their medical history[1][4]" which means that the insight is supported by Document 1 and Document 4. No need to say "Conversation 14", you can just use the following structure: "[14]".
+    - [Length] Your summary should be no longer than 300 words in total."""
+    pipe = PhysicalPipeline(plan_name, "conversations", load_data(source_csv))
+    pipe.sem_agg(
+        cols=[{"name": "summary", "type": str, "description": "The bullet point list, one bullet per line."}],
+        agg=agg,
+        model=pz.Model.GPT_6_LUNA,
+        depends_on=["idx", "document"],
+    )
+    pipe
+  '3': |
+    agg = """You are given conversations within the following scenario: "A 25-minute meeting between a doctor and a patient discussing the patient's recent health concerns and treatment options.".
+    The conversations involve the following participants: doctor, patient. In each conversation, the participants might be different, with different names, but all the conversations fall into the same scenario.
+
+    Each conversation is one input row: idx is its ID and document is its text.
+
+    Your objective is to produce a summary of all the document with [N_insights] bullet points covering the main insights regarding the following query: Are medication changes being reviewed?.
+    Careful:
+    - [Format] You should format your summary as a bullet point list, where each bullet point is a different insight.
+    - [References] For each insight, you should refer to the relevant conversations by using the IDs given in the conversation list. For example: "some of the doctors ask patients for their medical history[1][4]" which means that the insight is supported by Document 1 and Document 4. No need to say "Conversation 14", you can just use the following structure: "[14]".
+    - [Length] Your summary should be no longer than 300 words in total."""
+    pipe = PhysicalPipeline(plan_name, "conversations", load_data(source_csv))
+    pipe.sem_agg(
+        cols=[{"name": "summary", "type": str, "description": "The bullet point list, one bullet per line."}],
+        agg=agg,
+        model=pz.Model.GPT_6_LUNA,
+        depends_on=["idx", "document"],
+    )
+    pipe
+  '4': |
+    agg = """You are given conversations within the following scenario: "A 25-minute meeting between a doctor and a patient discussing the patient's recent health concerns and treatment options.".
+    The conversations involve the following participants: doctor, patient. In each conversation, the participants might be different, with different names, but all the conversations fall into the same scenario.
+
+    Each conversation is one input row: idx is its ID and document is its text.
+
+    Your objective is to produce a summary of all the document with [N_insights] bullet points covering the main insights regarding the following query: Was the diagnosis explanation given?.
+    Careful:
+    - [Format] You should format your summary as a bullet point list, where each bullet point is a different insight.
+    - [References] For each insight, you should refer to the relevant conversations by using the IDs given in the conversation list. For example: "some of the doctors ask patients for their medical history[1][4]" which means that the insight is supported by Document 1 and Document 4. No need to say "Conversation 14", you can just use the following structure: "[14]".
+    - [Length] Your summary should be no longer than 300 words in total."""
+    pipe = PhysicalPipeline(plan_name, "conversations", load_data(source_csv))
+    pipe.sem_agg(
+        cols=[{"name": "summary", "type": str, "description": "The bullet point list, one bullet per line."}],
+        agg=agg,
+        model=pz.Model.GPT_6_LUNA,
+        depends_on=["idx", "document"],
+    )
+    pipe
+  '5': |
+    agg = """You are given conversations within the following scenario: "A 25-minute meeting between a doctor and a patient discussing the patient's recent health concerns and treatment options.".
+    The conversations involve the following participants: doctor, patient. In each conversation, the participants might be different, with different names, but all the conversations fall into the same scenario.
+
+    Each conversation is one input row: idx is its ID and document is its text.
+
+    Your objective is to produce a summary of all the document with [N_insights] bullet points covering the main insights regarding the following query: Were lifestyle changes recommended?.
+    Careful:
+    - [Format] You should format your summary as a bullet point list, where each bullet point is a different insight.
+    - [References] For each insight, you should refer to the relevant conversations by using the IDs given in the conversation list. For example: "some of the doctors ask patients for their medical history[1][4]" which means that the insight is supported by Document 1 and Document 4. No need to say "Conversation 14", you can just use the following structure: "[14]".
+    - [Length] Your summary should be no longer than 300 words in total."""
+    pipe = PhysicalPipeline(plan_name, "conversations", load_data(source_csv))
+    pipe.sem_agg(
+        cols=[{"name": "summary", "type": str, "description": "The bullet point list, one bullet per line."}],
+        agg=agg,
+        model=pz.Model.GPT_6_LUNA,
+        depends_on=["idx", "document"],
+    )
+    pipe
+  '6': |
+    agg = """You are given conversations within the following scenario: "A 25-minute meeting between a doctor and a patient discussing the patient's recent health concerns and treatment options.".
+    The conversations involve the following participants: doctor, patient. In each conversation, the participants might be different, with different names, but all the conversations fall into the same scenario.
+
+    Each conversation is one input row: idx is its ID and document is its text.
+
+    Your objective is to produce a summary of all the document with [N_insights] bullet points covering the main insights regarding the following query: Are they discussing lab tests?.
+    Careful:
+    - [Format] You should format your summary as a bullet point list, where each bullet point is a different insight.
+    - [References] For each insight, you should refer to the relevant conversations by using the IDs given in the conversation list. For example: "some of the doctors ask patients for their medical history[1][4]" which means that the insight is supported by Document 1 and Document 4. No need to say "Conversation 14", you can just use the following structure: "[14]".
+    - [Length] Your summary should be no longer than 300 words in total."""
+    pipe = PhysicalPipeline(plan_name, "conversations", load_data(source_csv))
+    pipe.sem_agg(
+        cols=[{"name": "summary", "type": str, "description": "The bullet point list, one bullet per line."}],
+        agg=agg,
+        model=pz.Model.GPT_6_LUNA,
+        depends_on=["idx", "document"],
+    )
+    pipe
+  '7': |
+    agg = """You are given conversations within the following scenario: "A 25-minute meeting between a doctor and a patient discussing the patient's recent health concerns and treatment options.".
+    The conversations involve the following participants: doctor, patient. In each conversation, the participants might be different, with different names, but all the conversations fall into the same scenario.
+
+    Each conversation is one input row: idx is its ID and document is its text.
+
+    Your objective is to produce a summary of all the document with [N_insights] bullet points covering the main insights regarding the following query: Was a referral to a specialist discussed?.
+    Careful:
+    - [Format] You should format your summary as a bullet point list, where each bullet point is a different insight.
+    - [References] For each insight, you should refer to the relevant conversations by using the IDs given in the conversation list. For example: "some of the doctors ask patients for their medical history[1][4]" which means that the insight is supported by Document 1 and Document 4. No need to say "Conversation 14", you can just use the following structure: "[14]".
+    - [Length] Your summary should be no longer than 300 words in total."""
+    pipe = PhysicalPipeline(plan_name, "conversations", load_data(source_csv))
+    pipe.sem_agg(
+        cols=[{"name": "summary", "type": str, "description": "The bullet point list, one bullet per line."}],
+        agg=agg,
+        model=pz.Model.GPT_6_LUNA,
+        depends_on=["idx", "document"],
+    )
+    pipe
+  '8': |
+    agg = """You are given conversations within the following scenario: "A 25-minute meeting between a doctor and a patient discussing the patient's recent health concerns and treatment options.".
+    The conversations involve the following participants: doctor, patient. In each conversation, the participants might be different, with different names, but all the conversations fall into the same scenario.
+
+    Each conversation is one input row: idx is its ID and document is its text.
+
+    Your objective is to produce a summary of all the document with [N_insights] bullet points covering the main insights regarding the following query: Did they discuss managing symptoms daily?.
+    Careful:
+    - [Format] You should format your summary as a bullet point list, where each bullet point is a different insight.
+    - [References] For each insight, you should refer to the relevant conversations by using the IDs given in the conversation list. For example: "some of the doctors ask patients for their medical history[1][4]" which means that the insight is supported by Document 1 and Document 4. No need to say "Conversation 14", you can just use the following structure: "[14]".
+    - [Length] Your summary should be no longer than 300 words in total."""
+    pipe = PhysicalPipeline(plan_name, "conversations", load_data(source_csv))
+    pipe.sem_agg(
+        cols=[{"name": "summary", "type": str, "description": "The bullet point list, one bullet per line."}],
+        agg=agg,
+        model=pz.Model.GPT_6_LUNA,
+        depends_on=["idx", "document"],
+    )
+    pipe
+  '9': |
+    agg = """You are given conversations within the following scenario: "A 25-minute meeting between a doctor and a patient discussing the patient's recent health concerns and treatment options.".
+    The conversations involve the following participants: doctor, patient. In each conversation, the participants might be different, with different names, but all the conversations fall into the same scenario.
+
+    Each conversation is one input row: idx is its ID and document is its text.
+
+    Your objective is to produce a summary of all the document with [N_insights] bullet points covering the main insights regarding the following query: Are home health monitoring tips discussed?.
+    Careful:
+    - [Format] You should format your summary as a bullet point list, where each bullet point is a different insight.
+    - [References] For each insight, you should refer to the relevant conversations by using the IDs given in the conversation list. For example: "some of the doctors ask patients for their medical history[1][4]" which means that the insight is supported by Document 1 and Document 4. No need to say "Conversation 14", you can just use the following structure: "[14]".
+    - [Length] Your summary should be no longer than 300 words in total."""
+    pipe = PhysicalPipeline(plan_name, "conversations", load_data(source_csv))
+    pipe.sem_agg(
+        cols=[{"name": "summary", "type": str, "description": "The bullet point list, one bullet per line."}],
+        agg=agg,
+        model=pz.Model.GPT_6_LUNA,
+        depends_on=["idx", "document"],
+    )
+    pipe
+  '10': |
+    agg = """You are given conversations within the following scenario: "A 25-minute meeting between a doctor and a patient discussing the patient's recent health concerns and treatment options.".
+    The conversations involve the following participants: doctor, patient. In each conversation, the participants might be different, with different names, but all the conversations fall into the same scenario.
+
+    Each conversation is one input row: idx is its ID and document is its text.
+
+    Your objective is to produce a summary of all the document with [N_insights] bullet points covering the main insights regarding the following query: Is physical health impacting mental well-being?.
+    Careful:
+    - [Format] You should format your summary as a bullet point list, where each bullet point is a different insight.
+    - [References] For each insight, you should refer to the relevant conversations by using the IDs given in the conversation list. For example: "some of the doctors ask patients for their medical history[1][4]" which means that the insight is supported by Document 1 and Document 4. No need to say "Conversation 14", you can just use the following structure: "[14]".
+    - [Length] Your summary should be no longer than 300 words in total."""
+    pipe = PhysicalPipeline(plan_name, "conversations", load_data(source_csv))
+    pipe.sem_agg(
+        cols=[{"name": "summary", "type": str, "description": "The bullet point list, one bullet per line."}],
+        agg=agg,
+        model=pz.Model.GPT_6_LUNA,
+        depends_on=["idx", "document"],
+    )
+    pipe

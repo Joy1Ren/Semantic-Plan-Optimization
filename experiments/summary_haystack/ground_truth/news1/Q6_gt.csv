@@ -1,0 +1,5 @@
+insight_id,insight_name,insight,doc_idxs
+B3ynMRF23szQYbJnYRp4Vw9y,Production Numbers,"Dodge intends to produce 3,000 units of the Demon 170 for the U.S. and 300 for Canada, matching the same production run from 2018.","[5, 18, 23, 33, 51, 54, 57, 58, 66, 79, 81, 83]"
+aeYgKJ2xn4sKZPK3CtRqtmmp,Production Timeline,"The Demon 170 will cease production by the end of 2023 when the Brampton, Ontario, plant ends Challenger production.","[5, 18, 23, 33, 51, 54, 57, 58, 66, 79, 81, 83]"
+UrfsSHdQ0MnLI1XvVxIfWUwn,Supply Chain Risks,"The final production count could end up lower than planned if there are ongoing supply-chain issues, as all cars must be built by the end of the year.","[5, 18, 23, 33, 51, 54, 57, 66, 79, 83]"
+XdcOYANuQEFukPhvNWKj3mXP,Shutdown Implications,"If all 3,300 units aren't produced by year-end due to the shutdown of the Brampton plant, the production run will be limited to however many units are completed by that time.","[5, 18, 23, 33, 51, 57, 58, 66, 79, 81, 83]"

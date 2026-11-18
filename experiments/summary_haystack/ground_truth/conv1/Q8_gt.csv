@@ -1,0 +1,6 @@
+insight_id,insight_name,insight,doc_idxs
+66569322cfa5f926ed96adee,daily routine adjustments,"The patient asks the doctor for advice on how to adjust their daily routine to better manage symptoms, and the doctor suggests incorporating regular breaks and structured activities.","[9, 27, 29, 69, 79, 89]"
+66569322cfa5f926ed96adef,pain management techniques,"The patient inquires about effective pain management techniques for their condition, and the doctor recommends a combination of over-the-counter medications and specific stretching exercises.","[8, 29, 37, 60, 71, 79]"
+66569322cfa5f926ed96adf0,hydration tips,"The patient asks for tips on maintaining hydration to help alleviate their symptoms, and the doctor advises drinking at least 8 glasses of water a day and reducing caffeinated beverages.","[12, 27, 37, 65, 78, 89, 100]"
+66569322cfa5f926ed96adf1,stress reduction strategies,"The patient seeks advice on managing stress as it worsens their symptoms, and the doctor recommends daily mindfulness exercises and setting aside 15 minutes every evening for relaxation.","[8, 20, 42, 69, 71, 100]"
+66569322cfa5f926ed96adf2,symptom tracking,"The patient asks how they should track their symptoms daily, and the doctor suggests keeping a symptom diary and noting the severity on a scale of 1-10.","[9, 12, 42, 65, 78, 88]"

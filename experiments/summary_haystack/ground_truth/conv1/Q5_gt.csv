@@ -1,0 +1,7 @@
+insight_id,insight_name,insight,doc_idxs
+66569314cfa5f926ed96addd,exercise recommendation,"The doctor recommends the patient integrate 30 minutes of moderate-intensity exercise, such as brisk walking or cycling, at least 5 days a week to improve overall health.","[16, 27, 36, 68, 79, 95]"
+66569314cfa5f926ed96adde,dietary adjustments,The doctor advises the patient to incorporate more fruits and vegetables into their diet and reduce the intake of processed foods for better overall health.,"[11, 16, 41, 56, 70, 89]"
+66569314cfa5f926ed96addf,sleep schedule,"The doctor stresses the importance of maintaining a consistent sleep schedule, suggesting the patient aim for 7-8 hours of sleep every night.","[12, 17, 45, 68, 83, 95]"
+66569314cfa5f926ed96ade0,stress management,The doctor suggests the patient practice stress management techniques like meditation or yoga for 15 minutes a day to aid in their treatment.,"[9, 25, 45, 52, 70, 89]"
+66569314cfa5f926ed96ade1,hydration tips,The doctor advises the patient to drink at least 2 liters of water daily to keep themselves properly hydrated.,"[9, 25, 36, 52, 66, 86]"
+66569314cfa5f926ed96ade2,limiting alcohol,The doctor recommends that the patient limit their alcohol consumption to two standard drinks per week to support their medical treatment.,"[11, 27, 41, 59, 66, 83]"

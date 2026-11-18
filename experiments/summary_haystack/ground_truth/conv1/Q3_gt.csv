@@ -1,0 +1,7 @@
+insight_id,insight_name,insight,doc_idxs
+6656930acfa5f926ed96add1,current dosage,The doctor reviews the patient's current dosage of a heart medication and considers increasing it based on recent blood pressure readings.,"[7, 33, 40, 64, 84, 87]"
+6656930acfa5f926ed96add2,medication interaction,"The doctor notices a potential interaction between the patient's new anxiety medication and their existing antidepressant, requiring a change in the treatment plan.","[2, 26, 43, 57, 82, 87]"
+6656930acfa5f926ed96add3,side effect review,"The patient reports experiencing dizziness, and the doctor identifies it as a likely side effect of their migraine medication, suggesting an alternative.","[1, 31, 36, 63, 75, 82]"
+6656930acfa5f926ed96add4,discontinuing drug,The doctor decides to discontinue the patient's cholesterol medication due to improved levels in their recent lab results.,"[15, 31, 43, 62, 70, 94, 99]"
+6656930acfa5f926ed96add5,new prescription,The doctor prescribes a new antihistamine to replace the patient's current one after they report ineffectiveness against their allergy symptoms.,"[2, 26, 36, 67, 84, 94]"
+6656930acfa5f926ed96add6,supplement assessment,The doctor reviews the patient's use of a Vitamin D supplement and suggests adjusting the dosage based on their recent lab results showing vitamin levels.,"[15, 30, 40, 62, 70, 99]"

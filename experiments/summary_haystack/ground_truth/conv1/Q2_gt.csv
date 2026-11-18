@@ -1,0 +1,7 @@
+insight_id,insight_name,insight,doc_idxs
+66569306cfa5f926ed96adcb,medication options,"The patient asks the doctor about the different medication options available, including brand names and generics.","[3, 23, 35, 65, 75, 99, 100]"
+66569306cfa5f926ed96adcc,therapy types,"The patient inquires about non-medication treatments such as physical therapy, cognitive-behavioral therapy, or acupuncture.","[19, 23, 38, 67, 83, 87]"
+66569306cfa5f926ed96adcd,success rates,The patient asks the doctor about the success rates and effectiveness of various treatment options for their condition.,"[15, 26, 38, 50, 80, 87]"
+66569306cfa5f926ed96adce,treatment duration,The patient is curious about the expected duration of different treatments and how long it might take to see improvements.,"[15, 35, 50, 68, 75, 100]"
+66569306cfa5f926ed96adcf,insurance coverage,The patient asks whether their insurance will cover specific treatment options and what out-of-pocket costs they might expect.,"[13, 22, 48, 68, 81, 83]"
+66569306cfa5f926ed96add0,new treatments,The patient inquires if there are any new or experimental treatments available that they should consider.,"[19, 22, 48, 65, 67, 99]"

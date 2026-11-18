@@ -1,0 +1,7 @@
+insight_id,insight_name,insight,doc_idxs
+66569328cfa5f926ed96adf3,blood pressure tracking,"The doctor advises the patient to track their blood pressure twice daily, once in the morning and once in the evening, using a home blood pressure monitor.","[14, 24, 49, 62, 72, 86]"
+66569328cfa5f926ed96adf4,temperature log,"The doctor suggests that the patient keep a daily log of their body temperature, especially if experiencing feverish symptoms, using a digital thermometer.","[14, 24, 46, 53, 85, 93]"
+66569328cfa5f926ed96adf5,heart rate monitoring,"The doctor recommends the patient monitor their heart rate for one week using a fitness tracker or a manual pulse check, and report any irregularities.","[13, 30, 46, 51, 85, 93]"
+66569328cfa5f926ed96adf6,blood sugar levels,"The doctor instructs the patient on how to use a glucometer to check their blood sugar levels before meals and at bedtime, detailing targets for each reading.","[5, 31, 47, 56, 72, 94]"
+66569328cfa5f926ed96adf7,weight and hydration,"The doctor advises the patient to check their weight every morning and maintain a hydration diary, aiming for at least 8 glasses of water per day, to monitor changes.","[5, 31, 49, 56, 62, 94]"
+66569328cfa5f926ed96adf8,oxygen saturation,"The doctor explains how to use a pulse oximeter to measure blood oxygen saturation levels, especially if experiencing respiratory issues, aiming for readings above 95%.","[13, 30, 45, 50, 74, 86]"

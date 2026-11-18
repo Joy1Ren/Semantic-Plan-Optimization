@@ -1,0 +1,7 @@
+insight_id,insight_name,insight,doc_idxs
+6656930ecfa5f926ed96add7,diagnosis explanation,The doctor explains that the diagnosis is based on the results of a recent blood test indicating elevated inflammatory markers.,"[6, 32, 38, 59, 80, 91]"
+6656930ecfa5f926ed96add8,underlying causes,The doctor mentions that the possible causes for the diagnosis could include an autoimmune disorder or a chronic infection.,"[14, 18, 49, 55, 59, 88]"
+6656930ecfa5f926ed96add9,disease progression,"The doctor explains how the condition might progress if left untreated, stating that symptoms might worsen over the next 6 months.","[18, 21, 49, 54, 80]"
+6656930ecfa5f926ed96adda,genetic factors,"The doctor mentions that genetic predisposition might be a factor, considering a specific genetic marker identified in recent studies.","[2, 32, 44, 58, 84, 88]"
+6656930ecfa5f926ed96addb,symptom correlation,"The doctor correlates the patient’s symptoms with the diagnosis, citing specific instances from the patient's medical history.","[6, 23, 44, 55, 72, 84]"
+6656930ecfa5f926ed96addc,rare causes,"The doctor discusses rare causes, like environmental factors, noting a study involving 200 patients with similar conditions.","[14, 23, 38, 58, 71, 91]"

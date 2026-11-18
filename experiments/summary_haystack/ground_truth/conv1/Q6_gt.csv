@@ -1,0 +1,6 @@
+insight_id,insight_name,insight,doc_idxs
+66569318cfa5f926ed96ade3,specific tests,"The doctor suggests ordering specific lab tests, including a complete blood count (CBC) and thyroid function tests, to get a better understanding of the patient's condition.","[7, 24, 48, 53, 63, 91]"
+66569318cfa5f926ed96ade4,previous results review,"The doctor reviews lab test results from the last month and notes that the patient's cholesterol levels have slightly increased, warranting further investigation.","[6, 19, 39, 51, 85, 90]"
+66569318cfa5f926ed96ade5,test turnaround time,The doctor informs the patient that the lab results will take approximately 3-5 business days to come back.,"[19, 25, 34, 53, 73, 91]"
+66569318cfa5f926ed96ade6,cost discussion,"The patient inquires about the cost of the recommended lab tests, and the doctor estimates that it will be around $150-$200.","[7, 32, 39, 51, 82, 90, 98]"
+66569318cfa5f926ed96ade7,lab facility recommendation,The doctor recommends a specific lab facility nearby that offers accurate testing and quick results.,"[6, 32, 48, 63, 85, 98]"

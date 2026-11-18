@@ -1,0 +1,7 @@
+insight_id,insight_name,insight,doc_idxs
+6656932ccfa5f926ed96adf9,stress link,"The doctor discusses how their recent study shows that 78% of patients with chronic pain also experience significant stress, thereby affecting their mental well-being.","[4, 28, 40, 54, 76, 96]"
+6656932ccfa5f926ed96adfa,sleep patterns,"The patient shares that ever since they injured their leg, they have been unable to sleep more than 4 hours a night, which has led to increased anxiety.","[10, 21, 41, 60, 77, 97]"
+6656932ccfa5f926ed96adfb,exercise benefits,"The doctor mentions a study done in 2019 which found that 45 minutes of moderate exercise, 3 times a week, can improve mood and reduce symptoms of depression by up to 30%.","[4, 28, 42, 57, 77]"
+6656932ccfa5f926ed96adfc,mind-body program,"The doctor recommends a local 'Mind-Body Wellness' program available at the downtown community center, which integrates physical therapy with mindfulness techniques to improve overall well-being.","[10, 33, 41, 57, 76, 92]"
+6656932ccfa5f926ed96adfd,patient anecdote,"The patient recounts how, since becoming more physically active again, they've noticed a significant decrease in feelings of depression and are feeling more positive overall.","[1, 21, 42, 54, 73, 92]"
+6656932ccfa5f926ed96adfe,impact of isolation,"The doctor explains that patients who are physically incapacitated often experience a 50% increase in feelings of loneliness and isolation, which can severely affect their mental health.","[1, 33, 40, 60, 73, 97]"

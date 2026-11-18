@@ -1,0 +1,7 @@
+insight_id,insight_name,insight,doc_idxs
+66569301cfa5f926ed96adc5,symptom onset,"The doctor asks when the recent symptoms first appeared, and the patient responds that the symptoms started roughly 10 days ago.","[8, 22, 37, 69, 74, 95]"
+66569301cfa5f926ed96adc6,symptom frequency,"The doctor inquires how often the symptoms occur, and the patient mentions that they experience the symptoms approximately 3 times a week.","[3, 34, 37, 52, 74, 96]"
+66569301cfa5f926ed96adc7,severity rating,"The doctor asks the patient to rate the severity of their symptoms on a scale from 1 to 10, and the patient rates their symptoms as a 7.","[3, 28, 34, 61, 69, 96]"
+66569301cfa5f926ed96adc8,symptom progression,"The doctor questions whether the symptoms have been getting worse, better, or staying the same, and the patient indicates that they have been gradually worsening over the last few days.","[8, 22, 39, 61, 66, 97]"
+66569301cfa5f926ed96adc9,current impact,"The doctor asks how the symptoms are affecting the patient's daily life, and the patient shares that they have had to take two days off work recently due to the symptoms.","[18, 35, 39, 47, 76, 97]"
+66569301cfa5f926ed96adca,symptom triggers,"The doctor queries if there are specific activities or conditions that seem to trigger the symptoms, and the patient notes that physical exertion and cold weather make the symptoms worse.","[16, 18, 47, 52, 76, 95]"
