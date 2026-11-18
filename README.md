@@ -308,7 +308,7 @@ p
 | `limit` | `(n: int)` |
 | `groupby` | `(group_by_fields, agg_funcs, agg_fields)` |
 
-The model catalog (`available_models_openai.txt`, injected into the system prompt) lists every
+The model catalog (`available_models.txt` by default, or the file `AGENT_MODEL_CATALOG` names; injected into the system prompt) lists every
 `pz.Model` the agent can pick per-operator, grouped by cost/speed tier with $/1M-token
 input+output prices and per-output-token latency — this, plus `depends_on` (restrict which
 input columns a semantic op actually needs, shrinking its prompt) and operator ordering/
