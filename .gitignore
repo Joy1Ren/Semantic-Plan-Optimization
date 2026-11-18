@@ -33,6 +33,7 @@ analysis/
 results/
 
 PHYSICAL_PIPELINE_DESIGN.md
+/README.md
 
 # Keep the directory structure visible after a fresh clone.
 !results/.gitkeep

@@ -6,7 +6,6 @@ build-backend = "setuptools.build_meta"
 name = "raptor"
 version = "0.1.0"
 description = "An LLM agent that optimizes semantic query plans by executing candidate plans on a data subset."
-readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "palimpzest==1.5.3",
