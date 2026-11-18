@@ -23,6 +23,15 @@ class _Step:
     raw: str = ""
 
 
+def _first_block_only(text: str) -> tuple[str, int]:
+    """`text` cut after its first fenced block, and how many characters were cut. Only that
+    block is ever acted on, so anything after it is dropped from the history."""
+    m = _FENCE_RE.search(text)
+    if m is None or not text[m.end():].strip():
+        return text, 0
+    return text[:m.end()], len(text) - m.end()
+
+
 def _parse_step(text: str) -> _Step:
     """First fenced block → python tool call or json final answer."""
     m = _FENCE_RE.search(text)
