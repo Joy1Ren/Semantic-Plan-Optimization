@@ -1,23 +1,3 @@
-"""Score one CUAD category: did the plan give the right answer, and did it quote the right text.
-
-Ground truth is ground_truth/cuad_gt.csv, built by cuad/clean_cuad_gt.py. A contract scores 1 or
-0: the question is whether the plan got the information out, not how it phrased it.
-
-  1  the answer means what the ground truth says -- a date part the contract leaves blank matches
-     anything, "6 months" matches "180 days", "Beijing, China" contains the ground-truth place
-     "Beijing", and for Parties the count is right;
-  1  or, failing that, the text it quoted overlaps CUAD's highlighted text by more than
-     SPAN_THRESHOLD (token-set Jaccard, the word-set measure docetl's CUAD scorer uses): the right
-     clause was found even though the value came out wrong;
-  0  otherwise.
-
-Where the ground-truth answer is "unspecified" the contract states no value to get right, so only
-the quoted text is judged.
-
-A contract whose `unusable` column names this category is skipped: its ground truth was found not
-to be gradable (see clean_cuad_gt.py). For Parties, "number_parties" disqualifies only the count,
-so those contracts are judged on their spans.
-"""
 from __future__ import annotations
 
 import json

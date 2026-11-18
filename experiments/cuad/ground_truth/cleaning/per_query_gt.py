@@ -1,8 +1,9 @@
 """Split the CUAD ground truth into one file per query: ground_truth/Q{id}_gt.csv.
 
-Reads the clause-level ground truth (cuad/ground_truth/cuad_gt.csv, written by
-cuad/clean_cuad_gt.py) and writes what each of benchmark.yaml's queries is scored against, so a
-query's ground truth can be read on its own without knowing how the other eighteen work.
+Query 1 (all 41 categories) is scored against CUAD's master_clauses.csv as released, so Q1_gt.csv
+is that file's rows for the dataset's contracts, unchanged. Queries 2-8 read the clause-level
+ground truth (ground_truth/cuad_gt.csv, written by clean_cuad_gt.py), split so each query's ground
+truth can be read on its own:
 
   extraction query   name, {category}, span -- one row per contract. {category} holds the answer;
                      an empty answer ("[]") is an answer, meaning the contract has no such clause.
@@ -21,10 +22,10 @@ query's ground truth can be read on its own without knowing how the other eighte
 Contracts whose ground truth cannot settle a query (cuad_gt.csv's `unusable` column) are left out
 of that query's file entirely, since neither answering nor skipping them can be graded.
 
-The answer written for each extraction query is the value the scorer compares against: the number
-of parties for queries 1 and 20, and cuad_gt.csv's own JSON answer for the rest.
+The answer written for an extraction query is the value the scorer compares against: the number
+of parties for a Parties query, and cuad_gt.csv's own JSON answer for the rest.
 
-    python -m agent_cost_model.experiments.cuad_categories.cuad_categories_gt
+    python -m agent_cost_model.experiments.cuad.ground_truth.cleaning.per_query_gt
 """
 from __future__ import annotations
 
@@ -34,16 +35,17 @@ from pathlib import Path
 
 import pandas as pd
 
-from agent_cost_model.experiments.cuad_categories.paths import (
-    CATEGORIES_DIR,
+from agent_cost_model.experiments.cuad.category_scoring import SPAN_BACKED
+from agent_cost_model.experiments.cuad.paths import (
     DATASET_CSV,
     GROUND_TRUTH_CSV,
+    GROUND_TRUTH_DIR as OUTPUT_DIR,
     IDX_TO_NAME_JSON,
+    MASTER_CLAUSES_CSV,
 )
-from agent_cost_model.experiments.cuad_categories.queries import QUERIES, Query, gradable
-from agent_cost_model.experiments.cuad_categories.scoring import SPAN_BACKED
+from agent_cost_model.experiments.cuad.queries import QUERIES, Query, gradable
+from agent_cost_model.experiments.cuad.scoring import contract_key
 
-OUTPUT_DIR = CATEGORIES_DIR / "ground_truth"
 NAME_COL = "name"
 SPAN_COL = "span"
 # Governing Law and Parties are judged on the answer alone (a place list, a count), so their rows
@@ -88,6 +90,18 @@ def build(query: Query, ground_truth: pd.DataFrame) -> pd.DataFrame:
                          for r in rows if query.holds(r)])
 
 
+def build_query_1(contracts: set[str] | None) -> pd.DataFrame:
+    """master_clauses.csv's rows for these contracts (every row when None), columns untouched."""
+    master = pd.read_csv(MASTER_CLAUSES_CSV)
+    if contracts is None:
+        return master
+    wanted = {contract_key(name) for name in contracts}
+    rows = master[master["Filename"].map(contract_key).isin(wanted)]
+    if len(rows) != len(wanted):
+        raise KeyError(f"{len(wanted) - len(rows)} dataset contracts have no master_clauses.csv row")
+    return rows
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
     parser.add_argument("--ground-truth", type=Path, default=GROUND_TRUTH_CSV,
@@ -101,8 +115,8 @@ def main() -> None:
     args = parser.parse_args()
 
     ground_truth = pd.read_csv(args.ground_truth)
-    if not args.all_contracts:
-        wanted = _contracts_in_dataset(args.contracts)
+    wanted = None if args.all_contracts else _contracts_in_dataset(args.contracts)
+    if wanted is not None:
         missing = wanted - set(ground_truth[NAME_COL])
         if missing:
             raise KeyError(f"{len(missing)} dataset contracts are not in {args.ground_truth}: "
@@ -110,6 +124,9 @@ def main() -> None:
         ground_truth = ground_truth[ground_truth[NAME_COL].isin(wanted)]
 
     args.out.mkdir(parents=True, exist_ok=True)
+    query_1 = build_query_1(wanted)
+    query_1.to_csv(args.out / "Q1_gt.csv", index=False)
+    print(f"Q1  cuad_clauses {len(query_1):3d} rows of {MASTER_CLAUSES_CSV.name} -> Q1_gt.csv")
     print(f"{len(ground_truth)} contracts from {args.ground_truth}\n")
     for query in QUERIES:
         table = build(query, ground_truth)

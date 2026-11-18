@@ -19,7 +19,8 @@ from agent_cost_model.paths import EXPERIMENTS_DIR, RESULTS_DIR
 _BENCHMARK_DIRS = {
     "SemBench": "SemBench",
     "CUAD": "cuad",
-    "CUAD Categories": "cuad_categories",
+    "Summary of a Haystack": "summary_haystack",
+    "Sustainability Reports": "sustainability",
 }
 
 
@@ -130,8 +131,7 @@ def results_prefix(
     """Where one (benchmark, use case, scale factor, query, runner) writes everything it produces.
 
     The benchmark decides which of use_case/scale_factor/query_id appear: SemBench keys on all
-    three, CUAD Categories on query_id, CUAD on none. The runner owns the layout below the
-    returned prefix.
+    three, CUAD on query_id. The runner owns the layout below the returned prefix.
     """
     config = load_benchmark(benchmark)
     context = build_context(config, runner=runner, use_case=use_case, scale_factor=scale_factor,

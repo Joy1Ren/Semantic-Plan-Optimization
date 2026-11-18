@@ -1,34 +1,56 @@
-"""CUAD adapter for plan-quality evaluation, scored by scoring.score_cuad -- the same scorer
-docetl/cuad_run.py grades MOAR with, so the two optimizers' numbers are comparable.
-
-The CUAD task prompt (benchmark.yaml) asks the plan to emit one wide column per clause category
-(matching how the CostModelAgent's sem_map cols naturally work: one named, described field per
-category). That is also the ground truth's own layout, so normalize_eval_df only has to attach the
-real filename, which the oracle ground truth is written under.
+"""CUAD adapter for plan-quality evaluation. run_opt.py reaches it through benchmark.yaml's
+`quality_adapter` and passes the query id, which picks the evaluator.
+Every query reads its own ground_truth/Q{id}_gt.csv (ground_truth/cleaning/per_query_gt.py), which
+benchmark.yaml names per query id.
 """
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 import pandas as pd
 
-from agent_cost_model.opt_agent.plan_quality_evaluator import PlanQualityEvaluator
-from agent_cost_model.experiments.cuad.paths import IDX_TO_NAME_JSON
+from agent_cost_model.experiments.cuad.category_scoring import party_count_closeness, score_document
+from agent_cost_model.experiments.cuad.paths import (
+    GROUND_TRUTH_CSV,
+    IDX_TO_NAME_JSON,
+    per_query_ground_truth,
+)
+from agent_cost_model.experiments.cuad.queries import QUERY_BY_ID, gradable
 from agent_cost_model.experiments.cuad.scoring import predictions_from_wide, score_cuad
+from agent_cost_model.experiments.scoring.identification import score_returned_set
+from agent_cost_model.opt_agent.plan_quality_evaluator import PlanQualityEvaluator
 
 # The document identifier, on every frame this module produces or consumes. The dataset CSVs
-# carry "idx" (see prepare_cuad_data.py); normalize_eval_df maps that back to the real source
-# filename under this one column name.
+# carry "idx"; normalize_eval_df maps that back to the real source filename under this column.
 FILENAME_COL = "filename"
-# Columns that are not clause categories. "idx" is the dataset's real identifier column
-_ID_COLUMNS = {FILENAME_COL, "idx"}
+# cuad_gt.csv keys rows by the CUADv1 title, which is the source filename without ".txt". Only
+# that suffix may be stripped: a CUAD filename has dots inside it ("EX-10.27_Affiliate Agreement"),
+# so Path(...).stem would cut it in the wrong place.
+_TXT_SUFFIX = re.compile(r"\.txt$", re.I)
 
 
-def _clause_columns(df: pd.DataFrame) -> list[str]:
-    """The plan's clause-category columns: everything that is not an identifier."""
-    return [c for c in df.columns if c not in _ID_COLUMNS]
+def normalize_eval_df(df: pd.DataFrame, *_ignored) -> pd.DataFrame:
+    """Attach the real source filename, which the plan never sees, so its rows can be joined to
+    the ground truth. A plan's input/output carries only 'idx', so it cannot copy a filename into
+    the "Document Name" answer; the plan's own columns are kept as they are."""
+    if df.empty or FILENAME_COL in df.columns or "idx" not in df.columns:
+        return df
+    mapping = json.loads(IDX_TO_NAME_JSON.read_text())
+    df = df.copy()
+    df[FILENAME_COL] = df["idx"].apply(lambda i: mapping.get(str(i)))
+    return df
 
+
+def QualityEvaluator(query_id: int, **kwargs) -> PlanQualityEvaluator:
+    """The evaluator for this query: ExtractionQualityEvaluator for query 1, else
+    CategoryQualityEvaluator."""
+    cls = ExtractionQualityEvaluator if int(query_id) == 1 else CategoryQualityEvaluator
+    return cls(query_id=query_id, **kwargs)
+
+
+# ── Query 1: all 41 categories ──────────────────────────────────────────────────
 
 def _evaluate(
     plan_output_df: pd.DataFrame,
@@ -44,63 +66,30 @@ def _evaluate(
     return score_cuad(predictions_from_wide(plan_output_df), population_path, ground_truth_path)
 
 
-def normalize_eval_df(df: pd.DataFrame, *_ignored) -> pd.DataFrame:
-    """Attach the real source filename to a plan's output. The wide one-column-per-clause shape
-    the plan emits is kept as-is.
-
-    A plan's input/output only carries 'idx' instead of the real source filename (to prevent
-    cheating on the "Document Name" clause category). This mapping re-attaches the real filename.
-    """
-    if df.empty or FILENAME_COL in df.columns or "idx" not in df.columns:
-        return df
-    mapping = json.loads(IDX_TO_NAME_JSON.read_text())
-    df = df.copy()
-    df[FILENAME_COL] = df["idx"].apply(lambda i: mapping.get(str(i)))
-    return df
-
-
-class QualityEvaluator(PlanQualityEvaluator):
-    """CUAD QualityEvaluator, matching the SemBench QualityEvaluator constructor signature
-    CostModelAgent.run() instantiates via quality_evaluator_cls(...). use_oracle_ground_truth
-    is caller-controlled (see run_opt.py's --use-oracle-ground-truth flag); pass False to score
-    against CUAD's real ground truth (CUAD-master_clauses.csv) instead of an oracle-substituted
-    pipeline run -- the sensible choice here, since real annotations already exist."""
+class ExtractionQualityEvaluator(PlanQualityEvaluator):
+    """Query 1's evaluator: scores against CUAD's annotations (Q1_gt.csv, master_clauses.csv's
+    rows)."""
 
     def __init__(
         self,
         query_id: int,
         ground_truth_path: str | Path,
-        oracle_client=None,
-        oracle_model: str | None = None,
-        llm_judge_dir: str | Path | None = None,
         subset_path: str | Path | None = None,
-        run_dir: str | Path | None = None,
-        oracle_reasoning_effort: str | None = None,
-        use_oracle_ground_truth: bool = False,
-        oracle_operator_quality: bool = True,
         **_ignored,
     ) -> None:
         # `**_ignored` absorbs the keywords the engine passes to every adapter's constructor
-        # that this one has no use for -- `use_case` and `scale_factor`, which SemBench needs to
-        # pick its evaluator but CUAD does not (one use case, one query, no scale factor).
+        # that this one has no use for -- `use_case` and `scale_factor`.
         ground_truth_path = Path(ground_truth_path)
         super().__init__(
-            oracle_client=oracle_client,
-            oracle_model=oracle_model,
             query_id=query_id,
             subset_path=subset_path,
             normalize_df=normalize_eval_df,
-            llm_judge_dir=llm_judge_dir,
-            run_dir=run_dir,
-            oracle_reasoning_effort=oracle_reasoning_effort,
-            use_oracle_ground_truth=use_oracle_ground_truth,
-            oracle_operator_quality=oracle_operator_quality,
             ground_truth_path=ground_truth_path,
         )
 
     def has_ground_truth(self, ground_truth_df, ground_truth_path) -> bool:
         """CUAD scores from the ground-truth FILE, so this asks about the file, not the frame
-        (which is always None here -- see the ground_truth_loader note above).
+        (which is always None here: this adapter supplies no ground_truth_loader).
 
         `nrows=1` reads only the first chunk, so an existing-but-header-only ground truth is
         caught without materialising a frame this benchmark never scores against.
@@ -117,34 +106,13 @@ class QualityEvaluator(PlanQualityEvaluator):
         """The idx -> category -> text predictions score_cuad grades."""
         path.write_text(json.dumps(predictions_from_wide(plan_output_df), indent=2))
 
-    def write_oracle_ground_truth(self, df: pd.DataFrame, path: Path) -> None:
-        """Write an oracle-substituted plan's output as a ground-truth CSV in master_clauses.csv's
-        layout ("Filename" plus one column per category, "[]" for an absent clause), so
-        `score_plan` reads it exactly like the real one and never has to know which mode produced
-        it."""
-        out = pd.DataFrame({"Filename": df[FILENAME_COL].tolist()})
-        for col in _clause_columns(df):
-            out[col] = [
-                value if pd.notna(value) and str(value).strip() else "[]"
-                for value in df[col]
-            ]
-        out.to_csv(path, index=False)
-
     def score_plan(self, plan_output_df, ground_truth_df, ground_truth_path, population_path) -> float:
         """Score a plan's clause extractions: score_cuad's avg_f1.
 
-        `ground_truth_df` is unused -- score_cuad reads the ground truth from a FILE, and the
-        path handed in already points at the right one for this run's mode (the run's
-        materialised oracle ground truth, or the real annotations), so nothing here branches on
-        the mode.
+        `ground_truth_df` is unused -- score_cuad reads the ground truth from a FILE.
         """
         if not ground_truth_path:
-            raise ValueError(
-                "CUAD scoring needs a ground_truth_path: either benchmark.yaml's "
-                "ground_truth_path (direct mode) or the run's materialised oracle ground truth "
-                "(oracle mode, which needs run_dir to be set). See "
-                "PlanQualityEvaluator.ground_truth_path_in_use()."
-            )
+            raise ValueError("CUAD scoring needs a ground_truth_path (benchmark.yaml's ground_truth_path)")
         metrics = _evaluate(plan_output_df, ground_truth_path, population_path)
         if not metrics:
             print("[QualityEvaluator] CUAD: no idx column in the plan's output, score nan")
@@ -154,4 +122,191 @@ class QualityEvaluator(PlanQualityEvaluator):
         return float(metrics["avg_f1"])
 
 
-__all__ = ["QualityEvaluator", "normalize_eval_df"]
+# ── Queries 2-8: one question each ──────────────────────────────────────────────
+
+NAME_COL = "name"
+SPAN_COL = "span"
+NOT_NEEDED = "not needed"
+REASON_COL = "reason"
+ANSWER_COL = "answer"
+SPANS_COL = "spans"
+
+
+def _first_column(df: pd.DataFrame, preferred: str, *, avoid: tuple[str, ...]) -> str | None:
+    """`preferred` if the plan used that name, else its single other column -- a plan may name the
+    column something of its own, and with one answer and one spans column the mapping is clear."""
+    if preferred in df.columns:
+        return preferred
+    candidates = [c for c in df.columns if c not in {"idx", FILENAME_COL, *avoid}]
+    return candidates[0] if len(candidates) == 1 else None
+
+
+def _gold_rows(ground_truth_path: str | Path) -> pd.DataFrame:
+    return pd.read_csv(ground_truth_path, dtype=str).fillna("")
+
+
+def score_identification(query, plan_output_df: pd.DataFrame, ground_truth_path: str | Path,
+                        population_path: str | Path | None = None) -> dict:
+    """F1 over the contracts a plan returned, against the set in Q{id}_gt.csv, which lists the
+    contracts that qualify. A contract whose ground truth cannot settle the query (cuad_gt.csv's
+    `unusable`) counts neither way: returning it is not a false positive.
+
+    Where that file has a span column, a returned contract that qualifies is a hit only if the
+    plan's reason matches the span (token Jaccard above SPAN_THRESHOLD); otherwise it is a miss,
+    counted against recall only."""
+    gold = _gold_rows(ground_truth_path)
+    judgeable = set(_population_keys(population_path)) if population_path else set(gold[NAME_COL])
+    judgeable -= _ungradable(query)
+
+    returned = {}
+    if not plan_output_df.empty and FILENAME_COL in plan_output_df.columns:
+        reason_col = _first_column(plan_output_df, REASON_COL, avoid=())
+        for _, row in plan_output_df.iterrows():
+            reason = row.get(reason_col) if reason_col else None
+            returned[_TXT_SUFFIX.sub("", str(row[FILENAME_COL]))] = reason if isinstance(reason, str) else ""
+
+    gold_spans = None
+    if SPAN_COL in gold.columns:
+        gold_spans = {name: _gold_span(cell) or [] for name, cell in zip(gold[NAME_COL], gold[SPAN_COL])}
+    result = score_returned_set(returned, set(gold[NAME_COL]), judgeable, gold_spans)
+    return {"score": result["score"], "documents_scored": len(judgeable), "documents_skipped": 0,
+            "counts": result["counts"]}
+
+
+def _ungradable(query) -> set[str]:
+    """The contracts whose ground truth cannot settle this query."""
+    ground_truth = pd.read_csv(GROUND_TRUTH_CSV, usecols=[NAME_COL, "unusable"])
+    return {row[NAME_COL] for _, row in ground_truth.iterrows() if not gradable(query, row)}
+
+
+def _population_keys(population_path: str | Path) -> list[str]:
+    return [_TXT_SUFFIX.sub("", str(name)) for name in _population_names(population_path)]
+
+
+def score_category(category: str, plan_output_df: pd.DataFrame, ground_truth_path: str | Path,
+                   population_path: str | Path | None = None, scorer=None) -> dict:
+    """The category's quality over the document population: the share of contracts whose answer was
+    right (see category_scoring.py). `scorer(gold, answer)` replaces score_document for a query that
+    grades its answer its own way.
+    """
+    ground_truth = _gold_rows(ground_truth_path)
+    answer_col = next(c for c in ground_truth.columns if c not in (NAME_COL, SPAN_COL))
+    gold = {row[NAME_COL]: row for _, row in ground_truth.iterrows()}
+
+    predictions = {}
+    if not plan_output_df.empty and FILENAME_COL in plan_output_df.columns:
+        spans_col = _first_column(plan_output_df, SPANS_COL, avoid=(ANSWER_COL,))
+        plan_answer_col = _first_column(plan_output_df, ANSWER_COL, avoid=(spans_col or SPANS_COL,))
+        for _, row in plan_output_df.iterrows():
+            predictions[_TXT_SUFFIX.sub("", str(row[FILENAME_COL]))] = (
+                row.get(plan_answer_col) if plan_answer_col else None,
+                row.get(spans_col) if spans_col else None)
+
+    names = _population_keys(population_path) if population_path else list(predictions)
+    scores, skipped = [], 0
+    for name in names:
+        row = gold.get(name)
+        if row is None:                     # not gradable for this query, so not in its file
+            skipped += 1
+            continue
+        answer, spans = predictions.get(name, (None, None))
+        gold_value = _gold_value(row[answer_col])
+        score = (scorer(gold_value, answer) if scorer else
+                 score_document(category, gold_value, _gold_span(row.get(SPAN_COL, "")), answer, spans))
+        if score is None:                   # nothing in this row to score (a law that is no place)
+            skipped += 1
+            continue
+        scores.append(score)
+    return {"score": sum(scores) / len(scores) if scores else float("nan"),
+            "documents_scored": len(scores), "documents_skipped": skipped}
+
+
+def _gold_value(cell: str):
+    """The answer column of a per-query file: JSON for every category but Parties, whose answer is
+    the number of parties."""
+    try:
+        return json.loads(cell) if cell else None
+    except json.JSONDecodeError:
+        return int(cell) if str(cell).strip().isdigit() else cell
+
+
+def _gold_span(cell: str) -> list[str] | None:
+    """The span column: the text to check, or None where the file says none is needed."""
+    if not cell or cell == NOT_NEEDED:
+        return None
+    try:
+        spans = json.loads(cell)
+    except json.JSONDecodeError:
+        return [cell]
+    return spans or None
+
+
+def _population_names(population_path: str | Path) -> list[str]:
+    df = pd.read_csv(population_path, dtype={"idx": str})
+    if FILENAME_COL in df.columns:
+        return df[FILENAME_COL].tolist()
+    mapping = json.loads(IDX_TO_NAME_JSON.read_text())
+    return [mapping.get(str(i)) for i in df["idx"]]
+
+
+class CategoryQualityEvaluator(PlanQualityEvaluator):
+    """Scores one of queries 2-8, chosen by the query id it is constructed with."""
+
+    def __init__(self, query_id: int, ground_truth_path: str | Path | None = None,
+                 subset_path: str | Path | None = None, **_ignored) -> None:
+        try:
+            self.QUERY = QUERY_BY_ID[int(query_id)]
+        except (KeyError, TypeError, ValueError):
+            raise ValueError(
+                f"query {query_id!r} is not one of this benchmark's questions: "
+                f"{sorted(QUERY_BY_ID)} (see queries.py and benchmark.yaml's task_prompts)"
+            ) from None
+        self.CATEGORY = self.QUERY.category
+        super().__init__(
+            query_id=query_id,
+            subset_path=subset_path,
+            normalize_df=normalize_eval_df,
+            # benchmark.yaml names the per-query file and the runner passes it; the default is
+            # the same file, so constructing an evaluator without one (a standalone script, a
+            # test) still scores against this query's own ground truth.
+            ground_truth_path=(
+                Path(ground_truth_path) if ground_truth_path
+                else per_query_ground_truth(int(query_id))
+            ),
+        )
+
+    def has_ground_truth(self, ground_truth_df, ground_truth_path) -> bool:
+        """Asks about the FILE: this benchmark scores from cuad_gt.csv, never from a frame."""
+        if not ground_truth_path or not Path(ground_truth_path).exists():
+            return False
+        try:
+            return not pd.read_csv(ground_truth_path, nrows=1).empty
+        except Exception as error:
+            print(f"[QualityEvaluator] could not read ground truth at {ground_truth_path}: {error}")
+            return False
+
+    def write_scoring_input(self, plan_output_df: pd.DataFrame, path: Path) -> None:
+        plan_output_df.to_csv(path, index=False)
+
+    def score_plan(self, plan_output_df, ground_truth_df, ground_truth_path, population_path) -> float:
+        if not ground_truth_path:
+            raise ValueError("CUAD category scoring needs a ground_truth_path (benchmark.yaml's "
+                             "ground_truth_path)")
+        if self.QUERY.kind == "identify":
+            result = score_identification(self.QUERY, plan_output_df, ground_truth_path, population_path)
+            counts = self.last_quality_counts = result["counts"]
+            fn = counts["FN"]["total"] if isinstance(counts["FN"], dict) else counts["FN"]
+            print(f"[QualityEvaluator] {self.QUERY.name}: F1 {result['score']:.4f}, "
+                  f"(TP, FP, TN, FN) = ({counts['TP']}, {counts['FP']}, {counts['TN']}, {fn}), over "
+                  f"{result['documents_scored']} contracts ({result['documents_skipped']} skipped)")
+        else:
+            scorer = party_count_closeness if self.QUERY.metric == "party_count_relative_error" else None
+            result = score_category(self.CATEGORY, plan_output_df, ground_truth_path, population_path,
+                                    scorer=scorer)
+            print(f"[QualityEvaluator] {self.CATEGORY}: score {result['score']:.4f} over "
+                  f"{result['documents_scored']} contracts ({result['documents_skipped']} skipped)")
+        return float(result["score"])
+
+
+__all__ = ["CategoryQualityEvaluator", "ExtractionQualityEvaluator", "QualityEvaluator",
+           "normalize_eval_df", "score_category", "score_identification"]

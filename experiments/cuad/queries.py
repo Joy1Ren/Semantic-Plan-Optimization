@@ -1,11 +1,11 @@
-"""What each query id asks, and how its ground truth is read out of cuad_gt.csv.
+"""What queries 2-8 ask, and how their ground truth is read out of cuad_gt.csv. Query 1 (all 41
+categories at once) is not here: scoring.py grades it against master_clauses.csv's rows.
 
-Two kinds of query share the benchmark:
+Two kinds of query are supported:
 
   extract       pull one category's value out of every contract; scored per contract by
-                scoring.score_document (the answer, with the quote behind the answers that say the
-                contract states no value), or by the query's own metric (query 20: how close the
-                party count is).
+                category_scoring.score_document (the answer, with the quote behind the answers
+                that say the contract states no value), or by the query's own metric.
   identify      return the contracts that satisfy a condition; scored by F1 over that set, since a
                 plan answers it by dropping the rows that do not qualify. A query with `evidence`
                 also asks why, and counts a returned contract as found only if its reason matches
@@ -51,9 +51,8 @@ def _has_clause(row: pd.Series, category: str) -> bool:
 
 def _has_expiration(row: pd.Series) -> bool:
     """Whether the contract says anything about the end of its initial term -- a date, a term
-    length, "perpetual", or a term that ends on an event with no stated length. This is exactly
-    the rule query 7 is scored by (a non-empty Expiration Date answer), so the two agree on which
-    contracts have the clause at all."""
+    length, "perpetual", or a term that ends on an event with no stated length: a non-empty
+    Expiration Date answer, the same rule an Expiration Date extraction is scored by."""
     return bool(answer(row, "Expiration Date"))
 
 
@@ -86,60 +85,30 @@ def _identify(query_id: int, name: str, task: str, *conditions, evidence: str = 
                  evidence=evidence, metric="set_f1_reason_jaccard" if evidence else "set_f1")
 
 
-# Single-category questions first, each extraction query followed by the question that filters on
-# the same category; the questions that read more than one category come last.
+# Formerly cuad_categories queries 2, 10, 15, 16, 17, 21 and 22, in this order.
 QUERIES = [
-    _extract(1, "Parties", "how many parties signed the contract"),
     _identify(2, "cuad_parties_over_two", "contracts signed by more than two parties",
               ("more than two parties", "Parties",
                lambda r: (answer(r, "Parties")["number_parties"] or 0) > 2)),
-
-    _extract(3, "Agreement Date", "the date of the contract"),
-    _identify(4, "cuad_agreement_before_2010", "contracts dated before 2010",
-              ("dated before 2010", "Agreement Date",
-               lambda r: (_latest_year(r, "Agreement Date") or 9999) < 2010)),
-
-    _extract(5, "Effective Date", "the date the contract takes effect"),
-    _identify(6, "cuad_effective_on_event", "contracts that take effect on an event, not a date",
-              ("effective date is an event", "Effective Date",
-               lambda r: "relative" in answer(r, "Effective Date")), evidence="Effective Date"),
-
-    _extract(7, "Expiration Date", "when the contract's initial term expires"),
-    _identify(8, "cuad_perpetual", "contracts with no expiration",
-              ("runs perpetually", "Expiration Date",
-               lambda r: "perpetual" in answer(r, "Expiration Date")), evidence="Expiration Date"),
-
-    _extract(9, "Renewal Term", "the renewal term after the initial term expires"),
-    _identify(10, "cuad_renews_indefinitely", "contracts that keep renewing with no limit",
+    _identify(3, "cuad_renews_indefinitely", "contracts that keep renewing with no limit",
               ("renews indefinitely", "Renewal Term",
                lambda r: any(isinstance(i, dict) and i.get("renewals") == "unlimited"
                              for i in answer(r, "Renewal Term"))), evidence="Renewal Term"),
 
-    _extract(11, "Notice Period to Terminate Renewal", "the notice needed to stop a renewal"),
-    _identify(12, "cuad_notice_90_days", "contracts needing 90 days' notice or more to stop a renewal",
-              ("notice of 90 days or more", "Notice Period to Terminate Renewal",
-               lambda r: any((_days(i) or 0) >= 90
-                             for i in answer(r, "Notice Period to Terminate Renewal")))),
-
-    _extract(13, "Governing Law", "whose law governs the contract"),
-    _identify(14, "cuad_new_york_law", "contracts governed by New York law",
-              ("governed by New York law", "Governing Law",
-               lambda r: "New York" in answer(r, "Governing Law"))),
-
     # More than one category: each condition is a separate read of the contract.
-    _identify(15, "cuad_many_parties_new_york",
+    _identify(4, "cuad_many_parties_new_york",
               "contracts with more than two parties that are also governed by New York law",
               ("more than two parties", "Parties",
                lambda r: (answer(r, "Parties")["number_parties"] or 0) > 2),
               ("governed by New York law", "Governing Law",
                lambda r: "New York" in answer(r, "Governing Law"))),
-    _identify(16, "cuad_expires_after_2000_with_audit",
+    _identify(5, "cuad_expires_after_2000_with_audit",
               "contracts expiring after 2000 that also grant audit rights",
               ("expires after 2000", "Expiration Date",
                lambda r: (_latest_year(r, "Expiration Date") or 0) > 2000),
               ("has an audit rights clause", "Audit Rights",
                lambda r: _has_clause(r, "Audit Rights"))),
-    _identify(17, "cuad_evergreen_with_long_notice",
+    _identify(6, "cuad_evergreen_with_long_notice",
               "contracts that renew indefinitely and need 90 days' notice or more to stop",
               ("renews indefinitely", "Renewal Term",
                lambda r: any(isinstance(i, dict) and i.get("renewals") == "unlimited"
@@ -147,36 +116,21 @@ QUERIES = [
               ("notice of 90 days or more", "Notice Period to Terminate Renewal",
                lambda r: any((_days(i) or 0) >= 90
                              for i in answer(r, "Notice Period to Terminate Renewal")))),
-    _identify(18, "cuad_perpetual_with_insurance",
-              "contracts with no expiration that also require insurance",
-              ("runs perpetually", "Expiration Date",
-               lambda r: "perpetual" in answer(r, "Expiration Date")),
-              ("has an insurance clause", "Insurance", lambda r: _has_clause(r, "Insurance"))),
-    _identify(19, "cuad_old_with_non_compete",
-              "contracts dated before 2010 that also contain a non-compete",
-              ("dated before 2010", "Agreement Date",
-               lambda r: (_latest_year(r, "Agreement Date") or 9999) < 2010),
-              ("has a non-compete clause", "Non-Compete",
-               lambda r: _has_clause(r, "Non-Compete"))),
 
-    # The expiration date again, but asked only of the contracts that also carry another clause,
-    # and graded on the quoted expiration sentence rather than on a parsed answer.
-    _identify(21, "cuad_expiration_with_volume_restriction",
+    # The expiration date, asked only of the contracts that also carry another clause, and graded
+    # on the quoted expiration sentence rather than on a parsed answer.
+    _identify(7, "cuad_expiration_with_volume_restriction",
               "the expiration date of contracts that also restrict volume",
               ("states its expiration terms", "Expiration Date", _has_expiration),
               ("has a volume restriction clause", "Volume Restriction",
                lambda r: _has_clause(r, "Volume Restriction")),
               evidence="Expiration Date"),
-    _identify(22, "cuad_expiration_with_termination_for_convenience",
+    _identify(8, "cuad_expiration_with_termination_for_convenience",
               "the expiration date of contracts that can also be terminated for convenience",
               ("states its expiration terms", "Expiration Date", _has_expiration),
               ("has a termination for convenience clause", "Termination for Convenience",
                lambda r: _has_clause(r, "Termination for Convenience")),
               evidence="Expiration Date"),
-
-    # Query 1's question again, scored by how far the count is off rather than exact.
-    _extract(20, "Parties", "how many parties signed the contract, scored by relative error",
-             name="cuad_parties_count_error", metric="party_count_relative_error"),
 ]
 
 QUERY_BY_ID = {query.id: query for query in QUERIES}

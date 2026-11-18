@@ -1,15 +1,7 @@
 name: CUAD
 quality_adapter: agent_cost_model.experiments.cuad.quality_evaluator
 
-# CUAD data and its scorer come from the docetl checkout, used in place. docetl is packaged,
-# but its build includes only docetl/** and server/**, so experiments.reasoning.evaluation.cuad
-# is not in the installed distribution -- hence python_path '.' over the repo root.
-external_repo:
-  env_var: DOCETL_ROOT
-  default: ../docetl
-  python_path: .
 results_prefix: "{results_dir}/CUAD/q{query_id}/{runner}"
-# Shared with cuad_categories/benchmark.yaml, whose contracts keep the idx given here.
 sampling_dir: "{results_dir}/CUAD/_sampling"
 sampling_results_path: "{results_dir}/CUAD/_sampling/sampling_results.json"
 
@@ -21,6 +13,7 @@ use_cases:
       type: text
       modalities: [text]
     task_prompts:
+      # extract: every one of the 41 categories, one column each
       "1": |-
         Extract the text spans (if they exist) for each of the following categories. If a category is not present or cannot be determined, return an empty string. If there are multiple text spans for a category, return them as a comma-separated list of text spans.
 
@@ -67,13 +60,112 @@ use_cases:
         41. Third Party Beneficiary: Is there a non-contracting party who is a beneficiary to some or all of the clauses in the contract and therefore can enforce its rights against a contracting party?
 
         Output `idx` and one column per category above, using the exact category name as the column name (e.g. a column named "Document Name" for category 1, a column named "Third Party Beneficiary" for category 41).
-    query_metrics:
-      "1": f1_jaccard  # matches avg_f1 in docetl/experiments/reasoning/evaluation/cuad.py (jaccard > 0.15 gate)
-    # The same 140 contracts cuad_categories runs on and samples its subsets from (a copy of
-    # cuad_categories/dataset/cuad_clean_140.csv).
+      # identify: contracts signed by more than two parties
+      "2": |-
+        You are given the full text of one legal contract.
+
+        Return this contract only if it has more than two Parties.
+        Parties: The two or more parties who signed the contract
+
+        Return no row at all for a contract that does not qualify. For one that does,
+        output:
+          idx         copy the input row's idx unchanged
+      # identify: contracts that keep renewing with no limit
+      "3": |-
+        You are given the full text of one legal contract.
+
+        Return this contract only if its Renewal Term is for successive periods, with no limit on the number of renewals.
+        Renewal Term: What is the renewal term after the initial term expires? This includes automatic extensions and
+        unilateral extensions with prior notice.
+
+        Return no row at all for a contract that does not qualify. For one that does,
+        output a single row with these columns:
+          idx         copy the input row's idx unchanged
+          reason      the full sentence(s) from the contract that say it renews, quoted verbatim
+      # identify: contracts with more than two parties that are also governed by New York law
+      "4": |-
+        You are given the full text of one legal contract.
+
+        Return this contract only if BOTH of these hold:
+          1. it has more than two Parties: the two or more parties who signed the contract;
+          2. New York law governs it.
+
+        Return no row at all for a contract that does not qualify. For one that does,
+        output a single row with these columns:
+          idx         copy the input row's idx unchanged
+      # identify: contracts expiring after 2000 that also grant audit rights
+      "5": |-
+        You are given the full text of one legal contract.
+
+        Return this contract only if BOTH of these hold:
+          1. it states an expiration date later than 31 December 2000 -- a contract that gives
+             only a term length ("five years from the effective date"), or no expiration, does
+             not qualify;
+          2. contains an Audit Rights clause: a party has the right to audit the books, records, or physical locations of the counterparty to ensure compliance with the contract.
+
+        Return no row at all for a contract that does not qualify. For one that does,
+        output:
+          idx         copy the input row's idx unchanged
+      # identify: contracts that renew indefinitely and need 90 days' notice or more to stop
+      "6": |-
+        You are given the full text of one legal contract.
+
+        Return this contract only if BOTH of these hold:
+          1. its Renewal Term is for successive periods, with no limit on the number of renewals.
+             Renewal Term: What is the renewal term after the initial term expires? This includes
+             automatic extensions and unilateral extensions with prior notice.
+          2. its Notice Period to Terminate Renewal is at least 90 days, counting a month as 30
+             days. Notice Period to Terminate Renewal: What is the notice period required to
+             terminate renewal?
+
+        Return no row at all for a contract that does not qualify. For one that does,
+        output:
+          idx         copy the input row's idx unchanged
+      # identify: the expiration date of contracts that also restrict volume
+      "7": |-
+        You are given the full text of one legal contract.
+
+        Return this contract only if BOTH of these hold:
+          1. it states its expiration terms: when its initial term ends, or that it has no
+             end at all; a contract that says nothing about its term ending does not qualify;
+          2. contains a Volume Restriction clause: there is a fee increase or consent requirement,
+             etc. if one party's use of the product/services exceeds a certain threshold.
+
+        Return no row at all for a contract that does not qualify. For one that does,
+        output:
+          idx         copy the input row's idx unchanged
+          reason      a concise verbatim span containing the expiration terms: the
+                      contract's own words, copied exactly, with nothing before or after them
+      # identify: the expiration date of contracts that can also be terminated for convenience
+      "8": |-
+        You are given the full text of one legal contract.
+
+        Return this contract only if BOTH of these hold:
+          1. it states its expiration terms: when its initial term ends, or that it has no
+             end at all; a contract that says nothing about its term ending does not qualify;
+          2. contains a Termination for Convenience clause: a party can terminate the contract
+             without cause, solely by giving notice and allowing a waiting period to expire.
+
+        Return no row at all for a contract that does not qualify. For one that does,
+        output:
+          idx         copy the input row's idx unchanged
+          reason      a concise verbatim span containing the expiration terms: the
+                      contract's own words, copied exactly, with nothing before or after them
+    query_metrics:  # 2-8: see queries.py (Query.metric), category_scoring.py and quality_evaluator.py
+      "1": f1_jaccard
+      "2": set_f1  # cuad_parties_over_two
+      "3": set_f1_reason_jaccard  # cuad_renews_indefinitely
+      "4": set_f1  # cuad_many_parties_new_york
+      "5": set_f1  # cuad_expires_after_2000_with_audit
+      "6": set_f1  # cuad_evergreen_with_long_notice
+      "7": set_f1_reason_jaccard  # cuad_expiration_with_volume_restriction
+      "8": set_f1_reason_jaccard  # cuad_expiration_with_termination_for_convenience
+    # The 140 contracts every query runs on (prepare_cuad_data.py).
     dataset:
       directory: "{benchmark_dir}/dataset"
       source_csv: "cuad_clean_140.csv"
       id_col: idx
+    # One subset per query: sampling writes Q{id}_subset_{mode}.csv, which run_opt.py reads back.
     subset_path: "{benchmark_dir}/datasubset_opt/Q{query_id}_subset.csv"
-    ground_truth_path: "{repo_root}/experiments/reasoning/data/CUAD-master_clauses.csv"
+    # One file per query, written by ground_truth/cleaning/per_query_gt.py.
+    ground_truth_path: "{benchmark_dir}/ground_truth/Q{query_id}_gt.csv"

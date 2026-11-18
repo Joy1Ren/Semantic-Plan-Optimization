@@ -1,22 +1,3 @@
-"""The CUAD scorer both optimizers are graded by: the cost model agent through quality_evaluator.py,
-MOAR through docetl/cuad_run.py.
-
-It is docetl's own scorer (docetl/experiments/reasoning/evaluation/cuad.py, evaluate_results) with
-the matching made exact. Kept as docetl has it: the 41 categories; text cleaned to letters, digits
-and whitespace, a list joined into one text; per contract and category a true positive when both
-sides are non-empty and their word-set Jaccard is > 0.15, a false positive when only the
-prediction is, a false negative when only the truth is; precision 0 with no predictions, recall
-NaN with no positives; score = avg_f1, the mean of the per-category F1s that are not NaN.
-
-Changed:
-  * Contracts are matched by idx -> contract name. docetl sorts both sides by a fuzzy filename
-    match and pairs them by row position, so one duplicated or missing output row shifts every
-    later contract onto another contract's ground truth.
-  * Categories are matched by name, after dropping case and treating space, - and / alike, where
-    docetl takes the Levenshtein-closest clause_type.
-  * Every span a plan gives a category counts -- several rows for one contract, or several
-    entries with one clause_type -- where docetl keeps the first.
-"""
 from __future__ import annotations
 
 import json
@@ -75,7 +56,7 @@ def _jaccard(a: str, b: str) -> float:
 
 def load_ground_truth(path: str | Path) -> dict[str, dict[str, str]]:
     """contract key -> category -> cleaned truth, from a wide CSV keyed by "Filename": CUAD's
-    master_clauses.csv, or an oracle ground truth in the same layout."""
+    master_clauses.csv."""
     df = pd.read_csv(path)
     columns = {category_key(c): c for c in df.columns}
     missing = [c for c in CATEGORIES if c not in columns]
@@ -122,8 +103,6 @@ def predictions_from_clauses(records: list[dict]) -> dict[str, dict[str, str]]:
 
 def score_cuad(predictions: dict[str, dict[str, str]], population_path: str | Path,
                ground_truth_path: str | Path) -> dict:
-    """docetl's CUAD metrics over the contracts in population_path, the CSV the plan ran on. A
-    contract the plan returned nothing for is an empty prediction in every category."""
     names = json.loads(Path(IDX_TO_NAME_JSON).read_text())
     truth = load_ground_truth(ground_truth_path)
     population = [_idx(i) for i in pd.read_csv(population_path, usecols=["idx"])["idx"]]

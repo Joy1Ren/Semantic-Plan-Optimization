@@ -1,57 +1,36 @@
-"""CUAD-local file locations.
+"""CUAD file locations, for Python callers; the runner gets its paths from benchmark.yaml.
 
-These live here rather than in the package-level ``paths.py`` because only this adapter reads
-them: the runner gets everything it needs from ``benchmark.yaml``. The docetl checkout they
-hang off is resolved from this benchmark's own ``external_repo`` block, so there is one
-declaration of where docetl lives.
+Query 1 extracts all 41 categories; queries 2-8 each ask one question of the same 140 contracts
+(queries.py). Every query is scored against its own ground_truth/Q{id}_gt.csv, written by
+ground_truth/cleaning/per_query_gt.py from cuad_gt.csv (queries 2-8) or CUAD's master_clauses.csv
+(query 1).
 """
 
 from __future__ import annotations
 
-from functools import lru_cache
 from pathlib import Path
 
-import yaml
-
-from agent_cost_model.experiments.external_repo import resolve_repo
-
 BENCHMARK_DIR = Path(__file__).resolve().parent
-BENCHMARK_YAML = BENCHMARK_DIR / "benchmark.yaml"
 
-
-@lru_cache(maxsize=1)
-def docetl_root() -> Path:
-    with BENCHMARK_YAML.open() as handle:
-        config = yaml.safe_load(handle)
-    root = resolve_repo(config.get("external_repo"))
-    if root is None:
-        raise RuntimeError(f"{BENCHMARK_YAML} declares no external_repo for docetl")
-    return root
-
-
-def cuad_data_dir() -> Path:
-    """Root of docetl's CUAD data, holding the train/ and test/ split directories. Which json
-    under it is the full dataset and which is the optimization set is declared once, in
-    prepare_cuad_data.py's FULL_SOURCE / OPTIMIZE_SOURCE."""
-    return docetl_root() / "experiments" / "reasoning" / "data"
-
-
-# -- inputs read from the docetl checkout (read-only) -------------------------
-def cuad_ground_truth_csv() -> Path:
-    """The real, human-annotated CUAD clause annotations. One file covers every split.
-
-    Scoring does not read a fixed population file: it derives the document population from
-    the plan's own predicted rows (see quality_evaluator.py's _evaluate)."""
-    return cuad_data_dir() / "CUAD-master_clauses.csv"
-
-
-# -- data prepared into this repo (see prepare_cuad_data.py) ------------------
 DATASET_DIR = BENCHMARK_DIR / "dataset"
+SOURCE_DIR = DATASET_DIR / "source"
+SOURCE_JSON = SOURCE_DIR / "cuad.json"
+MASTER_CLAUSES_CSV = SOURCE_DIR / "CUAD-master_clauses.csv"
+DATASET_CSV = DATASET_DIR / "cuad_clean_140.csv"
 DATASUBSET_DIR = BENCHMARK_DIR / "datasubset_opt"
 GROUND_TRUTH_DIR = BENCHMARK_DIR / "ground_truth"
+CLEANING_DIR = GROUND_TRUTH_DIR / "cleaning"
 
-# idx -> real source filename, for re-attaching the filename at eval time only (see
-# prepare_cuad_data.py and quality_evaluator.py's normalize_eval_df) -- never exposed to a
-# plan, so it can't cheat on the "Document Name" extraction category by copying the input
-# row's filename.
+CUAD_JSON = CLEANING_DIR / "CUADv1.json"
+CATEGORY_DESCRIPTIONS_CSV = CLEANING_DIR / "category_descriptions.csv"
+# The clause-level ground truth for all 510 contracts, written by cleaning/clean_cuad_gt.py.
+GROUND_TRUTH_CSV = GROUND_TRUTH_DIR / "cuad_gt.csv"
+ISSUES_CSV = GROUND_TRUTH_DIR / "cuad_gt_issues.csv"
+# idx -> real source filename for all 510 contracts, written by prepare_cuad_data.py. The
+# plans see only "idx", so they cannot copy a filename into the "Document Name" answer.
 IDX_TO_NAME_JSON = GROUND_TRUTH_DIR / "idx_to_name.json"
+
+
+def per_query_ground_truth(query_id: int) -> Path:
+    """The ground truth for one query; benchmark.yaml names the same file through its template."""
+    return GROUND_TRUTH_DIR / f"Q{query_id}_gt.csv"

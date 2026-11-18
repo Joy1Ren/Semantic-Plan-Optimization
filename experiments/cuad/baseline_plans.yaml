@@ -1,4 +1,4 @@
-# Hand-written baseline plans for cuad: one reasonable, unoptimized plan per query, the
+# Hand-written baseline plans for CUAD: one reasonable, unoptimized plan per query, the
 # comparison point for what the optimizer finds. Run with experiments/run_baseline.py.
 #
 # Keyed by query id. Each value is plan code, executed in the same sandbox
@@ -8,6 +8,7 @@
 #
 # Every LLM operator uses gpt-6-luna.
 
+# extract: every one of the 41 categories, one column each
 "1": |
   categories = [
       ("Document Name", "The name of the contract"),
@@ -62,4 +63,95 @@
       depends_on=["document"],
   )
   pipe.project(["idx"] + [name for name, _ in categories])
+  pipe
+
+# identify: contracts signed by more than two parties
+"2": |
+  pipe = PhysicalPipeline(plan_name, "contracts", load_data(source_csv))
+  pipe.sem_filter(
+      "This contract has more than two Parties. Parties: the two or more parties who signed the contract.",
+      model=pz.Model.GPT_6_LUNA,
+      depends_on=["document"],
+  )
+  pipe.project(["idx"])
+  pipe
+
+# identify: contracts that keep renewing with no limit
+"3": |
+  pipe = PhysicalPipeline(plan_name, "contracts", load_data(source_csv))
+  pipe.sem_map(
+      cols=[
+          {"name": "qualifies", "type": bool, "description": "True if this contract's Renewal Term is for successive periods, with no limit on the number of renewals. Renewal Term: What is the renewal term after the initial term expires? This includes automatic extensions and unilateral extensions with prior notice."},
+          {"name": "reason", "type": str, "description": "If it qualifies, the full sentence(s) from the contract that say it renews, quoted verbatim. Otherwise empty."},
+      ],
+      model=pz.Model.GPT_6_LUNA,
+      depends_on=["document"],
+  )
+  pipe.filter(lambda row: bool(row["qualifies"]))
+  pipe.project(["idx", "reason"])
+  pipe
+
+# identify: contracts with more than two parties that are also governed by New York law
+"4": |
+  pipe = PhysicalPipeline(plan_name, "contracts", load_data(source_csv))
+  pipe.sem_filter(
+      "Both hold: (1) the contract has more than two Parties: the two or more parties who signed the contract; (2) New York law governs it.",
+      model=pz.Model.GPT_6_LUNA,
+      depends_on=["document"],
+  )
+  pipe.project(["idx"])
+  pipe
+
+# identify: contracts expiring after 2000 that also grant audit rights
+"5": |
+  pipe = PhysicalPipeline(plan_name, "contracts", load_data(source_csv))
+  pipe.sem_filter(
+      "Both hold: (1) the contract states an expiration date later than 31 December 2000 -- a contract that gives only a term length (\"five years from the effective date\"), or no expiration, does not qualify; (2) it contains an Audit Rights clause: a party has the right to audit the books, records, or physical locations of the counterparty to ensure compliance with the contract.",
+      model=pz.Model.GPT_6_LUNA,
+      depends_on=["document"],
+  )
+  pipe.project(["idx"])
+  pipe
+
+# identify: contracts that renew indefinitely and need 90 days' notice or more to stop
+"6": |
+  pipe = PhysicalPipeline(plan_name, "contracts", load_data(source_csv))
+  pipe.sem_filter(
+      "Both hold: (1) the contract's Renewal Term is for successive periods, with no limit on the number of renewals (Renewal Term: What is the renewal term after the initial term expires? This includes automatic extensions and unilateral extensions with prior notice); (2) its Notice Period to Terminate Renewal is at least 90 days, counting a month as 30 days (Notice Period to Terminate Renewal: What is the notice period required to terminate renewal?).",
+      model=pz.Model.GPT_6_LUNA,
+      depends_on=["document"],
+  )
+  pipe.project(["idx"])
+  pipe
+
+# identify: the expiration date of contracts that also restrict volume
+"7": |
+  pipe = PhysicalPipeline(plan_name, "contracts", load_data(source_csv))
+  pipe.sem_filter(
+      "Both hold: (1) the contract states its expiration terms: when its initial term ends, or that it has no end at all; a contract that says nothing about its term ending does not qualify; (2) it contains a Volume Restriction clause: there is a fee increase or consent requirement, etc. if one party's use of the product/services exceeds a certain threshold.",
+      model=pz.Model.GPT_6_LUNA,
+      depends_on=["document"],
+  )
+  pipe.sem_map(
+      cols=[{"name": "reason", "type": str, "description": "A concise verbatim span containing the expiration terms. The contract's own words, copied exactly, with nothing before or after them."}],
+      model=pz.Model.GPT_6_LUNA,
+      depends_on=["document"],
+  )
+  pipe.project(["idx", "reason"])
+  pipe
+
+# identify: the expiration date of contracts that can also be terminated for convenience
+"8": |
+  pipe = PhysicalPipeline(plan_name, "contracts", load_data(source_csv))
+  pipe.sem_filter(
+      "Both hold: (1) the contract states its expiration terms: when its initial term ends, or that it has no end at all; a contract that says nothing about its term ending does not qualify; (2) it contains a Termination for Convenience clause: a party can terminate the contract without cause, solely by giving notice and allowing a waiting period to expire.",
+      model=pz.Model.GPT_6_LUNA,
+      depends_on=["document"],
+  )
+  pipe.sem_map(
+      cols=[{"name": "reason", "type": str, "description": "A concise verbatim span containing the expiration terms. The contract's own words, copied exactly, with nothing before or after them."}],
+      model=pz.Model.GPT_6_LUNA,
+      depends_on=["document"],
+  )
+  pipe.project(["idx", "reason"])
   pipe

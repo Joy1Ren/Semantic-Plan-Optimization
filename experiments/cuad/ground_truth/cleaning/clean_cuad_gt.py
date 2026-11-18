@@ -2,11 +2,10 @@
 
 Spans and the Yes/No answers come from CUADv1.json, the SQuAD-format CUAD release, whose spans
 are verbatim substrings of the contract. CUADv1.json carries no normalized answers, so the
-"-Answer" strings of the eight answer categories are read from CUAD's master_clauses.csv (the
-official release file; docetl ships a copy) and parsed into JSON.
+"-Answer" strings of the eight answer categories are read from CUAD's master_clauses.csv and parsed into JSON.
 
 Columns of cuad_gt.csv:
-  name                  CUADv1 title; equals the docetl / idx_to_name.json filename minus ".txt"
+  name                  CUADv1 title
   unusable              {category: why its ground truth cannot be graded for this contract}, empty
                         for most rows. Skip a category for a contract listed here. The key
                         "number_parties" disqualifies only the count, not the Parties spans
@@ -37,6 +36,8 @@ Columns of cuad_gt.csv:
 
 cuad_gt_issues.csv lists every (contract, category) whose ground truth cannot be checked cleanly
 against the contract text, one row per issue. See ISSUE_CODES.
+
+    python -m agent_cost_model.experiments.cuad.ground_truth.cleaning.clean_cuad_gt
 """
 from __future__ import annotations
 
@@ -47,12 +48,14 @@ import re
 
 import pandas as pd
 
-from agent_cost_model.experiments.cuad.paths import BENCHMARK_DIR, GROUND_TRUTH_DIR, cuad_ground_truth_csv
-
-CUAD_JSON = BENCHMARK_DIR / "CUADv1.json"
-CATEGORY_DESCRIPTIONS_CSV = BENCHMARK_DIR / "category_descriptions.csv"
-OUTPUT_CSV = GROUND_TRUTH_DIR / "cuad_gt.csv"
-ISSUES_CSV = GROUND_TRUTH_DIR / "cuad_gt_issues.csv"
+from agent_cost_model.experiments.cuad.paths import (
+    CATEGORY_DESCRIPTIONS_CSV,
+    CUAD_JSON,
+    GROUND_TRUTH_CSV as OUTPUT_CSV,
+    GROUND_TRUTH_DIR,
+    ISSUES_CSV,
+    MASTER_CLAUSES_CSV,
+)
 
 DATE_CATEGORIES = ["Agreement Date", "Effective Date", "Expiration Date"]
 ANSWER_CATEGORIES = ["Document Name", "Parties", *DATE_CATEGORIES, "Renewal Term",
@@ -852,7 +855,7 @@ def _unusable_column(name: str, issues: Issues) -> dict:
 
 def main() -> None:
     documents = json.loads(CUAD_JSON.read_text())["data"]
-    master = pd.read_csv(cuad_ground_truth_csv())
+    master = pd.read_csv(MASTER_CLAUSES_CSV)
     master_by_key = {_file_key(f): row for f, (_, row) in zip(master["Filename"], master.iterrows())}
     categories = _categories()
     missing = [d["title"] for d in documents if _file_key(d["title"]) not in master_by_key]
