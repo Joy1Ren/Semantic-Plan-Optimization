@@ -1,8 +1,5 @@
-"""CUAD adapter for plan-quality evaluation. run_opt.py reaches it through benchmark.yaml's
-`quality_adapter` and passes the query id, which picks the evaluator.
-Every query reads its own ground_truth/Q{id}_gt.csv (ground_truth/cleaning/per_query_gt.py), which
-benchmark.yaml names per query id.
-"""
+"""CUAD adapter for plan-quality evaluation. The query id picks the evaluator; every query reads
+its own ground_truth/Q{id}_gt.csv (ground_truth/cleaning/per_query_gt.py)."""
 from __future__ import annotations
 
 import json
@@ -11,7 +8,6 @@ from pathlib import Path
 
 import pandas as pd
 
-from agent_cost_model.experiments.cuad.category_scoring import party_count_closeness, score_document
 from agent_cost_model.experiments.cuad.paths import (
     GROUND_TRUTH_CSV,
     IDX_TO_NAME_JSON,
@@ -45,8 +41,8 @@ def normalize_eval_df(df: pd.DataFrame, *_ignored) -> pd.DataFrame:
 
 def QualityEvaluator(query_id: int, **kwargs) -> PlanQualityEvaluator:
     """The evaluator for this query: ExtractionQualityEvaluator for query 1, else
-    CategoryQualityEvaluator."""
-    cls = ExtractionQualityEvaluator if int(query_id) == 1 else CategoryQualityEvaluator
+    IdentificationQualityEvaluator."""
+    cls = ExtractionQualityEvaluator if int(query_id) == 1 else IdentificationQualityEvaluator
     return cls(query_id=query_id, **kwargs)
 
 
@@ -88,12 +84,8 @@ class ExtractionQualityEvaluator(PlanQualityEvaluator):
         )
 
     def has_ground_truth(self, ground_truth_df, ground_truth_path) -> bool:
-        """CUAD scores from the ground-truth FILE, so this asks about the file, not the frame
-        (which is always None here: this adapter supplies no ground_truth_loader).
-
-        `nrows=1` reads only the first chunk, so an existing-but-header-only ground truth is
-        caught without materialising a frame this benchmark never scores against.
-        """
+        """CUAD scores from the ground-truth file, so this checks the file; a header-only file
+        counts as missing."""
         if not ground_truth_path or not Path(ground_truth_path).exists():
             return False
         try:
@@ -126,18 +118,15 @@ class ExtractionQualityEvaluator(PlanQualityEvaluator):
 
 NAME_COL = "name"
 SPAN_COL = "span"
-NOT_NEEDED = "not needed"
 REASON_COL = "reason"
-ANSWER_COL = "answer"
-SPANS_COL = "spans"
 
 
-def _first_column(df: pd.DataFrame, preferred: str, *, avoid: tuple[str, ...]) -> str | None:
-    """`preferred` if the plan used that name, else its single other column -- a plan may name the
-    column something of its own, and with one answer and one spans column the mapping is clear."""
+def _first_column(df: pd.DataFrame, preferred: str) -> str | None:
+    """`preferred` if the plan used that name, else its single other column -- a plan may name its
+    reason column something of its own."""
     if preferred in df.columns:
         return preferred
-    candidates = [c for c in df.columns if c not in {"idx", FILENAME_COL, *avoid}]
+    candidates = [c for c in df.columns if c not in {"idx", FILENAME_COL}]
     return candidates[0] if len(candidates) == 1 else None
 
 
@@ -160,7 +149,7 @@ def score_identification(query, plan_output_df: pd.DataFrame, ground_truth_path:
 
     returned = {}
     if not plan_output_df.empty and FILENAME_COL in plan_output_df.columns:
-        reason_col = _first_column(plan_output_df, REASON_COL, avoid=())
+        reason_col = _first_column(plan_output_df, REASON_COL)
         for _, row in plan_output_df.iterrows():
             reason = row.get(reason_col) if reason_col else None
             returned[_TXT_SUFFIX.sub("", str(row[FILENAME_COL]))] = reason if isinstance(reason, str) else ""
@@ -183,56 +172,9 @@ def _population_keys(population_path: str | Path) -> list[str]:
     return [_TXT_SUFFIX.sub("", str(name)) for name in _population_names(population_path)]
 
 
-def score_category(category: str, plan_output_df: pd.DataFrame, ground_truth_path: str | Path,
-                   population_path: str | Path | None = None, scorer=None) -> dict:
-    """The category's quality over the document population: the share of contracts whose answer was
-    right (see category_scoring.py). `scorer(gold, answer)` replaces score_document for a query that
-    grades its answer its own way.
-    """
-    ground_truth = _gold_rows(ground_truth_path)
-    answer_col = next(c for c in ground_truth.columns if c not in (NAME_COL, SPAN_COL))
-    gold = {row[NAME_COL]: row for _, row in ground_truth.iterrows()}
-
-    predictions = {}
-    if not plan_output_df.empty and FILENAME_COL in plan_output_df.columns:
-        spans_col = _first_column(plan_output_df, SPANS_COL, avoid=(ANSWER_COL,))
-        plan_answer_col = _first_column(plan_output_df, ANSWER_COL, avoid=(spans_col or SPANS_COL,))
-        for _, row in plan_output_df.iterrows():
-            predictions[_TXT_SUFFIX.sub("", str(row[FILENAME_COL]))] = (
-                row.get(plan_answer_col) if plan_answer_col else None,
-                row.get(spans_col) if spans_col else None)
-
-    names = _population_keys(population_path) if population_path else list(predictions)
-    scores, skipped = [], 0
-    for name in names:
-        row = gold.get(name)
-        if row is None:                     # not gradable for this query, so not in its file
-            skipped += 1
-            continue
-        answer, spans = predictions.get(name, (None, None))
-        gold_value = _gold_value(row[answer_col])
-        score = (scorer(gold_value, answer) if scorer else
-                 score_document(category, gold_value, _gold_span(row.get(SPAN_COL, "")), answer, spans))
-        if score is None:                   # nothing in this row to score (a law that is no place)
-            skipped += 1
-            continue
-        scores.append(score)
-    return {"score": sum(scores) / len(scores) if scores else float("nan"),
-            "documents_scored": len(scores), "documents_skipped": skipped}
-
-
-def _gold_value(cell: str):
-    """The answer column of a per-query file: JSON for every category but Parties, whose answer is
-    the number of parties."""
-    try:
-        return json.loads(cell) if cell else None
-    except json.JSONDecodeError:
-        return int(cell) if str(cell).strip().isdigit() else cell
-
-
 def _gold_span(cell: str) -> list[str] | None:
-    """The span column: the text to check, or None where the file says none is needed."""
-    if not cell or cell == NOT_NEEDED:
+    """The span column's text to check, or None when it is empty."""
+    if not cell:
         return None
     try:
         spans = json.loads(cell)
@@ -249,7 +191,7 @@ def _population_names(population_path: str | Path) -> list[str]:
     return [mapping.get(str(i)) for i in df["idx"]]
 
 
-class CategoryQualityEvaluator(PlanQualityEvaluator):
+class IdentificationQualityEvaluator(PlanQualityEvaluator):
     """Scores one of queries 2-8, chosen by the query id it is constructed with."""
 
     def __init__(self, query_id: int, ground_truth_path: str | Path | None = None,
@@ -261,7 +203,6 @@ class CategoryQualityEvaluator(PlanQualityEvaluator):
                 f"query {query_id!r} is not one of this benchmark's questions: "
                 f"{sorted(QUERY_BY_ID)} (see queries.py and benchmark.yaml's task_prompts)"
             ) from None
-        self.CATEGORY = self.QUERY.category
         super().__init__(
             query_id=query_id,
             subset_path=subset_path,
@@ -276,7 +217,7 @@ class CategoryQualityEvaluator(PlanQualityEvaluator):
         )
 
     def has_ground_truth(self, ground_truth_df, ground_truth_path) -> bool:
-        """Asks about the FILE: this benchmark scores from cuad_gt.csv, never from a frame."""
+        """Asks about the FILE: this benchmark scores from Q{id}_gt.csv, never from a frame."""
         if not ground_truth_path or not Path(ground_truth_path).exists():
             return False
         try:
@@ -290,23 +231,16 @@ class CategoryQualityEvaluator(PlanQualityEvaluator):
 
     def score_plan(self, plan_output_df, ground_truth_df, ground_truth_path, population_path) -> float:
         if not ground_truth_path:
-            raise ValueError("CUAD category scoring needs a ground_truth_path (benchmark.yaml's "
+            raise ValueError("CUAD scoring needs a ground_truth_path (benchmark.yaml's "
                              "ground_truth_path)")
-        if self.QUERY.kind == "identify":
-            result = score_identification(self.QUERY, plan_output_df, ground_truth_path, population_path)
-            counts = self.last_quality_counts = result["counts"]
-            fn = counts["FN"]["total"] if isinstance(counts["FN"], dict) else counts["FN"]
-            print(f"[QualityEvaluator] {self.QUERY.name}: F1 {result['score']:.4f}, "
-                  f"(TP, FP, TN, FN) = ({counts['TP']}, {counts['FP']}, {counts['TN']}, {fn}), over "
-                  f"{result['documents_scored']} contracts ({result['documents_skipped']} skipped)")
-        else:
-            scorer = party_count_closeness if self.QUERY.metric == "party_count_relative_error" else None
-            result = score_category(self.CATEGORY, plan_output_df, ground_truth_path, population_path,
-                                    scorer=scorer)
-            print(f"[QualityEvaluator] {self.CATEGORY}: score {result['score']:.4f} over "
-                  f"{result['documents_scored']} contracts ({result['documents_skipped']} skipped)")
+        result = score_identification(self.QUERY, plan_output_df, ground_truth_path, population_path)
+        counts = self.last_quality_counts = result["counts"]
+        fn = counts["FN"]["total"] if isinstance(counts["FN"], dict) else counts["FN"]
+        print(f"[QualityEvaluator] {self.QUERY.name}: F1 {result['score']:.4f}, "
+              f"(TP, FP, TN, FN) = ({counts['TP']}, {counts['FP']}, {counts['TN']}, {fn}), over "
+              f"{result['documents_scored']} contracts ({result['documents_skipped']} skipped)")
         return float(result["score"])
 
 
-__all__ = ["CategoryQualityEvaluator", "ExtractionQualityEvaluator", "QualityEvaluator",
-           "normalize_eval_df", "score_category", "score_identification"]
+__all__ = ["ExtractionQualityEvaluator", "IdentificationQualityEvaluator", "QualityEvaluator",
+           "normalize_eval_df", "score_identification"]

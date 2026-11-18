@@ -151,7 +151,7 @@ use_cases:
           idx         copy the input row's idx unchanged
           reason      a concise verbatim span containing the expiration terms: the
                       contract's own words, copied exactly, with nothing before or after them
-    query_metrics:  # 2-8: see queries.py (Query.metric), category_scoring.py and quality_evaluator.py
+    query_metrics:  # 2-8: see queries.py (Query.metric) and quality_evaluator.py
       "1": f1_jaccard
       "2": set_f1  # cuad_parties_over_two
       "3": set_f1_reason_jaccard  # cuad_renews_indefinitely

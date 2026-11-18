@@ -8,7 +8,6 @@ for "Document Name", and a filename in an input column would let a plan copy it 
 the title from the text. Each contract gets a small integer idx instead, and the map re-attaches
 the name at eval time (quality_evaluator.normalize_eval_df). It lives under ground_truth/ since
 that directory is eval-only and never fed to a plan.
-
 """
 from __future__ import annotations
 
@@ -20,7 +19,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from agent_cost_model.experiments.cuad.category_scoring import NON_PLACE
+from agent_cost_model.experiments.cuad.ground_truth.cleaning.clean_cuad_gt import NON_PLACE
 from agent_cost_model.experiments.cuad.paths import (
     CUAD_JSON,
     DATASET_CSV,
@@ -59,7 +58,7 @@ def _gradable_everywhere(row: pd.Series) -> bool:
 
 def build_dataset(source_json: Path, ground_truth: pd.DataFrame,
                   idx_by_name: dict[str, int]) -> pd.DataFrame:
-    """docetl's 140 contracts, with every one not gradable everywhere replaced (see above)."""
+    """docetl's 140 contracts, each one some query cannot grade swapped for a random gradable one."""
     keep = {row["name"] for _, row in ground_truth.iterrows() if _gradable_everywhere(row)}
     documents = {doc["title"]: doc["paragraphs"][0]["context"]
                  for doc in json.loads(CUAD_JSON.read_text())["data"]}

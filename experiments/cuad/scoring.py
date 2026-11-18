@@ -85,7 +85,7 @@ def predictions_from_wide(df: pd.DataFrame) -> dict[str, dict[str, str]]:
 
 
 def predictions_from_clauses(records: list[dict]) -> dict[str, dict[str, str]]:
-    """idx -> category -> text, from MOAR's output: a `clauses` list of {clause_type, text_span}."""
+    """idx -> category -> text, from output holding a `clauses` list of {clause_type, text_span}."""
     predictions: dict[str, dict[str, list[str]]] = {}
     for record in records:
         if pd.isna(record.get("idx")):

@@ -1,22 +1,13 @@
 """What queries 2-8 ask, and how their ground truth is read out of cuad_gt.csv. Query 1 (all 41
 categories at once) is not here: scoring.py grades it against master_clauses.csv's rows.
 
-Two kinds of query are supported:
+Each query returns the contracts that satisfy a condition and is scored by F1 over that set. A
+query with `evidence` also asks why, and counts a returned contract as found only if its reason
+matches the text CUAD highlighted for that category. A contract whose ground truth for a category
+the query reads is not gradable (cuad_gt.csv's `unusable`) is left out of both the gold set and the
+plan's, rather than counting as a miss.
 
-  extract       pull one category's value out of every contract; scored per contract by
-                category_scoring.score_document (the answer, with the quote behind the answers
-                that say the contract states no value), or by the query's own metric.
-  identify      return the contracts that satisfy a condition; scored by F1 over that set, since a
-                plan answers it by dropping the rows that do not qualify. A query with `evidence`
-                also asks why, and counts a returned contract as found only if its reason matches
-                the text CUAD highlighted for that category.
-
-An identify query names the categories it reads, so a contract whose ground truth for one of them
-is not gradable (cuad_gt.csv's `unusable`) is left out of both the gold set and the plan's, rather
-than counting as a miss.
-
-The ids here are benchmark.yaml's task_prompts keys; QUERIES is the one place that says which id is
-which question.
+The ids are benchmark.yaml's task_prompts keys.
 """
 from __future__ import annotations
 
@@ -60,32 +51,23 @@ def _has_expiration(row: pd.Series) -> bool:
 class Query:
     id: int
     name: str
-    kind: str                                   # "extract" or "identify"
     task: str                                   # one line, for reports
-    category: str = ""                          # extract: the category scored
-    reads: tuple[str, ...] = ()                 # identify: the categories the condition reads
+    reads: tuple[str, ...] = ()                 # the categories the condition reads
     conditions: tuple[tuple[str, Callable[[pd.Series], bool]], ...] = field(default=())
-    evidence: str = ""                          # identify: the category a returned reason must quote
+    evidence: str = ""                          # the category a returned reason must quote
     metric: str = ""                            # benchmark.yaml's query_metrics name
 
     def holds(self, row: pd.Series) -> bool:
         return all(condition(row) for _, condition in self.conditions)
 
 
-def _extract(query_id: int, category: str, task: str, *, name: str = "",
-             metric: str = "answer_match_span_jaccard") -> Query:
-    return Query(query_id, name or f"cuad_{category.lower().replace(' ', '_')}", "extract", task,
-                 category=category, metric=metric)
-
-
 def _identify(query_id: int, name: str, task: str, *conditions, evidence: str = "") -> Query:
     reads = tuple(dict.fromkeys(category for _, category, _ in conditions))
-    return Query(query_id, name, "identify", task, reads=reads,
+    return Query(query_id, name, task, reads=reads,
                  conditions=tuple((label, test) for label, _, test in conditions),
                  evidence=evidence, metric="set_f1_reason_jaccard" if evidence else "set_f1")
 
 
-# Formerly cuad_categories queries 2, 10, 15, 16, 17, 21 and 22, in this order.
 QUERIES = [
     _identify(2, "cuad_parties_over_two", "contracts signed by more than two parties",
               ("more than two parties", "Parties",
@@ -134,12 +116,9 @@ QUERIES = [
 ]
 
 QUERY_BY_ID = {query.id: query for query in QUERIES}
-# Extraction queries only; the category whose answers a plan's output is scored against.
-CATEGORY_BY_QUERY = {q.id: q.category for q in QUERIES if q.kind == "extract"}
 
 
 def gradable(query: Query, row: pd.Series) -> bool:
     """Whether this contract's ground truth can settle the query at all."""
     unusable = json.loads(row["unusable"])
-    categories = (query.category,) if query.kind == "extract" else query.reads
-    return not any(category in unusable for category in categories)
+    return not any(category in unusable for category in query.reads)
